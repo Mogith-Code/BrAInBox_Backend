@@ -1,0 +1,8 @@
+venv/
+.env
+__pycache__/
+app/data/source/
+app/data/extracted_text.txt
+app/data/chunks.json
+app/data/ocr_cache/
+app/data/questions_import.csv

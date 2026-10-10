@@ -1,0 +1,62 @@
+[
+  {
+    "id": "BIO-CELL-001",
+    "topic": "Cell Structure",
+    "unit": "Cell Biology",
+    "question": "Which organelle is the main site of ATP production in a eukaryotic cell?",
+    "options": ["Ribosome", "Mitochondrion", "Golgi apparatus", "Lysosome", "Peroxisome"],
+    "correct_answer": "Mitochondrion",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-CELL-002",
+    "topic": "Cell Structure",
+    "unit": "Cell Biology",
+    "question": "Protein synthesis takes place on which structure?",
+    "options": ["Ribosome", "Nucleolus", "Vacuole", "Centriole", "Cell wall"],
+    "correct_answer": "Ribosome",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-CELL-003",
+    "topic": "Cell Structure",
+    "unit": "Cell Biology",
+    "question": "Which of the following is present in prokaryotic cells but absent in animal cells?",
+    "options": ["Cell membrane", "Ribosomes", "Cell wall", "Cytoplasm", "DNA"],
+    "correct_answer": "Cell wall",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-CELL-004",
+    "topic": "Cell Structure",
+    "unit": "Cell Biology",
+    "question": "Which organelle is responsible for modifying, packaging and secreting proteins?",
+    "options": ["Golgi apparatus", "Chloroplast", "Centriole", "Nucleus", "Lysosome"],
+    "correct_answer": "Golgi apparatus",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-PHO-001",
+    "topic": "Photosynthesis",
+    "unit": "Bioenergetics",
+    "question": "In which organelle does photosynthesis occur?",
+    "options": ["Mitochondrion", "Chloroplast", "Nucleus", "Peroxisome", "Vacuole"],
+    "correct_answer": "Chloroplast",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-PHO-002",
+    "topic": "Photosynthesis",
+    "unit": "Bioenergetics",
+    "question": "The light-independent reactions of photosynthesis take place in the:",
+    "options": ["Thylakoid membrane", "Stroma", "Cytoplasm", "Inner mitochondrial membrane", "Nucleus"],
+    "correct_answer": "Stroma",
+    "marks": 1,
+    "year": null
+  }
+]
