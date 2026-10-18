@@ -8,6 +8,7 @@ Idempotent: a file whose SHA-256 has not changed since the last successful run i
 
 import hashlib
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,15 @@ SOURCE_DIRS: dict[str, SourceType] = {
     "approved_notes": SourceType.APPROVED_NOTE,
     "marking_schemes": SourceType.MARKING_SCHEME,
 }
+
+
+# "unit2_chemical_basis.pdf", "Unit-10 Applied Biology.pdf" -> 2, 10 (Udith's file naming)
+_UNIT_IN_FILENAME_RE = re.compile(r"^unit[\s_-]*0*(\d{1,2})(?!\d)", re.IGNORECASE)
+
+
+def unit_number_from_filename(name: str) -> int | None:
+    match = _UNIT_IN_FILENAME_RE.match(name)
+    return int(match.group(1)) if match else None
 
 
 @dataclass
@@ -92,6 +102,8 @@ async def ingest_file(
     settings = get_settings()
     key = storage_key(path)
     sha = file_sha256(path)
+    if unit_id is None and (number := unit_number_from_filename(path.name)):
+        unit_id = await unit_id_for_number(session, number)
 
     doc = (
         await session.execute(select(SourceDocument).where(SourceDocument.file_path == key))

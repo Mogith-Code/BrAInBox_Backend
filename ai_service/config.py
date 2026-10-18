@@ -9,12 +9,17 @@ class AISettings(SharedSettings):
     # --- Gemini (LLM + embeddings + images)
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Tried when GEMINI_MODEL is overloaded / rate limited (429, 5xx). Empty = no fallback.
+    GEMINI_FALLBACK_MODEL: str = ""
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIM: int = 768  # must match vector(768) in the database
     IMAGE_MODEL: str = "imagen-4.0-generate-001"
 
     # --- OCR (Google Cloud Vision, uses GOOGLE_APPLICATION_CREDENTIALS)
     OCR_LANGUAGE_HINTS: str = "en"
+    # Local OCR (Tesseract) for scanned PDF pages during RAG ingestion. Empty = find it on PATH.
+    # Windows example: C:\Program Files\Tesseract-OCR\tesseract.exe
+    TESSERACT_CMD: str = ""
 
     # --- Limits
     LLM_TEMPERATURE: float = 0.2

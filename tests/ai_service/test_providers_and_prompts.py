@@ -7,7 +7,7 @@ from jinja2 import Environment, FileSystemLoader
 from ai_service.prompts import PROMPTS_DIR, list_prompts, render_prompt
 from ai_service.providers import get_embedder, get_llm
 from ai_service.providers.fakes import FakeEmbedder
-from ai_service.schemas.llm_outputs import GeneratedMCQ, VisualDecision
+from ai_service.schemas.llm_outputs import GeneratedMCQSet, VisualDecision
 
 
 async def test_fake_embedder_is_deterministic_and_normalised():
@@ -37,8 +37,9 @@ async def test_fake_embedder_similar_texts_are_closer():
 
 async def test_fake_llm_fills_structured_output():
     llm = get_llm()
-    mcq = await llm.generate_json("any prompt", GeneratedMCQ)
-    assert isinstance(mcq, GeneratedMCQ)
+    # GeneratedMCQSet has validators, so the fake uses its fake_example()
+    mcqs = await llm.generate_json("any prompt", GeneratedMCQSet)
+    assert mcqs.questions[0].correct_answer in mcqs.questions[0].options
     visual = await llm.generate_json("any prompt", VisualDecision)
     assert visual.kind == "diagram"
 

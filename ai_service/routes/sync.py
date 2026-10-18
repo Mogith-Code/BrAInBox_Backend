@@ -1,8 +1,9 @@
-"""Fast AI calls that answer immediately (no job). All placeholders for now."""
+"""Fast AI calls that answer immediately (no job)."""
 
 from fastapi import APIRouter
 
 from ai_service.pipelines.community import auto_tag
+from ai_service.pipelines.questions.explain_answers import explain_answers
 from ai_service.schemas.jobs import (
     ExplainMCQRequest,
     KeywordScoreRequest,
@@ -13,10 +14,11 @@ from ai_service.schemas.jobs import (
 router = APIRouter(prefix="/sync", tags=["Sync"])
 
 
-@router.post("/explain-mcq", response_model=SyncResponse, summary="Explain an MCQ answer")
+@router.post("/explain-mcq", response_model=SyncResponse, summary="Explain wrong MCQ answers")
 async def explain_mcq(request: ExplainMCQRequest) -> SyncResponse:
-    # TODO(Udith): explain why the selected option is right/wrong using its misconception.
-    return SyncResponse(name="explain-mcq", status="todo")
+    """result = {"explanations": {question_id: "1-2 sentence feedback"}} (may be empty)."""
+    explanations = await explain_answers([item.model_dump() for item in request.items])
+    return SyncResponse(name="explain-mcq", status="ok", result={"explanations": explanations})
 
 
 @router.post("/tag-post", response_model=SyncResponse, summary="Suggest tags for a post")

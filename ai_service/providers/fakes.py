@@ -25,7 +25,7 @@ _TINY_PNG = bytes.fromhex(
 
 
 class FakeLLM:
-    """Echo-style LLM. `generate_json` fills every required field with a simple value."""
+    """Echo-style LLM. `generate_json` returns `schema.fake_example()` or fills required fields."""
 
     name = "fake-llm"
 
@@ -46,9 +46,14 @@ class FakeLLM:
         schema: type[SchemaT],
         *,
         system: str | None = None,
+        temperature: float | None = None,
         prompt_name: str | None = None,
     ) -> SchemaT:
-        return schema.model_validate(_fake_data(schema))
+        # A schema with validators (e.g. "answer must be one of the options") can provide
+        # its own valid sample through a `fake_example()` classmethod.
+        example = getattr(schema, "fake_example", None)
+        data = example() if callable(example) else _fake_data(schema)
+        return schema.model_validate(data)
 
 
 def _fake_value(annotation: Any) -> Any:
