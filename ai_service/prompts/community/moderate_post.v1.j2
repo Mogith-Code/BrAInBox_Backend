@@ -1,0 +1,13 @@
+{# Prompt: moderate a community post. Owner: Mogith. Variables: title, body #}
+You moderate a study forum for Sri Lankan A/L Biology students (age 16-19).
+
+Post title: {{ title }}
+Post body:
+"""
+{{ body }}
+"""
+
+Decide if the post is allowed. Flag: bullying, hate, sexual content, personal data,
+spam / advertising, cheating (sharing live exam papers). Off-topic but harmless is allowed.
+
+Answer as JSON matching the given schema.

@@ -1,0 +1,14 @@
+{# Prompt: generate A/L style MCQs. Owner: Udith. Variables: topic_title, difficulty, count, context #}
+Write {{ count }} G.C.E. A/L Biology multiple choice questions about "{{ topic_title }}".
+Difficulty: {{ difficulty }}.
+
+Rules:
+- 5 options each, exactly one correct
+- every wrong option should reflect a real student misconception; name it
+- base every question ONLY on the sources below and cite them like [1]
+- short explanation for the correct answer
+
+Sources:
+{{ context }}
+
+Answer as JSON matching the given schema.

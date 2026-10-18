@@ -1,0 +1,94 @@
+{
+  "_note": "sample – to be completed from the NIE syllabus. Owners: Keshomigha + Udith. Topic numbers and titles are placeholders until checked against the official NIE G.C.E. A/L Biology syllabus.",
+  "subject": "G.C.E. A/L Biology",
+  "medium": "English",
+  "units": [
+    {
+      "number": 1,
+      "title": "Introduction to Biology",
+      "topics": [
+        {"number": "1.1", "title": "Scope and importance of biology"},
+        {"number": "1.2", "title": "Characteristics of living organisms"},
+        {"number": "1.3", "title": "Levels of organisation of life"}
+      ]
+    },
+    {
+      "number": 2,
+      "title": "Chemical & Cellular Basis of Life",
+      "topics": [
+        {"number": "2.1", "title": "Biomolecules"},
+        {"number": "2.2", "title": "Cell structure and organelles"},
+        {"number": "2.3", "title": "Cell membrane and transport"}
+      ]
+    },
+    {
+      "number": 3,
+      "title": "Evolution & Diversity of Organisms",
+      "topics": [
+        {"number": "3.1", "title": "Origin of life and evolution"},
+        {"number": "3.2", "title": "Classification of organisms"},
+        {"number": "3.3", "title": "Diversity of plants and animals"}
+      ]
+    },
+    {
+      "number": 4,
+      "title": "Plant Form & Function",
+      "topics": [
+        {"number": "4.1", "title": "Photosynthesis"},
+        {"number": "4.2", "title": "Transport in plants"},
+        {"number": "4.3", "title": "Plant growth and development"}
+      ]
+    },
+    {
+      "number": 5,
+      "title": "Animal Form & Function",
+      "topics": [
+        {"number": "5.1", "title": "Digestion and nutrition"},
+        {"number": "5.2", "title": "Circulation and gas exchange"},
+        {"number": "5.3", "title": "Excretion and osmoregulation"}
+      ]
+    },
+    {
+      "number": 6,
+      "title": "Genetics",
+      "topics": [
+        {"number": "6.1", "title": "Mendelian inheritance"},
+        {"number": "6.2", "title": "Chromosomes and linkage"},
+        {"number": "6.3", "title": "Population genetics"}
+      ]
+    },
+    {
+      "number": 7,
+      "title": "Molecular Biology & Recombinant DNA Technology",
+      "topics": [
+        {"number": "7.1", "title": "DNA replication"},
+        {"number": "7.2", "title": "Protein synthesis"},
+        {"number": "7.3", "title": "Recombinant DNA technology"}
+      ]
+    },
+    {
+      "number": 8,
+      "title": "Environmental Biology",
+      "topics": [
+        {"number": "8.1", "title": "Ecosystems and energy flow"},
+        {"number": "8.2", "title": "Biodiversity and conservation"}
+      ]
+    },
+    {
+      "number": 9,
+      "title": "Microbiology",
+      "topics": [
+        {"number": "9.1", "title": "Structure of microorganisms"},
+        {"number": "9.2", "title": "Microorganisms in industry and disease"}
+      ]
+    },
+    {
+      "number": 10,
+      "title": "Applied Biology",
+      "topics": [
+        {"number": "10.1", "title": "Food production and agriculture"},
+        {"number": "10.2", "title": "Biotechnology applications"}
+      ]
+    }
+  ]
+}
