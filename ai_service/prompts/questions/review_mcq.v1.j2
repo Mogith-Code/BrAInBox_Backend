@@ -1,0 +1,16 @@
+{# Prompt: LLM reviewer for one MCQ. Owner: Udith. Variables: question_json, context #}
+You are a strict A/L Biology examiner reviewing a multiple choice question.
+
+Question (JSON):
+{{ question_json }}
+
+Check it against the sources below:
+1. Is the marked answer correct according to the sources?
+2. Is exactly one option correct?
+3. Is the wording clear and at A/L level?
+4. Are the distractors plausible?
+
+Sources:
+{{ context }}
+
+Answer as JSON matching the given schema (verdict: accept | revise | reject).

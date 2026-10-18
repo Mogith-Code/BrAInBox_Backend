@@ -1,0 +1,6 @@
+# Same line endings for everyone (Windows, macOS, Linux, Docker)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.docx binary

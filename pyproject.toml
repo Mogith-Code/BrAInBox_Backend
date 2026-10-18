@@ -1,0 +1,90 @@
+# One pyproject.toml for the whole backend.
+# Install only what you need with "extras":
+#   pip install -e ".[api]"          -> the public REST API
+#   pip install -e ".[ai]"           -> the internal AI service
+#   pip install -e ".[api,ai,dev]"   -> everything (local development + tests)
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brainbox-backend"
+version = "0.1.0"
+description = "BrAInBox backend: REST API + internal AI service for A/L Biology students"
+readme = "README.md"
+requires-python = ">=3.11"
+# Shared by both services (database, settings, web framework)
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pgvector>=0.3",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# Public REST API
+api = [
+    "firebase-admin>=6.5",
+    "python-multipart>=0.0.9",
+]
+# Internal AI service (the ONLY place that talks to AI providers)
+ai = [
+    "google-genai>=1.0",
+    "google-cloud-vision>=3.7",
+    "firebase-admin>=6.5",
+    "jinja2>=3.1",
+    "pypdf>=4.2",
+    "python-docx>=1.1",
+]
+# Tooling for development and CI
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
+
+[tool.setuptools.packages.find]
+include = ["api*", "ai_service*", "shared*"]
+
+# Non-Python files that must ship with the packages (prompt templates, brand files)
+[tool.setuptools.package-data]
+"*" = ["*.j2", "static/brand/*"]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["migrations/versions", "*.md"]
+
+[tool.ruff.lint]
+# E/W = style, F = bugs, I = import order, B = common pitfalls, UP = modern syntax
+select = ["E", "W", "F", "I", "B", "UP"]
+# The formatter already keeps code at 100 chars; long comments/docstrings are allowed.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["api", "ai_service", "shared"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+exclude = ["migrations/", "tests/"]
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "db: needs a running PostgreSQL + pgvector (skipped automatically when none is reachable)",
+]
