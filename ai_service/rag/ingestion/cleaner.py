@@ -10,6 +10,19 @@ _HYPHEN_BREAK_RE = re.compile(r"(\w)-\n(\w)")  # "photo-\nsynthesis" -> "photosy
 _SPACES_RE = re.compile(r"[ \t]+")
 _MANY_NEWLINES_RE = re.compile(r"\n{3,}")
 
+# Watermark / running-header text of the NIE resource books, removed from every page
+# (from Udith's ingest_pdfs.py).
+_JUNK_PATTERNS = [
+    re.compile(
+        r"©?\s*\d{4}\s+National\s+Institute\s+of\s+Education\W*\s*All\s+Rights\s+Reserved\W*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"G\W*C\W*E\W*\(?\s*Advanced\s+Level\s*\)?\s*Biology\s+Resource\s+Book", re.IGNORECASE
+    ),
+]
+_OCR_BULLET_RE = re.compile(r"(?m)^[ \t]*[¢•][ \t]+")  # bullet marks OCR leaves at line starts
+
 
 def clean_pages(pages: list[PageText]) -> list[PageText]:
     """Clean every page. Lines repeated on most pages are treated as headers/footers."""
@@ -21,6 +34,9 @@ def clean_text(text: str, drop_lines: set[str] | None = None) -> str:
     drop_lines = drop_lines or set()
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = _HYPHEN_BREAK_RE.sub(r"\1\2", text)
+    for pattern in _JUNK_PATTERNS:
+        text = pattern.sub(" ", text)
+    text = _OCR_BULLET_RE.sub("", text)
     kept = []
     for line in text.split("\n"):
         line = _SPACES_RE.sub(" ", line).strip()

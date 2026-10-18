@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.ai_client import get_ai_client
+from api.core.ai_client import AIClient, get_ai_client
 from api.core.config import get_settings
 from shared.db.models import AIJob
 from shared.db.session import SessionLocal
@@ -54,25 +54,34 @@ def enqueue_job(job: AIJob, background_tasks: BackgroundTasks) -> None:
         raise ValueError(f"Unknown JOB_RUNNER: {runner}")
 
 
+async def run_job_inline(session: AsyncSession, job: AIJob, client: AIClient) -> AIJob:
+    """Run a job right now, inside the current request, and save the outcome on the row.
+
+    Use this when the client waits for the answer (e.g. generating a paper).
+    `job.result` is the ai_service response: {"job_id", "job_type", "result": {...}}.
+    """
+    job.status = JobStatus.RUNNING
+    job.started_at = datetime.now(UTC)
+    job.attempts += 1
+    await session.commit()
+
+    try:
+        job.result = await client.run_job(str(job.id), job.job_type.value, job.input)
+        job.status = JobStatus.SUCCEEDED
+    except Exception as exc:
+        logger.exception("Job %s failed", job.id)
+        job.error = str(exc)
+        job.status = JobStatus.FAILED
+    job.finished_at = datetime.now(UTC)
+    await session.commit()
+    return job
+
+
 async def run_job_now(job_id: uuid.UUID) -> None:
-    """Run one job: call the ai_service and save the outcome. Uses its own DB session."""
+    """Run one queued job in the background. Uses its own DB session."""
     async with SessionLocal() as session:
         job = await session.get(AIJob, job_id)
         if job is None:
             logger.error("Job %s not found", job_id)
             return
-        job.status = JobStatus.RUNNING
-        job.started_at = datetime.now(UTC)
-        job.attempts += 1
-        await session.commit()
-
-        try:
-            result = await get_ai_client().run_job(str(job.id), job.job_type.value, job.input)
-            job.result = result
-            job.status = JobStatus.SUCCEEDED
-        except Exception as exc:
-            logger.exception("Job %s failed", job_id)
-            job.error = str(exc)
-            job.status = JobStatus.FAILED
-        job.finished_at = datetime.now(UTC)
-        await session.commit()
+        await run_job_inline(session, job, get_ai_client())

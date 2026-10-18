@@ -4,9 +4,10 @@ Every request carries the shared secret in the `X-Service-Token` header.
 """
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
+from fastapi import Depends
 
 from api.core.config import get_settings
 from api.core.errors import ServiceUnavailableError
@@ -63,3 +64,6 @@ def get_ai_client() -> AIClient:
     return AIClient(
         settings.AI_SERVICE_URL, settings.AI_SERVICE_TOKEN, settings.AI_SERVICE_TIMEOUT_SECONDS
     )
+
+
+AIClientDep = Annotated[AIClient, Depends(get_ai_client)]

@@ -4,9 +4,9 @@ Owners refine their own models; keep fields simple (str, int, float, bool, lists
 so Gemini's response_schema can express them.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ----------------------------------------------------------------- notes (Samni)
@@ -27,23 +27,56 @@ class VisualDecision(BaseModel):
 
 
 # ----------------------------------------------------------------- questions (Udith)
-class GeneratedOption(BaseModel):
-    label: str
-    text: str
-    is_correct: bool
-    misconception: str | None = None
-
-
 class GeneratedMCQ(BaseModel):
-    stem: str
-    options: list[GeneratedOption]
-    explanation: str
-    difficulty: Literal["easy", "medium", "hard"] = "medium"
-    cited_refs: list[int] = Field(default_factory=list)
+    """One A/L-style MCQ, in the format of Udith's original generator."""
+
+    question: str
+    options: list[str] = Field(min_length=4, max_length=5)
+    correct_answer: str  # copied exactly from one of the options
+    explanation: str = ""
+    marks: int = 1
+
+    @model_validator(mode="after")
+    def answer_must_be_in_options(self) -> "GeneratedMCQ":
+        if self.correct_answer not in self.options:
+            raise ValueError(f"correct_answer {self.correct_answer!r} is not one of the options")
+        return self
 
 
 class GeneratedMCQSet(BaseModel):
     questions: list[GeneratedMCQ]
+
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """Valid sample used by the fake LLM (offline / tests)."""
+        return {
+            "questions": [
+                {
+                    "question": "Which organelle is the main site of aerobic respiration?",
+                    "options": [
+                        "Ribosome",
+                        "Mitochondrion",
+                        "Golgi apparatus",
+                        "Lysosome",
+                        "Nucleus",
+                    ],
+                    "correct_answer": "Mitochondrion",
+                    "explanation": "The Krebs cycle and oxidative phosphorylation happen there.",
+                    "marks": 1,
+                }
+            ]
+        }
+
+
+class AnswerExplanation(BaseModel):
+    question_id: str
+    explanation: str
+
+
+class AnswerExplanationSet(BaseModel):
+    """Short feedback for each wrong / unanswered MCQ (Udith's explainer)."""
+
+    items: list[AnswerExplanation]
 
 
 class MCQReview(BaseModel):

@@ -58,8 +58,15 @@ context = build_context(chunks)
    ```
 3. Check it:
    ```bash
-   python scripts/rag_search.py --q "active transport" --unit 2
+   python scripts/rag_search.py --q "active transport" --unit 2   # one search
+   python scripts/inspect_rag.py                                  # chunks per unit, leftover watermarks
+   python scripts/rag_chat.py --unit 2                            # ask questions in the terminal
    ```
+
+**NIE resource books (Udith's setup).** Name the PDFs `unit<N>_<name>.pdf` (e.g. `unit2_chemical_cellular_basis_of_life.pdf`)
+and put them in `data/rag_sources/syllabus/`. The unit is read from the file name. The NIE watermark
+("© 2018 National Institute of Education…") and the "Biology Resource Book" running header are removed.
+Scanned pages are read with **Tesseract OCR** when it is installed (Docker image: yes; Windows: install it, or set `TESSERACT_CMD`).
 
 **From the admin portal (planned):** `POST /api/v1/admin/rag/documents` uploads the file and creates a
 `source_documents` row plus a `RAG_INGEST` job. The ai_service then runs `pipeline.run_job`.

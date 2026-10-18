@@ -29,6 +29,7 @@ class LLMProvider(Protocol):
         schema: type[SchemaT],
         *,
         system: str | None = None,
+        temperature: float | None = None,
         prompt_name: str | None = None,
     ) -> SchemaT:
         """Return a validated Pydantic object of type `schema` (structured output)."""

@@ -76,12 +76,12 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
+| POST | `/api/v1/papers/generate` | ✅ AI model paper for 1–10 topics (BUILD_PAPER) |
+| POST | `/api/v1/papers/{id}/submit` | ✅ Mark answers, topic scores, weak topics, explanations |
 | GET | `/api/v1/papers` | List papers |
 | GET | `/api/v1/papers/{id}` | One paper |
-| POST | `/api/v1/papers/generate` | Build a model paper -> BUILD_PAPER job |
 | POST | `/api/v1/attempts` | Start an attempt |
 | GET | `/api/v1/attempts/{id}` | Attempt with answers |
-| POST | `/api/v1/attempts/{id}/submit` | Submit an attempt |
 
 ## quality — Udith
 
@@ -166,6 +166,6 @@ Every request needs `X-Service-Token`. Only `api/core/ai_client.py` calls these.
 |---|---|---|
 | GET | `/health` | Status + which providers are active (fake or real) |
 | POST | `/jobs/run` | Run one AI job: `{job_id, job_type, payload}` → `{result}` |
-| POST | `/sync/explain-mcq` | Explain an MCQ answer (fast) |
+| POST | `/sync/explain-mcq` | ✅ Explain wrong MCQ answers: `{items: [...]}` → `{explanations: {question_id: text}}` |
 | POST | `/sync/tag-post` | Suggest tags for a community post (fast) |
 | POST | `/sync/keyword-score` | Quick keyword score for an answer (fast) |

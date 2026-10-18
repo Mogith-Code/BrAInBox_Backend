@@ -1,0 +1,29 @@
+{# Prompt: generate A/L MCQs grounded in syllabus sources. Owner: Udith (ported from his generator.py).
+   Variables: topic_title, count, context, examples (list of {question, options, correct_answer}, may be empty) #}
+You are an examiner for the Sri Lankan G.C.E. Advanced Level Biology paper.
+Write {{ count }} NEW multiple-choice questions on the topic "{{ topic_title }}".
+
+Rules:
+- Base every question ONLY on the context below. Do not use outside facts.
+- If the context is not enough for {{ count }} good questions, return fewer questions.
+- Each question has exactly 5 options and exactly ONE clearly correct option.
+- "correct_answer" must be copied exactly from one of the options.
+- Avoid vague wording. Do NOT copy sentences from the context directly.
+- Every wrong option must be clearly false for an A/L student. No wrong option may be partly or conditionally true.
+- Never mention "the context", "the text", "the passage" or "the source" in a question or option. Each question must read like a normal exam question.
+- Make the questions different from each other: cover different facts from the context.
+- Give a one-sentence "explanation" of why the correct answer is right.
+
+Context:
+{{ context }}
+{% if examples %}
+
+Example questions (use for style and difficulty only, do not copy them):
+{% for e in examples %}
+- {{ e.question }}
+  Options: {{ e.options | join(" | ") }}
+  Answer: {{ e.correct_answer }}
+{% endfor %}
+{% endif %}
+
+Answer as JSON matching the given schema.

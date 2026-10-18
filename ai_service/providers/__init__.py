@@ -49,7 +49,9 @@ def get_llm() -> LLMProvider:
     from ai_service.providers.llm_gemini import GeminiLLM
 
     s = get_settings()
-    return _get("llm", lambda: GeminiLLM(s.GEMINI_API_KEY, s.GEMINI_MODEL), FakeLLM)  # type: ignore[no-any-return]
+    return _get(
+        "llm", lambda: GeminiLLM(s.GEMINI_API_KEY, s.GEMINI_MODEL, s.GEMINI_FALLBACK_MODEL), FakeLLM
+    )  # type: ignore[no-any-return]
 
 
 def get_embedder() -> EmbeddingProvider:

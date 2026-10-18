@@ -10,7 +10,8 @@ from shared.settings import SharedSettings
 class ApiSettings(SharedSettings):
     # Where the internal AI service runs (docker compose overrides this to http://ai_service:8001)
     AI_SERVICE_URL: str = "http://localhost:8001"
-    AI_SERVICE_TIMEOUT_SECONDS: float = 60.0
+    # Generating a whole paper calls the LLM once per topic, so allow a few minutes.
+    AI_SERVICE_TIMEOUT_SECONDS: float = 180.0
 
     # Comma-separated list. "*" is allowed inside an entry, e.g. "http://localhost:*"
     CORS_ORIGINS: str = "http://localhost:*,http://127.0.0.1:*"
@@ -19,6 +20,9 @@ class ApiSettings(SharedSettings):
     JOB_RUNNER: str = "local"
 
     YOUTUBE_API_KEY: str = ""
+
+    # Dev only: include the correct answer in generated papers (ignored when ENVIRONMENT=prod).
+    DEBUG_SHOW_ANSWERS: bool = False
 
     API_VERSION: str = "0.1.0"
 

@@ -19,9 +19,15 @@ class JobRunResponse(BaseModel):
     result: dict[str, Any]
 
 
-class ExplainMCQRequest(BaseModel):
+class ExplainItem(BaseModel):
     question_id: str
-    selected_option_id: str | None = None
+    question: str
+    correct_answer: str
+    selected_option: str | None = None  # option text the student chose, None = not answered
+
+
+class ExplainMCQRequest(BaseModel):
+    items: list[ExplainItem] = Field(max_length=60)
 
 
 class TagPostRequest(BaseModel):
