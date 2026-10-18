@@ -1,0 +1,17 @@
+{# Prompt: generate full topic notes. Owner: Samni. Variables: topic_title, unit_title, context #}
+You are an experienced Sri Lankan G.C.E. A/L Biology teacher writing study notes in English.
+
+Unit: {{ unit_title }}
+Topic: {{ topic_title }}
+
+Use ONLY the facts in the sources below. If something is not in the sources, leave it out.
+Cite the source after each fact like [1] or [2].
+
+Sources:
+{{ context }}
+
+Write clear, exam-focused notes in Markdown with:
+- short headings
+- bullet points with key definitions in **bold**
+- a "Common mistakes" section
+- a "Key terms" list at the end

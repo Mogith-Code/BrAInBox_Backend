@@ -1,0 +1,12 @@
+{# Prompt: map wrong MCQ options to misconceptions. Owner: Udith. Variables: question_json, misconceptions #}
+For each WRONG option of this MCQ, choose the misconception a student who picks it most likely has.
+
+Question (JSON):
+{{ question_json }}
+
+Known misconceptions:
+{% for m in misconceptions %}
+- {{ m.id }}: {{ m.title }}
+{% endfor %}
+
+If none fits, suggest a new misconception title. Answer as JSON matching the given schema.

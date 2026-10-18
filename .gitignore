@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------- secrets (NEVER commit)
+.env
+.env.*
+!.env.example
+secrets/
+*service-account*.json
+*-firebase-adminsdk-*.json
+credentials*.json
+
+# ---------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------- editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------- RAG source documents
+# Real documents may be copyrighted: keep only .gitkeep, the README and our own sample_* files.
+data/rag_sources/**
+!data/rag_sources/**/
+!data/rag_sources/**/.gitkeep
+!data/rag_sources/README.md
+!data/rag_sources/**/sample_*
+
+# Eval data may contain real student answers
+ai_service/evals/data/*
+!ai_service/evals/data/.gitkeep

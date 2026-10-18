@@ -1,0 +1,11 @@
+{# Prompt: decide which visual fits a concept. Owner: Mogith. Variables: topic_title, concept_name, description #}
+A Biology student is learning "{{ concept_name }}" (topic: {{ topic_title }}).
+{% if description %}Concept description: {{ description }}{% endif %}
+
+Choose the most helpful visual:
+- "diagram"      : a labelled structure, as Mermaid code
+- "flowchart"    : a process with steps, as Mermaid flowchart code
+- "table"        : a comparison
+- "illustration" : a picture (give an image prompt; no text inside the image)
+
+Answer as JSON matching the given schema.

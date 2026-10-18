@@ -1,0 +1,63 @@
+# Code owners are asked to review PRs that touch their folders.
+# TODO: replace the placeholder handles with the real GitHub usernames:
+#   @mogith-gh      Mogith (22CSE0394)
+#   @samni-gh       Samni (22CSE0391)
+#   @udith-gh       Udith (22CSE0358)
+#   @keshomigha-gh  Keshomigha (22CSE0392)
+# Later rules win, so the specific folders below override this default.
+
+*                                        @mogith-gh
+
+# ---------------------------------------------------------------- Mogith
+/.github/                                @mogith-gh
+/docker-compose.yml                      @mogith-gh
+/api/Dockerfile                          @mogith-gh
+/ai_service/Dockerfile                   @mogith-gh
+/api/core/                               @mogith-gh
+/api/modules/auth/                       @mogith-gh
+/api/modules/profiles/                   @mogith-gh
+/api/modules/visuals/                    @mogith-gh
+/api/modules/community/                  @mogith-gh
+/api/modules/admin/moderation_admin.py   @mogith-gh
+/api/modules/admin/users_admin.py        @mogith-gh
+/ai_service/pipelines/visuals/           @mogith-gh
+/ai_service/pipelines/community/         @mogith-gh
+/ai_service/prompts/visuals/             @mogith-gh
+/ai_service/prompts/community/           @mogith-gh
+
+# ---------------------------------------------------------------- Samni
+/api/modules/content/                    @samni-gh
+/api/modules/admin/content_admin.py      @samni-gh
+/api/modules/admin/rag_admin.py          @samni-gh
+/ai_service/rag/                         @samni-gh @keshomigha-gh
+/ai_service/pipelines/summarization/     @samni-gh
+/ai_service/pipelines/notes/             @samni-gh
+/ai_service/prompts/summarization/       @samni-gh
+/ai_service/prompts/notes/               @samni-gh
+/tests/ai_service/rag/                   @samni-gh
+
+# ---------------------------------------------------------------- Udith
+/api/modules/questions/                  @udith-gh
+/api/modules/quizzes/                    @udith-gh
+/api/modules/exams/                      @udith-gh
+/api/modules/quality/                    @udith-gh
+/api/modules/recommendations/            @udith-gh
+/api/modules/admin/questions_admin.py    @udith-gh
+/ai_service/pipelines/questions/         @udith-gh
+/ai_service/pipelines/recommendations/   @udith-gh
+/ai_service/prompts/questions/           @udith-gh
+
+# ---------------------------------------------------------------- Keshomigha
+/api/modules/syllabus/                   @keshomigha-gh
+/api/modules/evaluation/                 @keshomigha-gh
+/api/modules/knowledge_base/             @keshomigha-gh
+/api/modules/performance/                @keshomigha-gh
+/api/modules/admin/syllabus_admin.py     @keshomigha-gh
+/api/modules/admin/knowledge_admin.py    @keshomigha-gh
+/api/modules/admin/analytics_admin.py    @keshomigha-gh
+/shared/db/models/                       @keshomigha-gh
+/shared/db/models/rag.py                 @keshomigha-gh @samni-gh
+/migrations/                             @keshomigha-gh
+/data/                                   @keshomigha-gh @udith-gh
+/ai_service/pipelines/evaluation/        @keshomigha-gh
+/ai_service/prompts/evaluation/          @keshomigha-gh
