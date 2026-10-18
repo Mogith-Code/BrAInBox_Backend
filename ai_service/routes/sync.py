@@ -4,11 +4,13 @@ from fastapi import APIRouter
 
 from ai_service.pipelines.community import auto_tag
 from ai_service.pipelines.diagnostic import summary as diagnostic_summary
+from ai_service.pipelines.home import next_action
 from ai_service.pipelines.questions.explain_answers import explain_answers
 from ai_service.schemas.jobs import (
     DiagnosticSummaryRequest,
     ExplainMCQRequest,
     KeywordScoreRequest,
+    NextActionRequest,
     SyncResponse,
     TagPostRequest,
 )
@@ -42,3 +44,10 @@ async def diagnostic_summary_route(request: DiagnosticSummaryRequest) -> SyncRes
     """result = {"summary": "...", "prompt_version": "diagnostic/summary.v1"}"""
     result = await diagnostic_summary.summarize(request.model_dump())
     return SyncResponse(name="diagnostic-summary", status="ok", result=result)
+
+
+@router.post("/next-action", response_model=SyncResponse, summary="Reason for the next best action")
+async def next_action_route(request: NextActionRequest) -> SyncResponse:
+    """result = {"reason": "...", "prompt_version": "home/next_action.v1"}"""
+    result = await next_action.explain(request.model_dump())
+    return SyncResponse(name="next-action", status="ok", result=result)

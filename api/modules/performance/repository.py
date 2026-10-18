@@ -8,7 +8,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import Mistake, StudyActivity, UnitMastery
@@ -34,7 +34,7 @@ async def latest_unit_mastery(
         select(UnitMastery.unit_id, UnitMastery.mastery)
         .where(UnitMastery.user_id == user_id)
         # Postgres DISTINCT ON: keep the first row per unit = the newest one
-        .distinct(UnitMastery.unit_id)
+        .ext(distinct_on(UnitMastery.unit_id))
         .order_by(UnitMastery.unit_id, UnitMastery.created_at.desc())
     )
     if before is not None:

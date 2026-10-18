@@ -85,6 +85,8 @@ class FakeAI:
         self.payloads.append(payload)
         if self.fail:
             raise ServiceUnavailableError("ai_service down")
+        if name == "next-action":
+            return {"result": {"reason": "AI reason: revise this unit first."}}
         return {"result": {"summary": "AI says: strong in Unit 1, practise Unit 10."}}
 
 

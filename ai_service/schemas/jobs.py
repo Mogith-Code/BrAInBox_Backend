@@ -60,6 +60,13 @@ class DiagnosticSummaryRequest(BaseModel):
     units: list[UnitScore] = Field(max_length=20)
 
 
+class NextActionRequest(BaseModel):
+    unit_code: str
+    unit_title: str
+    topic_title: str | None = None
+    mastery: int = Field(ge=0, le=100)
+
+
 class SyncResponse(BaseModel):
     name: str
     status: str

@@ -36,6 +36,13 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | PATCH | `/api/v1/profile` | ✅ Save any subset of the setup fields |
 | POST | `/api/v1/profile/complete` | ✅ Finish setup (`PROFILE_INCOMPLETE` + `missing`) |
 
+## home — Samni
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/home/summary` | ✅ Greeting, streak, days to A/L, next best action (AI reason), today's plan, mastery + weekly change, continue learning |
+| PATCH | `/api/v1/home/plan/{item_id}` | ✅ `{done}` → updated plan item |
+
 ## syllabus — Keshomigha
 
 | Method | Path | Description |
@@ -182,4 +189,5 @@ Every request needs `X-Service-Token`. Only `api/core/ai_client.py` calls these.
 | POST | `/sync/explain-mcq` | ✅ Explain wrong MCQ answers: `{items: [...]}` → `{explanations: {question_id: text}}` |
 | POST | `/sync/tag-post` | Suggest tags for a community post (fast) |
 | POST | `/sync/diagnostic-summary` | ✅ 2-sentence diagnostic summary (prompt `diagnostic/summary.v1`) |
+| POST | `/sync/next-action` | ✅ One-sentence reason for the home "next best action" (prompt `home/next_action.v1`) |
 | POST | `/sync/keyword-score` | Quick keyword score for an answer (fast) |

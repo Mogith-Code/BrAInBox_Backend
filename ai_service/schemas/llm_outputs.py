@@ -128,3 +128,15 @@ class DiagnosticSummary(BaseModel):
             "summary": "Fake AI summary: you have a clear strongest unit and one unit that "
             "needs the most work. Your plan starts with the unit that needs work."
         }
+
+
+# ----------------------------------------------------------------- home (Samni)
+class NextActionReason(BaseModel):
+    """One short sentence: why this is the best thing to study next."""
+
+    reason: str = Field(min_length=10, max_length=200)
+
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """Deterministic text for the fake LLM (offline / tests)."""
+        return {"reason": "Fake AI reason: this is your weakest unit right now."}
