@@ -2,6 +2,7 @@
 come from `shared/settings.py`."""
 
 import re
+from datetime import date
 from functools import lru_cache
 
 from shared.settings import SharedSettings
@@ -23,6 +24,25 @@ class ApiSettings(SharedSettings):
 
     # Dev only: include the correct answer in generated papers (ignored when ENVIRONMENT=prod).
     DEBUG_SHOW_ANSWERS: bool = False
+
+    # --- 6-digit email codes (verify email + password reset)
+    # Secret mixed into the code / reset-token hashes. MUST be a long random value outside dev.
+    AUTH_CODE_SECRET: str = "dev-only-change-me"
+    # Dev only: return the code in the API response ("dev_code") so you can test without email.
+    # Works ONLY when ENVIRONMENT=dev; ignored everywhere else.
+    DEV_EXPOSE_CODES: bool = False
+
+    # --- Email sending: "console" (prints to the log, dev) or "smtp"
+    EMAIL_BACKEND: str = "console"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    EMAIL_FROM: str = "BrAInBox <no-reply@example.com>"
+
+    # --- A/L exam dates per year, JSON in the env, e.g. {"2027": "2027-08-02"} (real dates TBD)
+    AL_EXAM_DATES: dict[int, date] = {}
 
     API_VERSION: str = "0.1.0"
 

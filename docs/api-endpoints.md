@@ -13,12 +13,19 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 ## auth — Mogith
 
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/auth/register` | Create the users row for a new Firebase account (uses FirebaseClaimsDep, not CurrentUserDep) |
-| GET | `/api/v1/auth/me` | Current user |
-| PATCH | `/api/v1/auth/me` | Update display name etc. |
-| DELETE | `/api/v1/auth/me` | Delete / anonymise the account |
+"token" = Firebase ID token. 6-digit codes: 10 min, 5 wrong tries, 60 s resend cooldown.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/auth/register` | token | ✅ Create / update my users row `{full_name, phone?, consent}` → `UserOut` (201 new, 200 existing) |
+| GET | `/api/v1/auth/me` | token | ✅ My account + onboarding flags (`USER_NOT_FOUND` before register) |
+| PATCH | `/api/v1/auth/me` | token | ✅ Change `full_name` / `phone` |
+| DELETE | `/api/v1/auth/me` | token | ✅ Delete account (DB + Firebase) → 204 |
+| POST | `/api/v1/auth/email-code/send` | token | ✅ Email a verification code (`ALREADY_VERIFIED`, `RESEND_TOO_SOON` 429) |
+| POST | `/api/v1/auth/email-code/verify` | token | ✅ `{code}` → `UserOut` with `email_verified: true` |
+| POST | `/api/v1/auth/password-reset/send` | none | ✅ `{email}` → always `{sent: true, ...}` |
+| POST | `/api/v1/auth/password-reset/verify` | none | ✅ `{email, code}` → `{reset_token, expires_in}` |
+| POST | `/api/v1/auth/password-reset/complete` | none | ✅ `{reset_token, new_password}` → `{reset: true}` |
 
 ## profiles — Mogith
 

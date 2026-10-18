@@ -41,6 +41,7 @@ class CurrentUser:
     firebase_uid: str
     email: str | None
     role: UserRole
+    full_name: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -101,7 +102,13 @@ async def get_current_user(claims: FirebaseClaimsDep, session: SessionDep) -> Cu
         )
     if not user.is_active:
         raise ForbiddenError("This account is disabled", code="USER_DISABLED")
-    return CurrentUser(id=user.id, firebase_uid=user.firebase_uid, email=user.email, role=user.role)
+    return CurrentUser(
+        id=user.id,
+        firebase_uid=user.firebase_uid,
+        email=user.email,
+        role=user.role,
+        full_name=user.display_name,
+    )
 
 
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]

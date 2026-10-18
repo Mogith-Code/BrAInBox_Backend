@@ -2,7 +2,8 @@
 
     {"error": {"code": "SOME_CODE", "message": "Human readable text"}}
 
-Validation errors also include "details" (the list of invalid fields).
+Validation errors also include "details" (the list of invalid fields), and an AppError can
+add extra fields with `extra=`, e.g. {"error": {"code": "RESEND_TOO_SOON", ..., "retry_after": 42}}.
 
 Raise `AppError` (or a subclass) anywhere in a service; the handlers below turn it into JSON.
 """
@@ -24,13 +25,22 @@ class AppError(Exception):
     status_code = 400
     code = "BAD_REQUEST"
 
-    def __init__(self, message: str, *, code: str | None = None, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        status_code: int | None = None,
+        extra: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.message = message
         if code:
             self.code = code
         if status_code:
             self.status_code = status_code
+        # Extra fields added inside "error", e.g. {"retry_after": 42} or {"missing": [...]}
+        self.extra = extra or {}
 
 
 class UnauthorizedError(AppError):
@@ -51,6 +61,11 @@ class NotFoundError(AppError):
 class ConflictError(AppError):
     status_code = 409
     code = "CONFLICT"
+
+
+class TooManyRequestsError(AppError):
+    status_code = 429
+    code = "TOO_MANY_REQUESTS"
 
 
 class ServiceUnavailableError(AppError):
@@ -82,7 +97,12 @@ def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
 
 async def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)
-    return JSONResponse(status_code=exc.status_code, content=error_body(exc.code, exc.message))
+    body = error_body(exc.code, exc.message)
+    body["error"].update(exc.extra)
+    headers = {}
+    if "retry_after" in exc.extra:  # standard HTTP header for "try again in N seconds"
+        headers["Retry-After"] = str(exc.extra["retry_after"])
+    return JSONResponse(status_code=exc.status_code, content=body, headers=headers or None)
 
 
 async def http_error_handler(request: Request, exc: Exception) -> JSONResponse:
