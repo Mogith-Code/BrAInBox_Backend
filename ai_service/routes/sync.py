@@ -3,8 +3,10 @@
 from fastapi import APIRouter
 
 from ai_service.pipelines.community import auto_tag
+from ai_service.pipelines.diagnostic import summary as diagnostic_summary
 from ai_service.pipelines.questions.explain_answers import explain_answers
 from ai_service.schemas.jobs import (
+    DiagnosticSummaryRequest,
     ExplainMCQRequest,
     KeywordScoreRequest,
     SyncResponse,
@@ -31,3 +33,12 @@ async def tag_post(request: TagPostRequest) -> SyncResponse:
 async def keyword_score(request: KeywordScoreRequest) -> SyncResponse:
     # TODO(Keshomigha): load keywords for the question and use pipelines.evaluation.keyword_match.
     return SyncResponse(name="keyword-score", status="todo")
+
+
+@router.post(
+    "/diagnostic-summary", response_model=SyncResponse, summary="2-sentence diagnostic summary"
+)
+async def diagnostic_summary_route(request: DiagnosticSummaryRequest) -> SyncResponse:
+    """result = {"summary": "...", "prompt_version": "diagnostic/summary.v1"}"""
+    result = await diagnostic_summary.summarize(request.model_dump())
+    return SyncResponse(name="diagnostic-summary", status="ok", result=result)

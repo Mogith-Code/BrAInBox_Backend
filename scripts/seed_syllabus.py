@@ -33,6 +33,8 @@ async def seed(path: Path) -> None:
                 await session.flush()  # gives the unit its id
             unit.title = unit_data["title"]
             unit.description = unit_data.get("description")
+            # past-paper weight for spreading diagnostic questions (1.0 until real values: TBD)
+            unit.exam_weight = float(unit_data.get("exam_weight", 1.0))
 
             for index, topic_data in enumerate(unit_data.get("topics", [])):
                 topic = (

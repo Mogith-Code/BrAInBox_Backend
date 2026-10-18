@@ -113,3 +113,18 @@ class ModerationResult(BaseModel):
 class PostTags(BaseModel):
     tags: list[str]
     unit_number: int | None = None
+
+
+# ----------------------------------------------------------------- diagnostic (Udith)
+class DiagnosticSummary(BaseModel):
+    """2 short sentences about the student's diagnostic result."""
+
+    summary: str = Field(min_length=10, max_length=400)
+
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """Deterministic text for the fake LLM (offline / tests)."""
+        return {
+            "summary": "Fake AI summary: you have a clear strongest unit and one unit that "
+            "needs the most work. Your plan starts with the unit that needs work."
+        }

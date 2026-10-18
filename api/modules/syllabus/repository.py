@@ -28,6 +28,21 @@ async def get_topics_with_units(
     return [(topic, unit) for topic, unit in result.all()]
 
 
+async def list_units(session: AsyncSession) -> list[Unit]:
+    result = await session.execute(select(Unit).order_by(Unit.number))
+    return list(result.scalars())
+
+
+async def list_current_topics(session: AsyncSession, unit_ids: list[uuid.UUID]) -> list[Topic]:
+    """Topics of these units that are in the current syllabus (not outdated), in order."""
+    result = await session.execute(
+        select(Topic)
+        .where(Topic.unit_id.in_(unit_ids), Topic.is_outdated.is_(False))
+        .order_by(Topic.order_index, Topic.number)
+    )
+    return list(result.scalars())
+
+
 # TODO(Keshomigha): add the queries this module needs, one small async function each, e.g.
 #   async def get_by_id(session: AsyncSession, id: uuid.UUID) -> Unit | None:
 #       return await session.get(Unit, id)
