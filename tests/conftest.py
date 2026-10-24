@@ -143,3 +143,112 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     """A real database session (only for tests marked @pytest.mark.db)."""
     async with SessionLocal() as session:
         yield session
+
+
+# --------------------------------------------------------------------------- onboarding helpers
+
+
+class FakeEmailSender:
+    """Keeps sent emails in a list instead of sending them."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    async def send(self, message) -> None:  # type: ignore[no-untyped-def]
+        self.sent.append(message)
+
+    def last_code(self) -> str:
+        """The 6-digit code from the newest email."""
+        import re
+
+        match = re.search(r"\b(\d{6})\b", self.sent[-1].text)
+        assert match, "no code in the last email"
+        return match.group(1)
+
+
+@pytest.fixture
+def fake_email() -> FakeEmailSender:
+    return FakeEmailSender()
+
+
+@pytest.fixture
+def fake_firebase(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Replaces firebase-admin user changes; returns the list of calls made."""
+    from api.core import firebase_users
+
+    calls: list[tuple] = []
+
+    async def update_user(uid, **changes):  # type: ignore[no-untyped-def]
+        calls.append(("update_user", uid, changes))
+
+    async def delete_user(uid):  # type: ignore[no-untyped-def]
+        calls.append(("delete_user", uid, {}))
+
+    monkeypatch.setattr(firebase_users, "update_user", update_user)
+    monkeypatch.setattr(firebase_users, "delete_user", delete_user)
+    return calls
+
+
+def student_claims(**extra) -> dict:  # type: ignore[no-untyped-def]
+    """Firebase token claims of the test student (what get_firebase_claims would return)."""
+    return {"uid": STUDENT.firebase_uid, "email": STUDENT.email, "email_verified": False, **extra}
+
+
+def make_api_client(  # type: ignore[no-untyped-def]
+    *, user=None, claims=None, ai=None, email=None
+) -> AsyncClient:
+    """API client with any of: logged-in user, Firebase claims, fake AI client, fake email."""
+    from api.core.ai_client import get_ai_client
+    from api.core.email import get_email_sender
+    from api.core.security import get_firebase_claims
+
+    app = create_api_app()
+    if user is not None:
+        app.dependency_overrides[get_current_user] = lambda: user
+    if claims is not None:
+        app.dependency_overrides[get_firebase_claims] = lambda: claims
+    if ai is not None:
+        app.dependency_overrides[get_ai_client] = lambda: ai
+    if email is not None:
+        app.dependency_overrides[get_email_sender] = lambda: email
+    return _client(app)
+
+
+async def delete_test_user(session: AsyncSession) -> None:
+    """Remove the test student and everything they own (cascades), plus their papers/codes."""
+    from sqlalchemy import delete, or_, select
+
+    from shared.db.models import EmailCode, Paper, User
+
+    # register creates the student with a new id, so match by uid / email too
+    is_student = or_(
+        User.id == STUDENT.id,
+        User.firebase_uid == STUDENT.firebase_uid,
+        User.email == STUDENT.email,
+    )
+    user_ids = list((await session.execute(select(User.id).where(is_student))).scalars())
+    if user_ids:
+        await session.execute(delete(Paper).where(Paper.created_by.in_(user_ids)))
+        await session.execute(delete(User).where(User.id.in_(user_ids)))
+    await session.execute(delete(EmailCode).where(EmailCode.email.like("%@test.local")))
+    await session.commit()
+
+
+@pytest.fixture
+async def student_in_db(db_session: AsyncSession) -> AsyncIterator[uuid.UUID]:
+    """The test student as a real (registered, not yet verified) users row."""
+    from shared.db.models import User
+
+    await delete_test_user(db_session)
+    db_session.add(
+        User(
+            id=STUDENT.id,
+            firebase_uid=STUDENT.firebase_uid,
+            email=STUDENT.email,
+            display_name="Nethmi Perera",
+            role=UserRole.STUDENT,
+        )
+    )
+    await db_session.commit()
+    yield STUDENT.id
+    await delete_test_user(db_session)

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
@@ -71,6 +73,9 @@ class Attempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     score: Mapped[float | None] = mapped_column(Float)
+    # Extra result data, e.g. the diagnostic's AI summary:
+    # {"summary": "...", "summary_ai_generated": true}
+    feedback: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Response(UUIDPrimaryKeyMixin, TimestampMixin, Base):
