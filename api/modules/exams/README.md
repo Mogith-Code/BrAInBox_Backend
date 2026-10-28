@@ -33,7 +33,7 @@
 ### How marking works
 
 `service.evaluate_paper` (Udith's evaluator, unchanged logic) marks every question, scores each topic and lists
-topics under 60 % as weak. Wrong answers get 1–2 sentence explanations from the ai_service (`/sync/explain-mcq`).
+topics under 55 % (grade S or F, from `performance/grading.py`) as weak. Wrong answers get 1–2 sentence explanations from the ai_service (`/sync/explain-mcq`).
 If that call fails, marking still works and there are no explanations. The attempt and one `responses` row per
 question are saved.
 
