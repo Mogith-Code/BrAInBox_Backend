@@ -109,6 +109,7 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/api/v1/insights/topics` | ✅ My topic-wise MCQ scores, grades, weak topics and feedback (`?attempt_id=` for one attempt) |
 | GET | `/api/v1/insights/summary` | Overall progress |
 | GET | `/api/v1/insights/units` | Mastery per unit |
 | GET | `/api/v1/insights/concepts` | Weakest concepts |
