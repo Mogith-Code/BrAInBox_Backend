@@ -1,26 +1,33 @@
 """Topic-based summary: summarise a topic from the student's notes, or from approved sources.
 Owner: Samni. Jira: SCRUM-37.
 
-Two ways to call it:
-  * with notes   -> the student's own text (pasted notes, or the text of an upload) is summarised
+Three ways to call it:
+  * with a file  -> the uploaded file (PDF) is downloaded from storage, its text is summarised
+  * with notes   -> the student's own pasted text is summarised
   * topic only   -> no notes given, so approved sources for the topic are found with RAG and
                     summarised (with [n] citations). No sources -> NoContextError, never invented.
 
 Long notes use map-reduce:
-  1. map:    split into parts and summarise each part (summarize_chunk prompt, plain text)
+  1. map:    split into parts and summarise each part (summarize_chunk prompt, plain text),
+             at most MAX_PARALLEL_PARTS at the same time
   2. reduce: merge the part summaries into one TopicSummary (summarize_topic prompt, JSON)
 Short notes skip the map step.
+
+Problems with the input (empty, too long, not English, unreadable file...) raise a
+UserInputError with a code; the api shows its message to the student.
 
 Job type: SUMMARIZE_UPLOAD (dispatched by ai_service/routes/jobs.py)
 """
 
+import asyncio
 import uuid
 from typing import Any
 
 from pydantic import ValidationError
 
+from ai_service.errors import UserInputError
 from ai_service.pipelines.summarization.chunker import split_for_summary
-from ai_service.pipelines.summarization.preprocess import preprocess
+from ai_service.pipelines.summarization.preprocess import load_upload_text, preprocess
 from ai_service.prompts import prompt_id, render_prompt
 from ai_service.providers import get_llm
 from ai_service.rag.context_builder import BuiltContext, build_context
@@ -36,12 +43,15 @@ PROMPT_ID = prompt_id(PROMPT_NAME, PROMPT_VERSION)  # stored in summaries.prompt
 
 SOURCE_TYPES = [SourceType.SYLLABUS, SourceType.TEACHER_GUIDE, SourceType.APPROVED_NOTE]
 MAX_PART_WORDS = 1500  # notes longer than this are summarised part by part
+MAX_PARALLEL_PARTS = 3  # map step: parts summarised at the same time (keeps Gemini rate limits)
 MAX_RETRIES = 2  # extra attempts when the LLM returns invalid JSON
 TEMPERATURE = 0.3  # low: a summary should stick to the text
 
 
-class NoContextError(ValueError):
+class NoContextError(UserInputError):
     """No notes were given and no approved sources exist for the topic."""
+
+    code = "NO_SOURCES_FOR_TOPIC"
 
 
 async def gather_context(
@@ -53,10 +63,11 @@ async def gather_context(
 
 
 async def summarize_parts(parts: list[str]) -> str:
-    """Map step: summarise each part on its own and join the results."""
+    """Map step: summarise each part on its own and join the results (in the original order)."""
     llm = get_llm()
-    part_summaries = []
-    for number, part in enumerate(parts, start=1):
+    limit = asyncio.Semaphore(MAX_PARALLEL_PARTS)
+
+    async def summarize_part(number: int, part: str) -> str:
         prompt = render_prompt(
             CHUNK_PROMPT_NAME,
             CHUNK_PROMPT_VERSION,
@@ -64,12 +75,18 @@ async def summarize_parts(parts: list[str]) -> str:
             chunk_number=number,
             total_chunks=len(parts),
         )
-        summary = await llm.generate(
-            prompt,
-            temperature=TEMPERATURE,
-            prompt_name=prompt_id(CHUNK_PROMPT_NAME, CHUNK_PROMPT_VERSION),
-        )
-        part_summaries.append(f"Part {number}:\n{summary}")
+        async with limit:
+            summary = await llm.generate(
+                prompt,
+                temperature=TEMPERATURE,
+                prompt_name=prompt_id(CHUNK_PROMPT_NAME, CHUNK_PROMPT_VERSION),
+            )
+        return f"Part {number}:\n{summary}"
+
+    # gather() returns the results in the order of the parts, whichever finishes first.
+    part_summaries = await asyncio.gather(
+        *(summarize_part(number, part) for number, part in enumerate(parts, start=1))
+    )
     return "\n\n".join(part_summaries)
 
 
@@ -91,15 +108,18 @@ async def summarize_topic(
         from_parts=from_parts,
         grounded=grounded,
     )
-    last_error: Exception | None = None
+    errors: list[str] = []
     for _ in range(MAX_RETRIES + 1):
         try:
             return await get_llm().generate_json(
                 prompt, TopicSummary, temperature=TEMPERATURE, prompt_name=PROMPT_ID
             )
         except ValidationError as exc:  # bad JSON or missing fields
-            last_error = exc
-    raise RuntimeError(f"LLM output was invalid after retries: {last_error}")
+            # Only the field names: the full error repeats the LLM output (= the student's notes).
+            errors.append(
+                ", ".join(".".join(map(str, e["loc"])) or e["type"] for e in exc.errors())
+            )
+    raise RuntimeError(f"LLM output was invalid after retries (fields: {'; '.join(errors)})")
 
 
 async def run(payload: dict[str, Any]) -> dict[str, Any]:
@@ -107,22 +127,28 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
 
     payload = {
         "topic_title": "Osmosis",   # required
-        "text": "...",              # optional: the student's notes
+        "file_path": "uploads/...", # optional: an uploaded file in storage (with "mime_type")
+        "mime_type": "application/pdf",
+        "text": "...",              # optional: the student's notes (used when no file_path)
         "topic_id": "...",          # optional: narrows the RAG search, saved on the summary
         "unit_title": "Unit 2",     # optional: extra context for the prompt
     }
     """
     topic_title = (payload.get("topic_title") or "").strip()
     if not topic_title:
-        raise ValueError("topic_title is required")
+        raise UserInputError("topic_title is required", code="MISSING_TOPIC_TITLE")
     topic_id = uuid.UUID(payload["topic_id"]) if payload.get("topic_id") else None
     unit_title = payload.get("unit_title") or ""
     citations: list[dict[str, Any]] = []
 
-    if payload.get("text"):
-        # 1. Summarise the student's own notes.
+    notes = payload.get("text") or ""
+    if payload.get("file_path"):
+        notes = await load_upload_text(payload["file_path"], payload.get("mime_type") or "")
+
+    if notes:
+        # 1. Summarise the student's own notes (pasted, or the text of their file).
         source = "notes"
-        parts = split_for_summary(preprocess(payload["text"]), max_words=MAX_PART_WORDS)
+        parts = split_for_summary(preprocess(notes), max_words=MAX_PART_WORDS)
         from_parts = len(parts) > 1
         source_text = await summarize_parts(parts) if from_parts else parts[0]
         summary = await summarize_topic(
