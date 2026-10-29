@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.ai_client import AIClient, get_ai_client
 from api.core.config import get_settings
+from api.core.errors import AppError
 from shared.db.models import AIJob
 from shared.db.session import SessionLocal
 from shared.enums import JobStatus, JobType
@@ -70,7 +71,9 @@ async def run_job_inline(session: AsyncSession, job: AIJob, client: AIClient) ->
         job.status = JobStatus.SUCCEEDED
     except Exception as exc:
         logger.exception("Job %s failed", job.id)
-        job.error = str(exc)
+        # AppErrors keep their code, e.g. "EMPTY_NOTES: The notes are empty...", so the module
+        # that owns the job can tell the student what went wrong.
+        job.error = f"{exc.code}: {exc.message}" if isinstance(exc, AppError) else str(exc)
         job.status = JobStatus.FAILED
     job.finished_at = datetime.now(UTC)
     await session.commit()
