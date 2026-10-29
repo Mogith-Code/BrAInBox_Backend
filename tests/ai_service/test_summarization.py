@@ -4,15 +4,27 @@ import uuid
 
 import pytest
 
+from ai_service.config import get_settings
 from ai_service.pipelines.summarization import summarize
 from ai_service.pipelines.summarization.chunker import split_for_summary
-from ai_service.pipelines.summarization.preprocess import EmptyTextError, preprocess
+from ai_service.pipelines.summarization.preprocess import (
+    EmptyTextError,
+    NotEnglishError,
+    NoTextInFileError,
+    TextTooLongError,
+    UnreadableFileError,
+    UnsupportedFileError,
+    load_upload_text,
+    looks_english,
+    preprocess,
+)
 from ai_service.prompts import render_prompt
 from ai_service.providers import set_providers
-from ai_service.providers.fakes import FakeLLM
+from ai_service.providers.fakes import FakeLLM, FakeStorage
 from ai_service.rag.schemas import RetrievedChunk
 from ai_service.schemas.llm_outputs import TopicSummary
 from shared.enums import SourceType
+from tests.samples import OSMOSIS_NOTES, make_pdf
 
 NOTES = "Osmosis is the movement of water across a partially permeable membrane."
 
@@ -169,3 +181,91 @@ async def test_summarize_job_through_the_endpoint(ai_client):
     result = response.json()["result"]
     assert result["source"] == "notes"
     assert result["prompt_version"] == "summarization/summarize_topic.v1"
+
+
+# ----------------------------------------------------------------- input checks
+def test_preprocess_rejects_too_long_notes(monkeypatch):
+    monkeypatch.setattr(get_settings(), "MAX_INPUT_CHARS", 20)
+    with pytest.raises(TextTooLongError) as error:
+        preprocess(NOTES)
+    assert error.value.code == "NOTES_TOO_LONG"
+
+
+def test_preprocess_rejects_non_english_notes():
+    sinhala = "ආශ්‍රැතිය යනු අර්ධ පාරගම්‍ය පටලයක් හරහා ජලය චලනය වීමයි. " * 3
+    with pytest.raises(NotEnglishError):
+        preprocess(sinhala)
+
+
+def test_english_check_allows_greek_letters_and_short_text():
+    assert looks_english("Alpha (α) and beta (β) glucose form starch and cellulose. " * 3)
+    assert looks_english("ජලය")  # too short to judge
+
+
+# ----------------------------------------------------------------- uploaded files
+PDF_PATH = "uploads/test-user/upload.pdf"
+
+
+async def store(data: bytes) -> FakeStorage:
+    storage = FakeStorage()
+    await storage.save(PDF_PATH, data, "application/pdf")
+    set_providers(storage=storage)
+    return storage
+
+
+async def test_pdf_upload_is_summarised():
+    await store(make_pdf(OSMOSIS_NOTES))
+    llm = CountingLLM()
+    set_providers(llm=llm)
+
+    result = await summarize.run(
+        {"topic_title": "Osmosis", "file_path": PDF_PATH, "mime_type": "application/pdf"}
+    )
+
+    assert result["source"] == "notes"
+    [prompt] = llm.json_prompts
+    assert "partially permeable membrane" in prompt  # the PDF text reached the prompt
+
+
+async def test_pdf_without_text_is_refused():
+    await store(make_pdf(""))  # a blank page, like a scan when OCR is not installed
+    with pytest.raises(NoTextInFileError) as error:
+        await load_upload_text(PDF_PATH, "application/pdf")
+    assert error.value.code == "NO_TEXT_IN_FILE"
+
+
+async def test_broken_pdf_is_refused():
+    await store(b"%PDF-1.4 this is not really a pdf")
+    with pytest.raises(UnreadableFileError):
+        await load_upload_text(PDF_PATH, "application/pdf")
+
+
+async def test_unsupported_file_type_is_refused():
+    with pytest.raises(UnsupportedFileError):
+        await load_upload_text("uploads/x.docx", "application/msword")
+
+
+# ----------------------------------------------------------------- errors over HTTP
+async def test_input_errors_answer_422_with_their_code(ai_client):
+    response = await ai_client.post(
+        "/jobs/run",
+        json={
+            "job_id": "j1",
+            "job_type": "summarize_upload",
+            "payload": {"topic_title": "Osmosis", "text": "Page 3 of 10"},  # nothing left
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "EMPTY_NOTES"
+
+
+async def test_invalid_output_error_does_not_repeat_the_output():
+    class BadLLM(FakeLLM):
+        async def generate_json(self, prompt, schema, **kwargs):  # type: ignore[no-untyped-def]
+            return schema.model_validate({"title": NOTES})  # body_md missing
+
+    set_providers(llm=BadLLM())
+    with pytest.raises(RuntimeError) as error:
+        await summarize.run({"topic_title": "Osmosis", "text": NOTES})
+    assert NOTES not in str(error.value)
+    assert "body_md" in str(error.value)
