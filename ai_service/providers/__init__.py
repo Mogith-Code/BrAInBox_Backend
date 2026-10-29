@@ -81,12 +81,21 @@ def get_image_generator() -> ImageProvider:
 
 
 def get_storage() -> StorageProvider:
-    from ai_service.providers.storage import FirebaseStorage
+    """Firebase Storage when STORAGE_BUCKET is set. Without a bucket: the in-memory fake in tests,
+    the local folder shared with the api in dev (so uploads work without Firebase)."""
+    from ai_service.providers.storage import FirebaseStorage, LocalStorage
 
     s = get_settings()
-    return _get(  # type: ignore[no-any-return]
-        "storage", lambda: FirebaseStorage(s.STORAGE_BUCKET, s.FIREBASE_PROJECT_ID), FakeStorage
-    )
+    if "storage" not in _cache:
+        if s.STORAGE_BUCKET:
+            _cache["storage"] = FirebaseStorage(s.STORAGE_BUCKET, s.FIREBASE_PROJECT_ID)
+        elif s.ENVIRONMENT == "test":
+            _cache["storage"] = FakeStorage()
+        elif s.ENVIRONMENT == "prod":
+            raise RuntimeError("STORAGE_BUCKET must be set in prod")
+        else:
+            _cache["storage"] = LocalStorage(s.LOCAL_STORAGE_DIR)
+    return _cache["storage"]  # type: ignore[no-any-return]
 
 
 def provider_names() -> dict[str, str]:
