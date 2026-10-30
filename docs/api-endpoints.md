@@ -31,8 +31,10 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/profile` | My profile |
-| PATCH | `/api/v1/profile` | Update my profile |
+| GET | `/api/v1/profile/options` | ✅ Choices for setup: streams, subjects (Biology only available), exam years, grades, study times |
+| GET | `/api/v1/profile` | ✅ My profile (`ProfileOut`, includes `weekly_hours`) |
+| PATCH | `/api/v1/profile` | ✅ Save any subset of the setup fields |
+| POST | `/api/v1/profile/complete` | ✅ Finish setup (`PROFILE_INCOMPLETE` + `missing`) |
 
 ## syllabus — Keshomigha
 
