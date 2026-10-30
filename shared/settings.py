@@ -31,6 +31,8 @@ class SharedSettings(BaseSettings):
 
     # Firebase / Google Cloud
     FIREBASE_PROJECT_ID: str = ""
+    # Firebase Web API key (public; from Project settings > Your apps). Only test scripts use it.
+    FIREBASE_WEB_API_KEY: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
     STORAGE_BUCKET: str = ""
 

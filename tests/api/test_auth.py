@@ -433,3 +433,49 @@ async def test_failed_email_can_be_resent_at_once(student_in_db, fake_email, db_
     assert rows == []  # nothing saved, so no cooldown
     assert retried.status_code == 200  # no RESEND_TOO_SOON
     assert len(fake_email.sent) == 1
+
+
+# --------------------------------------------------------------------------- Firebase app setup
+
+
+def test_firebase_app_loads_the_service_account_file(monkeypatch, tmp_path):
+    import firebase_admin
+    from firebase_admin import credentials
+
+    from api.core import security
+
+    key_file = tmp_path / "key.json"
+    key_file.write_text("{}")
+    calls = {}
+    monkeypatch.setattr(security, "_firebase_app", None)
+    monkeypatch.setattr(credentials, "Certificate", lambda path: f"cert:{path}")
+    monkeypatch.setattr(
+        firebase_admin,
+        "initialize_app",
+        lambda cred, options, name: calls.update(cred=cred, options=options) or "app",
+    )
+    settings = get_settings()
+    monkeypatch.setattr(settings, "FIREBASE_PROJECT_ID", "brainbox-test")
+    monkeypatch.setattr(settings, "GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
+
+    assert security._get_firebase_app() == "app"
+    assert calls == {"cred": f"cert:{key_file}", "options": {"projectId": "brainbox-test"}}
+
+
+def test_firebase_app_without_key_file_still_verifies_tokens(monkeypatch):
+    import firebase_admin
+
+    from api.core import security
+
+    calls = {}
+    monkeypatch.setattr(security, "_firebase_app", None)
+    monkeypatch.setattr(
+        firebase_admin,
+        "initialize_app",
+        lambda cred, options, name: calls.update(cred=cred) or "app",
+    )
+    settings = get_settings()
+    monkeypatch.setattr(settings, "FIREBASE_PROJECT_ID", "brainbox-test")
+    monkeypatch.setattr(settings, "GOOGLE_APPLICATION_CREDENTIALS", "./missing.json")
+    assert security._get_firebase_app() == "app"
+    assert calls == {"cred": None}  # project id only: enough to check login tokens

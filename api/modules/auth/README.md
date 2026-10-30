@@ -103,6 +103,24 @@ For more volume later, switch to a mail provider with SMTP (Brevo, SendGrid, Ama
    Needed so the backend can mark emails verified, set new passwords and delete accounts.
 5. Add the Android/iOS/web apps in the same project for the Flutter team (`flutterfire configure`).
 
+### Check the setup and test login in /docs
+
+```powershell
+python scripts/check_firebase.py                                         # project id + service account work?
+python scripts/get_test_token.py --email test.student@example.com --create   # make a TEST account, print a token
+python scripts/get_test_token.py --email test.student@example.com            # later: sign in again (token = 1 hour)
+```
+
+Start the api, open <http://localhost:8000/docs>, click **Authorize**, paste the token, then try
+`POST /auth/register` → `POST /auth/email-code/send` (with `ENVIRONMENT=dev` + `DEV_EXPOSE_CODES=true` the code is in
+the response as `dev_code`, and in the api log) → `POST /auth/email-code/verify`.
+`get_test_token.py` needs `FIREBASE_WEB_API_KEY` in `.env` (Project settings → General → Your apps → `apiKey`).
+Delete test accounts afterwards in Firebase → Authentication → Users.
+
+The backend loads the service-account file from `GOOGLE_APPLICATION_CREDENTIALS` itself, so it works with plain
+`uvicorn` as well as Docker. Without the file, logins still work, but verifying emails, resetting passwords and
+deleting accounts fail with `FIREBASE_ERROR`.
+
 ## Registration with OTP: the whole flow (Firebase + this backend)
 
 Firebase Auth creates the account and signs in. Firebase can't email 6-digit codes (only links), so **this backend**

@@ -12,6 +12,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -60,9 +61,24 @@ def _get_firebase_app() -> Any:
                 "Firebase is not configured (FIREBASE_PROJECT_ID is empty)",
                 code="AUTH_NOT_CONFIGURED",
             )
-        # Uses GOOGLE_APPLICATION_CREDENTIALS if set. Verifying tokens only needs the project id.
+        # Checking login tokens only needs the project id. Changing users (verify email,
+        # new password, delete account) also needs the service account, so load the file
+        # named in .env directly - .env values are NOT in the process environment when
+        # you run uvicorn yourself, so firebase-admin would not find it on its own.
+        cred = None
+        key_path = Path(settings.GOOGLE_APPLICATION_CREDENTIALS)
+        if settings.GOOGLE_APPLICATION_CREDENTIALS and key_path.is_file():
+            from firebase_admin import credentials
+
+            cred = credentials.Certificate(str(key_path))
+        elif settings.GOOGLE_APPLICATION_CREDENTIALS:
+            logger.warning(
+                "GOOGLE_APPLICATION_CREDENTIALS file not found (%s): logins work, but "
+                "verifying emails / resetting passwords / deleting accounts will fail",
+                settings.GOOGLE_APPLICATION_CREDENTIALS,
+            )
         _firebase_app = firebase_admin.initialize_app(
-            options={"projectId": settings.FIREBASE_PROJECT_ID}, name="brainbox-api"
+            cred, options={"projectId": settings.FIREBASE_PROJECT_ID}, name="brainbox-api"
         )
     return _firebase_app
 
