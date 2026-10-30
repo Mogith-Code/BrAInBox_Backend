@@ -17,6 +17,16 @@ class GeneratedNotes(BaseModel):
     cited_refs: list[int] = Field(default_factory=list)  # [n] numbers used from the context
 
 
+# ----------------------------------------------------------------- summarization (Samni)
+class TopicSummary(BaseModel):
+    """Revision summary of one topic, built from the student's notes or approved sources."""
+
+    title: str
+    body_md: str  # the summary itself, in Markdown (stored in summaries.body_md)
+    key_points: list[str] = Field(default_factory=list)  # 3-7 short bullet points
+    key_terms: list[str] = Field(default_factory=list)  # Biology terms the student must know
+
+
 # ----------------------------------------------------------------- visuals (Mogith)
 class VisualDecision(BaseModel):
     kind: Literal["diagram", "flowchart", "table", "illustration"]

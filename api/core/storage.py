@@ -1,9 +1,13 @@
 """Firebase Storage helper (uploads from students, generated images...).
 
 Files are never served by the api itself; the app downloads them with short-lived signed URLs.
+
+Dev without a bucket (STORAGE_BUCKET empty, ENVIRONMENT != prod): `upload_bytes` writes to
+LOCAL_STORAGE_DIR instead, the folder the ai_service reads (ai_service/providers/storage.py).
 """
 
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from api.core.config import get_settings
@@ -47,7 +51,23 @@ def generate_signed_url(path: str, expires_minutes: int = 15, method: str = "GET
 
 
 def upload_bytes(path: str, data: bytes, content_type: str) -> str:
-    """Upload bytes and return the storage path."""
-    # TODO(Samni): validate size / type before calling this (uploads module).
+    """Upload bytes and return the storage path. Blocking: call it with run_in_threadpool.
+
+    Callers validate size and type first (e.g. api/modules/content/service.py for PDFs).
+    """
+    settings = get_settings()
+    if not settings.STORAGE_BUCKET and settings.ENVIRONMENT != "prod":
+        _write_local(settings.LOCAL_STORAGE_DIR, path, data)
+        return path
     _get_bucket().blob(path).upload_from_string(data, content_type=content_type)
     return path
+
+
+def _write_local(root: str, path: str, data: bytes) -> None:
+    """Dev only: keep the file in the local storage folder."""
+    folder = Path(root).resolve()
+    file = (folder / path).resolve()
+    if not file.is_relative_to(folder):  # e.g. "../../.env"
+        raise ValueError(f"Storage path outside the storage folder: {path}")
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_bytes(data)

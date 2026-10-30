@@ -38,7 +38,9 @@ class ApiSettings(SharedSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
-    SMTP_USE_TLS: bool = True
+    SMTP_USE_TLS: bool = True  # STARTTLS on port 587
+    SMTP_USE_SSL: bool = False  # SSL from the start (port 465 turns this on automatically)
+    SMTP_TIMEOUT_SECONDS: float = 15.0
     EMAIL_FROM: str = "BrAInBox <no-reply@example.com>"
 
     # --- A/L exam dates per year, JSON in the env, e.g. {"2027": "2027-08-02"} (real dates TBD)
