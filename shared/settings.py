@@ -35,6 +35,10 @@ class SharedSettings(BaseSettings):
     FIREBASE_WEB_API_KEY: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
     STORAGE_BUCKET: str = ""
+    # Dev only: when STORAGE_BUCKET is empty, uploads are kept in this folder instead.
+    # The api writes and the ai_service reads it, so both must see the same folder
+    # (they do when run from the repo root, and in docker compose through the `.:/app` mount).
+    LOCAL_STORAGE_DIR: str = "data/local_storage"
 
     # Public URL of the logo (used in docs, emails, notifications)
     LOGO_URL: str = "/static/brand/logo_horizontal_1200.png"
