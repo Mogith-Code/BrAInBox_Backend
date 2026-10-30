@@ -36,6 +36,7 @@ from api.modules.exams.schemas import (
     SubmitRequest,
     TopicScore,
 )
+from api.modules.performance import service as performance_service
 from api.modules.questions import service as questions_service
 from api.modules.syllabus import service as syllabus_service
 from shared.enums import JobStatus, JobType
@@ -44,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 MODULE_NAME = "exams"
 LETTERS = "ABCDE"
-WEAK_THRESHOLD = 60.0  # topics below this percent are marked weak
 EXAMPLES_PER_TOPIC = 3
 
 
@@ -121,7 +121,10 @@ def evaluate_paper(
         TopicScore(topic=t, correct=c, total=n, percent=round(100 * c / n, 1))
         for t, (c, n) in topic_stats.items()
     ]
-    weak_topics = [s.topic for s in by_topic if s.percent < WEAK_THRESHOLD]
+    # Weak = grade S or F; the thresholds live in performance/grading.py.
+    weak_topics = [
+        s.topic for s in by_topic if performance_service.is_weak_topic_percent(s.percent)
+    ]
     percent = round(100 * marks_obtained / marks_total, 1) if marks_total else 0.0
 
     return EvaluateResponse(
