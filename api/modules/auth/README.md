@@ -60,10 +60,88 @@ backend creates, emails and checks them:
 ## Email
 
 `api/core/email.py`: `EMAIL_BACKEND=console` prints the email in the api log (body only in `ENVIRONMENT=dev`);
-`EMAIL_BACKEND=smtp` sends real email (`SMTP_*`, `EMAIL_FROM`; provider TBD).
+`EMAIL_BACKEND=smtp` sends real email (`SMTP_*`, `EMAIL_FROM`).
+
+- If sending fails, nothing is saved: the older code stays valid, there is **no** 60-second cooldown, and the app gets
+  `503 EMAIL_SEND_FAILED` (or `EMAIL_NOT_CONFIGURED` when `SMTP_HOST` is empty), so "Resend" works at once.
+- Emails have `Date` + `Message-ID` headers (fewer spam-folder hits). The logo is shown only when `LOGO_URL` is a
+  public `https://` address.
 
 **Testing without email (dev only):** set `ENVIRONMENT=dev` and `DEV_EXPOSE_CODES=true`, and the send endpoints
 also return `"dev_code"`. It is ignored in every other environment (tested).
+
+### Sending real OTP emails with Gmail (free, about 500 emails a day)
+
+1. Make (or use) a Google account for the project, e.g. `brainbox.app@gmail.com`.
+2. Turn on **2-Step Verification**: <https://myaccount.google.com/security>.
+3. Create an **App Password**: <https://myaccount.google.com/apppasswords> → name it "BrAInBox backend" → copy the
+   16 letters (spaces don't matter). This is **not** your normal password, and it goes **only** in `.env`.
+4. In `.env`:
+   ```
+   EMAIL_BACKEND=smtp
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USE_TLS=true
+   SMTP_USER=brainbox.app@gmail.com
+   SMTP_PASSWORD=abcdefghijklmnop
+   EMAIL_FROM=BrAInBox <brainbox.app@gmail.com>
+   ```
+5. Check it: `python scripts/send_test_email.py --to your.name@gmail.com` → "OK: sent". If you see
+   "rejected the username/password", the App Password is wrong or 2-Step Verification is off.
+6. Restart the api (`docker compose up -d` or uvicorn). Codes now arrive by email.
+
+For more volume later, switch to a mail provider with SMTP (Brevo, SendGrid, Amazon SES): only the `SMTP_*` values change.
+
+## Firebase project setup (once, by Mogith)
+
+1. <https://console.firebase.google.com> → **Add project** (e.g. `brainbox`).
+2. **Authentication → Sign-in method**: enable **Email/Password** and **Google**.
+3. **Project settings → General**: copy the **Project ID** → `.env` `FIREBASE_PROJECT_ID=...`.
+4. **Project settings → Service accounts → Generate new private key** → save it as
+   `secrets/firebase-service-account.json` (git-ignored, never commit it) →
+   `GOOGLE_APPLICATION_CREDENTIALS=./secrets/firebase-service-account.json`.
+   Needed so the backend can mark emails verified, set new passwords and delete accounts.
+5. Add the Android/iOS/web apps in the same project for the Flutter team (`flutterfire configure`).
+
+### Check the setup and test login in /docs
+
+```powershell
+python scripts/check_firebase.py                                         # project id + service account work?
+python scripts/get_test_token.py --email test.student@example.com --create   # make a TEST account, print a token
+python scripts/get_test_token.py --email test.student@example.com            # later: sign in again (token = 1 hour)
+```
+
+Start the api, open <http://localhost:8000/docs>, click **Authorize**, paste the token, then try
+`POST /auth/register` → `POST /auth/email-code/send` (with `ENVIRONMENT=dev` + `DEV_EXPOSE_CODES=true` the code is in
+the response as `dev_code`, and in the api log) → `POST /auth/email-code/verify`.
+`get_test_token.py` needs `FIREBASE_WEB_API_KEY` in `.env` (Project settings → General → Your apps → `apiKey`).
+Delete test accounts afterwards in Firebase → Authentication → Users.
+
+The backend loads the service-account file from `GOOGLE_APPLICATION_CREDENTIALS` itself, so it works with plain
+`uvicorn` as well as Docker. Without the file, logins still work, but verifying emails, resetting passwords and
+deleting accounts fail with `FIREBASE_ERROR`.
+
+## Registration with OTP: the whole flow (Firebase + this backend)
+
+Firebase Auth creates the account and signs in. Firebase can't email 6-digit codes (only links), so **this backend**
+sends and checks the OTP.
+
+| # | Screen | Flutter app | Backend |
+|---|---|---|---|
+| 1 | Create account | `FirebaseAuth.instance.createUserWithEmailAndPassword(email, password)` | – |
+| 2 | (same tap) | `POST /api/v1/auth/register` with the ID token, `{full_name, phone, consent: true}` | creates `users` row → 201 |
+| 3 | (same tap) | `POST /api/v1/auth/email-code/send` | emails the 6-digit code |
+| 4 | Check your inbox | user types the code → `POST /api/v1/auth/email-code/verify {code}` | marks the email verified (DB + Firebase) |
+| 5 | (after verify) | `await FirebaseAuth.instance.currentUser!.reload()` then `getIdToken(true)` | – |
+| 6 | Resend button | wait `resend_in` seconds; on 429 use `retry_after` | new code, old one cancelled |
+| 7 | Next | `GET /api/v1/auth/me` → `onboarding` says which screen comes next | – |
+
+Google sign-in skips steps 3–5: the token already says `email_verified: true`.
+Forgot password uses the same idea: `password-reset/send` → `verify` → `complete`, then the app signs in with the new
+password (`signInWithEmailAndPassword`).
+
+Errors on the inbox screen: `CODE_INVALID` (shows `attempts_left`), `CODE_EXPIRED` (ask for a new code),
+`TOO_MANY_ATTEMPTS` (ask for a new code), `EMAIL_SEND_FAILED` (try "Resend").
 
 ## Files
 

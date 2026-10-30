@@ -34,6 +34,7 @@ from api.core.errors import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
+    ServiceUnavailableError,
     TooManyRequestsError,
 )
 from api.modules.auth import repository
@@ -253,10 +254,24 @@ async def _create_and_send_code(
             created_at=now,
         )
     )
-    await session.commit()
+    await session.flush()  # saved in this transaction, but not committed yet
 
+    # Send BEFORE committing: if the email fails, nothing is saved, the older code stays
+    # valid and there is no 60-second cooldown - the student can tap "Resend" at once.
     if user is not None:  # unknown emails get no email, but the response looks the same
-        await sender.send(build_code_email(email, code, purpose, CODE_TTL_SECONDS // 60))
+        try:
+            await sender.send(build_code_email(email, code, purpose, CODE_TTL_SECONDS // 60))
+        except AppError:
+            await session.rollback()
+            raise
+        except Exception as exc:
+            await session.rollback()
+            logger.error("Sending the code email failed: %s", type(exc).__name__)
+            raise ServiceUnavailableError(
+                "We could not send the email right now. Please try again in a moment.",
+                code="EMAIL_SEND_FAILED",
+            ) from exc
+    await session.commit()
     return CodeSentOut(
         resend_in=RESEND_COOLDOWN_SECONDS,
         expires_in=CODE_TTL_SECONDS,
