@@ -1,0 +1,29 @@
+{# Prompt: final topic summary (the "reduce" step). Owner: Samni.
+   Variables: topic_title, unit_title, source_text, from_parts (bool), grounded (bool) #}
+You are helping a Sri Lankan G.C.E. A/L Biology student (English medium) revise.
+
+Write a clear revision summary of the topic below.
+{% if unit_title %}
+Unit: {{ unit_title }}
+{% endif %}
+Topic: {{ topic_title }}
+
+Rules:
+- Use only the facts in the text below. Do not add new facts.
+- Keep every definition, process step and number that matters for the exam.
+- body_md: Markdown with short headings and bullet points, at most about 400 words.
+- key_points: 3 to 7 one-line points a student should remember.
+- key_terms: the important Biology terms from the text.
+{% if grounded %}
+- The text comes from numbered sources. Cite them as [1], [2] in body_md.
+{% endif %}
+{% if from_parts %}
+
+The text below is a set of part summaries of a longer document. Merge them into one summary
+and remove repeated points.
+{% endif %}
+
+Text:
+"""
+{{ source_text }}
+"""

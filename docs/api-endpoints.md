@@ -40,7 +40,8 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/topics/{id}/notes` | Approved notes for a topic (full + short) |
-| POST | `/api/v1/uploads` | Upload a file -> creates SUMMARIZE_UPLOAD job |
+| POST | `/api/v1/uploads/text` | Text notes -> SUMMARIZE_UPLOAD job (202, poll GET) |
+| POST | `/api/v1/uploads/pdf` | PDF upload (multipart) -> storage + SUMMARIZE_UPLOAD job (202, poll GET) |
 | GET | `/api/v1/uploads/{id}` | Upload status + summary |
 | GET | `/api/v1/library` | My saved items |
 | POST | `/api/v1/library` | Save an item |

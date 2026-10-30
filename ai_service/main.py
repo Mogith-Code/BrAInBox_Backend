@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_service.config import get_settings
+from ai_service.errors import UserInputError
 from ai_service.providers import provider_names
 from ai_service.routes import jobs, sync
 from shared.branding import APP_NAME, FAVICON_32_PATH, LOGO_URL, TAGLINE
@@ -73,6 +74,11 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         return _error(422, "VALIDATION_ERROR", str(exc.errors()))
+
+    @app.exception_handler(UserInputError)
+    async def user_input_error(request: Request, exc: UserInputError) -> JSONResponse:
+        # The student's input is the problem (e.g. empty notes): the api shows this message.
+        return _error(422, exc.code, exc.message)
 
     @app.exception_handler(NotImplementedError)
     async def not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
