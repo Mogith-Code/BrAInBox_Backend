@@ -35,6 +35,9 @@ data/rag_sources/**
 !data/rag_sources/README.md
 !data/rag_sources/**/sample_*
 
+# Student uploads kept locally in dev (LOCAL_STORAGE_DIR)
+data/local_storage/
+
 # Eval data may contain real student answers
 ai_service/evals/data/*
 !ai_service/evals/data/.gitkeep

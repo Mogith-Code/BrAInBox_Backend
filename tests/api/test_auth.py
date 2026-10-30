@@ -315,3 +315,167 @@ async def test_dev_code_only_in_dev_with_flag(
     if shown:
         assert response.json()["dev_code"].isdigit() and len(response.json()["dev_code"]) == 6
     await delete_test_user(db_session)
+
+
+# --------------------------------------------------------------------------- real email delivery
+
+
+class FakeSMTP:
+    """Stands in for smtplib.SMTP / SMTP_SSL and records what happened."""
+
+    instances: list["FakeSMTP"] = []
+
+    def __init__(self, host, port, timeout=None):  # type: ignore[no-untyped-def]
+        self.host, self.port, self.calls, self.sent = host, port, [], []
+        FakeSMTP.instances.append(self)
+
+    def __enter__(self):  # type: ignore[no-untyped-def]
+        return self
+
+    def __exit__(self, *args):  # type: ignore[no-untyped-def]
+        return False
+
+    def starttls(self):  # type: ignore[no-untyped-def]
+        self.calls.append("starttls")
+
+    def login(self, user, password):  # type: ignore[no-untyped-def]
+        self.calls.append(f"login:{user}")
+
+    def send_message(self, message):  # type: ignore[no-untyped-def]
+        self.sent.append(message)
+
+
+@pytest.fixture
+def smtp_settings(monkeypatch):
+    import smtplib
+
+    from api.core import email as email_module
+
+    FakeSMTP.instances = []
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", type("FakeSMTPSSL", (FakeSMTP,), {}))
+    settings = get_settings()
+    for key, value in {
+        "EMAIL_BACKEND": "smtp",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": 587,
+        "SMTP_USER": "brainbox.app@gmail.com",
+        "SMTP_PASSWORD": "app-password",
+        "SMTP_USE_TLS": True,
+        "SMTP_USE_SSL": False,
+        "EMAIL_FROM": "BrAInBox <brainbox.app@gmail.com>",
+    }.items():
+        monkeypatch.setattr(settings, key, value)
+    return email_module
+
+
+async def test_smtp_sends_with_starttls_and_login(smtp_settings):
+    sender = smtp_settings.get_email_sender()
+    await sender.send(
+        smtp_settings.build_code_email("nethmi@example.com", "123456", "verify_email")
+    )
+    [smtp] = FakeSMTP.instances
+    assert (smtp.host, smtp.port) == ("smtp.gmail.com", 587)
+    assert smtp.calls == ["starttls", "login:brainbox.app@gmail.com"]
+    [mail] = smtp.sent
+    assert mail["To"] == "nethmi@example.com"
+    assert mail["Subject"] == "Your BrAInBox code"
+    assert mail["Date"] and mail["Message-ID"].endswith("@gmail.com>")
+    assert "123456" in mail.get_body(("plain",)).get_content()
+    assert "123456" in mail.get_body(("html",)).get_content()
+
+
+async def test_smtp_port_465_uses_ssl(smtp_settings, monkeypatch):
+    monkeypatch.setattr(get_settings(), "SMTP_PORT", 465)
+    await smtp_settings.get_email_sender().send(
+        smtp_settings.build_code_email("a@example.com", "123456", "reset_password")
+    )
+    [smtp] = FakeSMTP.instances
+    assert type(smtp).__name__ == "FakeSMTPSSL"
+    assert smtp.calls == ["login:brainbox.app@gmail.com"]  # no STARTTLS on an SSL connection
+
+
+async def test_smtp_without_host_is_a_clear_error(smtp_settings, monkeypatch):
+    monkeypatch.setattr(get_settings(), "SMTP_HOST", "")
+    with pytest.raises(AppError) as err:
+        await smtp_settings.get_email_sender().send(
+            smtp_settings.build_code_email("a@example.com", "123456", "verify_email")
+        )
+    assert err.value.code == "EMAIL_NOT_CONFIGURED"
+
+
+def test_logo_only_with_a_public_url(monkeypatch):
+    from api.core import email as email_module
+
+    assert "<img" not in email_module.build_code_email("a@b.c", "123456", "verify_email").html
+    monkeypatch.setattr(email_module, "LOGO_URL", "https://brainbox.lk/logo.png")
+    assert (
+        '<img src="https://brainbox.lk/logo.png"'
+        in email_module.build_code_email("a@b.c", "123456", "verify_email").html
+    )
+
+
+class BrokenEmailSender:
+    async def send(self, message) -> None:  # type: ignore[no-untyped-def]
+        raise OSError("connection refused")
+
+
+@pytest.mark.db
+async def test_failed_email_can_be_resent_at_once(student_in_db, fake_email, db_session):
+    async with make_api_client(user=STUDENT, email=BrokenEmailSender()) as c:
+        failed = await c.post("/api/v1/auth/email-code/send")
+    rows = (await db_session.execute(select(EmailCode))).scalars().all()
+    async with make_api_client(user=STUDENT, email=fake_email) as c:
+        retried = await c.post("/api/v1/auth/email-code/send")
+
+    assert failed.status_code == 503
+    assert failed.json()["error"]["code"] == "EMAIL_SEND_FAILED"
+    assert rows == []  # nothing saved, so no cooldown
+    assert retried.status_code == 200  # no RESEND_TOO_SOON
+    assert len(fake_email.sent) == 1
+
+
+# --------------------------------------------------------------------------- Firebase app setup
+
+
+def test_firebase_app_loads_the_service_account_file(monkeypatch, tmp_path):
+    import firebase_admin
+    from firebase_admin import credentials
+
+    from api.core import security
+
+    key_file = tmp_path / "key.json"
+    key_file.write_text("{}")
+    calls = {}
+    monkeypatch.setattr(security, "_firebase_app", None)
+    monkeypatch.setattr(credentials, "Certificate", lambda path: f"cert:{path}")
+    monkeypatch.setattr(
+        firebase_admin,
+        "initialize_app",
+        lambda cred, options, name: calls.update(cred=cred, options=options) or "app",
+    )
+    settings = get_settings()
+    monkeypatch.setattr(settings, "FIREBASE_PROJECT_ID", "brainbox-test")
+    monkeypatch.setattr(settings, "GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
+
+    assert security._get_firebase_app() == "app"
+    assert calls == {"cred": f"cert:{key_file}", "options": {"projectId": "brainbox-test"}}
+
+
+def test_firebase_app_without_key_file_still_verifies_tokens(monkeypatch):
+    import firebase_admin
+
+    from api.core import security
+
+    calls = {}
+    monkeypatch.setattr(security, "_firebase_app", None)
+    monkeypatch.setattr(
+        firebase_admin,
+        "initialize_app",
+        lambda cred, options, name: calls.update(cred=cred) or "app",
+    )
+    settings = get_settings()
+    monkeypatch.setattr(settings, "FIREBASE_PROJECT_ID", "brainbox-test")
+    monkeypatch.setattr(settings, "GOOGLE_APPLICATION_CREDENTIALS", "./missing.json")
+    assert security._get_firebase_app() == "app"
+    assert calls == {"cred": None}  # project id only: enough to check login tokens
