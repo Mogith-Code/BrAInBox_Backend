@@ -3,7 +3,7 @@
 import uuid
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -19,6 +19,9 @@ class Unit(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     number: Mapped[int] = mapped_column(Integer, unique=True)  # 1..10, also the display order
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
+    # Relative share of this unit in past papers (used to spread diagnostic questions).
+    # 1.0 for every unit until the real past-paper weights are entered (TBD).
+    exam_weight: Mapped[float] = mapped_column(Float, default=1.0, server_default="1")
 
 
 class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -34,6 +37,8 @@ class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+    # Topics removed from the current syllabus: kept for old data, skipped by the diagnostic.
+    is_outdated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class Concept(UUIDPrimaryKeyMixin, TimestampMixin, Base):
