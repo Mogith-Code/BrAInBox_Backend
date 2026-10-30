@@ -1,12 +1,16 @@
 """Base class and mixins for every database model."""
 
+import re
 import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Enum, MetaData, func, text
+from sqlalchemy import DateTime, Enum, ForeignKey, MetaData, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
+
+# Length of every embedding vector (Gemini text-embedding, 768 dimensions).
+EMBEDDING_DIM = 768
 
 # Predictable constraint names, so Alembic migrations are stable and readable.
 NAMING_CONVENTION = {
@@ -46,15 +50,38 @@ class TimestampMixin:
     )
 
 
+# The spec calls it UUIDPkMixin - both names work.
+UUIDPkMixin = UUIDPrimaryKeyMixin
+
+
+class AIGeneratedMixin:
+    """Columns every AI-generated row has, so outputs can be compared when prompts change."""
+
+    model: Mapped[str | None] = mapped_column(String(64))  # e.g. "gemini-2.5-flash"
+    prompt_version: Mapped[str | None] = mapped_column(String(50))  # e.g. "notes/v3"
+
+    @declared_attr
+    def job_id(cls) -> Mapped[uuid.UUID | None]:  # noqa: N805
+        return mapped_column(ForeignKey("ai_jobs.id", ondelete="SET NULL"), index=True)
+
+
+def _snake(name: str) -> str:
+    """UserRole -> user_role"""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
 def str_enum(enum_cls: type[StrEnum]) -> Enum:
     """Store a Python StrEnum as VARCHAR(32) holding its *value* (e.g. "admin").
 
-    No database enum type and no check constraint, so new enum values never need a migration.
+    No Postgres enum type, but a CHECK constraint named `ck_<table>_<enum_name>`
+    (e.g. ck_users_user_role), so the database refuses unknown values.
+    Adding a value later = a migration that recreates that CHECK (see docs/database.md).
     """
     return Enum(
         enum_cls,
+        name=_snake(enum_cls.__name__),
         native_enum=False,
-        create_constraint=False,
+        create_constraint=True,
         length=32,
         values_callable=lambda members: [m.value for m in members],
     )

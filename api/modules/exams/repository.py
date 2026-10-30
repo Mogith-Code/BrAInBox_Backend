@@ -26,7 +26,7 @@ from shared.db.models import (
     Response,
     Topic,
 )
-from shared.enums import ContentStatus, QuestionType
+from shared.enums import AttemptKind, ContentStatus, QuestionType
 
 LETTERS = "ABCDE"
 
@@ -184,6 +184,7 @@ async def save_attempt(
     attempt = Attempt(
         paper_id=paper_id,
         user_id=user_id,
+        kind=AttemptKind.EXAM,
         status="graded",
         started_at=now,
         submitted_at=now,

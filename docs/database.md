@@ -1,152 +1,287 @@
 # Database
 
-PostgreSQL 15 + **pgvector**. Models: `shared/db/models/` (one file per area, all imported in `__init__.py`).
-Migrations: `migrations/versions/` (Alembic, async). Schema owner: **Keshomigha**.
+PostgreSQL 15 + the `pgvector` extension. Models live in `shared/db/models/` (one file per
+area), enums in `shared/enums.py`, migrations in `migrations/versions/`.
+Schema owner: **Keshomigha**. Each module owner owns the logic that uses their tables.
 
-| Migration | What it adds |
-|---|---|
-| `0001_initial_schema` | pgvector extension + the first 43 tables |
-| `0002_onboarding_auth` | `email_codes`, `password_reset_tokens`, `unit_mastery`, `study_activity`, `daily_plan_items`; users: `phone`, `email_verified`, `consent_at`; student_profiles: onboarding setup fields; `units.exam_weight`, `topics.is_outdated`, `attempts.feedback` |
-
-Conventions:
-- Every table has a UUID primary key `id` (`gen_random_uuid()`) plus `created_at` / `updated_at`, except the link table `question_concepts`.
-- Every foreign key has an index. User-owned rows use `ON DELETE CASCADE`; `created_by`-style columns use `SET NULL`.
-- Enums (`shared/enums.py`) are stored as `VARCHAR(32)` with no database check, so new values need no migration.
-- Embeddings are `vector(768)`. `document_chunks` has an **HNSW** index (cosine) and a **GIN** index on the generated `tsv` column.
-- Secrets are never stored in plain text: `email_codes.code_hash` and `password_reset_tokens.token_hash` are HMAC-SHA256.
-- `unit_mastery` is a history (append-only): current = newest row per unit.
-
-## Workflow for a schema change
-
-```bash
-# 1. edit / add a model in shared/db/models/ (and import it in __init__.py)
-alembic revision --autogenerate -m "add xyz"   # 2. generate
-# 3. READ the generated file in migrations/versions/ and fix it if needed
-alembic upgrade head                           # 4. apply
-alembic check                                  # 5. CI also runs this: models == migrations
+```
+alembic upgrade head                              # create / update every table
+python scripts/seed_dev.py --with-samples         # syllabus, groups, settings, 15 sample MCQs
+docker compose exec api python -m scripts.seed_dev --with-samples    # same, inside Docker
 ```
 
-## Tables per area
+Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema`.
+53 app tables (54 with Alembic's own `alembic_version`).
 
-### `user.py` — owner Mogith (logic) / Keshomigha (schema) — used by: auth, profiles
+---
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `users` | One row per Firebase account (students and admins). | firebase_uid, email, display_name, phone, role, is_active, email_verified, consent_at, last_login_at | - |
-| `student_profiles` | Extra details for a student (one profile per user). | school, district, exam_year, avatar_url, bio, stream, subject, target_grade, confidence, study_days, hours_per_day, preferred_time, profile_completed_at, diagnostic_skipped_at | `user_id` → users |
+## 1. Conventions
 
-### `auth.py` — owner Mogith — used by: auth
+| Topic | Rule |
+|---|---|
+| Primary keys | `id UUID` from `UUIDPrimaryKeyMixin` (`gen_random_uuid()`). A few 1:1 / key tables use another key: `user_settings.user_id`, `app_config.key`, `question_concepts (question_id, concept_id)`. |
+| Timestamps | `created_at`, `updated_at` from `TimestampMixin`: `timestamptz`, stored in UTC. Dates without a time (plan dates, activity dates) are `DATE` in the student's local (Sri Lanka) date. |
+| Names | Tables plural `snake_case`; foreign keys `<thing>_id`. Constraint names come from the naming convention in `shared/db/base.py` (`ix_`, `uq_`, `ck_`, `fk_`, `pk_`), so migrations are stable. |
+| Enums | Python `StrEnum` stored as `VARCHAR(32)` **+ a CHECK constraint** (`str_enum()` in `shared/db/base.py`). The CHECK is named `ck_<table>_<enum_name>`, e.g. `ck_users_user_role`. A few older string columns (e.g. `papers.paper_type`, `attempts.status`) have a hand-written CHECK instead. |
+| Embeddings | `vector(768)` + `embedding_model VARCHAR(64)` next to it, with an **HNSW cosine index** (`USING hnsw (embedding vector_cosine_ops)`): `concepts`, `questions`, `answer_points`, `document_chunks`. |
+| AI output | Rows written by the AI have `model`, `prompt_version` and `job_id` (FK `ai_jobs`, SET NULL) - `AIGeneratedMixin` - so outputs can be compared when a prompt changes. |
+| JSON / arrays | `JSONB` with `'{}'` / `'[]'` defaults; arrays `ARRAY(TEXT)` / `ARRAY(UUID)` with `'{}'`. |
+| Indexes | Every foreign-key column has an index (Postgres does not add them by itself). |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `email_codes` | One 6-digit code sent to an email address (verify email or reset password). | email, purpose, code_hash, attempts, expires_at, consumed_at | `user_id` → users |
-| `password_reset_tokens` | Single-use token given after a correct reset code; lets the app set a new password. | token_hash, expires_at, used_at | `user_id` → users |
+### Delete rules
 
-### `syllabus.py` — owner Keshomigha — used by: syllabus
+| When you delete... | ...this happens |
+|---|---|
+| a **user** | Their private data is deleted (CASCADE): profile, settings, codes, reset tokens, device tokens, notifications, attempts + responses, uploads + summaries, library, mastery, mistakes, recommendations, plans, votes, group memberships. |
+| | Shared content they wrote is **kept, with the author set to NULL**: questions, notes, visuals, posts, replies, and review decisions (`reviewed_by`, `verified_by`, `resolved_by`, `approved_by`...). |
+| a **unit / topic / concept** | Cascades only down the syllabus tree (unit -> topics -> concepts). Content that points at a topic/concept uses **RESTRICT** (notes, visuals, questions, misconceptions, question_concepts), so the delete fails. **Set `is_outdated = true` instead of deleting.** |
+| a parent row | Child rows go with it: options, answer points, keywords, chunks, paper questions, replies, votes. |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `units` | One of the 10 A/L Biology units. | number, title, description, exam_weight | - |
-| `topics` | A topic inside a unit, e.g. "2.3 Cell membrane". | number, title, description, order_index, is_outdated | `unit_id` → units |
-| `concepts` | A single idea students must master, e.g. "active transport". | name, description, embedding | `topic_id` → topics |
+---
 
-### `content.py` — owner Samni — used by: content
+## 2. Tables per module
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `notes` | Topic notes (full or short), AI-generated or written by an admin. | title, note_type, body_md, status, prompt_version, citations | `created_by` → users<br>`topic_id` → topics |
-| `uploads` | A file a student uploaded (PDF, image...) to be summarised. | file_name, file_path, mime_type, size_bytes, processing_status | `topic_id` → topics<br>`user_id` → users |
-| `summaries` | AI summary of an upload (or of a topic). | body_md, prompt_version | `topic_id` → topics<br>`upload_id` → uploads<br>`user_id` → users |
-| `library_items` | Something a student saved to their library (note, summary, visual...). | item_type, item_id, title | `user_id` → users |
+### `user.py` - Mogith (auth, profiles)
+| Table | Purpose |
+|---|---|
+| `users` | One row per Firebase account. `display_name` = the API's `full_name`. Unique `lower(email)`, E.164 `phone` CHECK, `role` index. |
+| `student_profiles` | Onboarding answers: stream, subject, target grade (`A`/`B`/`C`/`S`), confidence (0-100), study days, hours per day, preferred time, `profile_completed_at`, `diagnostic_completed_at`, `diagnostic_skipped_at`. |
+| `user_settings` | Theme, notifications on/off, daily reminder time, email updates. Key = `user_id`. |
+| `device_tokens` | FCM push tokens (one per phone / browser). |
+| `notifications` | In-app notifications; partial index on unread ones. |
 
-### `visual.py` — owner Mogith — used by: visuals
+### `auth.py` - Mogith (auth)
+| Table | Purpose |
+|---|---|
+| `email_codes` | 6-digit codes (HMAC hash only) for verify-email and reset-password. |
+| `password_reset_tokens` | Single-use token after a correct reset code (hash only). |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `visuals` |  | kind, title, mermaid_code, image_path, prompt, prompt_version, status | `concept_id` → concepts<br>`created_by` → users<br>`topic_id` → topics |
-| `visual_reports` | A student reports a wrong or unclear visual. | reason, details, status | `user_id` → users<br>`visual_id` → visuals |
+### `syllabus.py` - Keshomigha
+| Table | Purpose |
+|---|---|
+| `units` | The 10 units. `number` (1-10) is the code and the display order; `exam_weight` = past-paper weight. |
+| `topics` | Topics in a unit, `number` like `"6.2"`. |
+| `concepts` | Ideas inside a topic, `code` like `"6.2.1"`, with an embedding. |
 
-### `question.py` — owner Udith — used by: questions
+### `content.py` - Samni
+| Table | Purpose |
+|---|---|
+| `notes` | Full / short topic notes. One approved topic note per (topic, kind) (partial unique index). |
+| `uploads` | Files students upload (max 20 MB, CHECK). |
+| `summaries` | AI summaries of uploads (key points, key terms). |
+| `library_items` | A student's saved items - **polymorphic, see section 4**. |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `questions` |  | question_type, difficulty, stem, explanation, marks, source, year, status, prompt_version | `created_by` → users<br>`topic_id` → topics |
-| `misconceptions` | A common wrong idea. Wrong MCQ options point to one, so mistakes can be explained. | title, description | `concept_id` → concepts |
-| `mcq_options` |  | label, text, is_correct | `misconception_id` → misconceptions<br>`question_id` → questions |
-| `question_concepts` | Many-to-many link: which concepts a question tests. |  | `concept_id` → concepts<br>`question_id` → questions |
+### `visual.py` - Mogith
+| Table | Purpose |
+|---|---|
+| `visuals` | Mermaid diagrams and AI illustrations, with verification and safety flags. |
+| `visual_reports` | Students report wrong / unclear visuals. |
 
-### `quality.py` — owner Udith — used by: quality
+### `question.py` - Udith
+| Table | Purpose |
+|---|---|
+| `questions` | The question bank (`source` = origin: past_paper / ai / admin / manual). Past papers unique by (year, part, number). |
+| `mcq_options` | Options `A`-`E`; **at most one correct** (partial unique index). |
+| `misconceptions` | Common wrong ideas, linked from wrong options. |
+| `question_concepts` | Which concepts a question tests (with a weight). |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `question_reviews` |  | reviewer_type, verdict, score, comments, prompt_version | `question_id` → questions<br>`reviewer_id` → users |
-| `question_reports` | A student reports a wrong / unclear question. | reason, details, status | `question_id` → questions<br>`user_id` → users |
-| `question_stats` | Running statistics for one question (one row per question). | attempts_count, correct_count, avg_time_seconds, discrimination_index | `question_id` → questions |
+### `quality.py` - Udith
+| Table | Purpose |
+|---|---|
+| `question_reviews` | AI / admin reviews (verdict, checks, score). |
+| `question_reports` | Student reports; partial index on unhandled ones. |
+| `question_stats` | Times answered / correct; `correct_rate` is **computed by Postgres**. |
 
-### `exam.py` — owner Udith — used by: quizzes (diagnostic), exams
+### `exam.py` - Udith (exams), Mogith (diagnostic)
+| Table | Purpose |
+|---|---|
+| `papers` | Quizzes, diagnostics, past / model papers, AI practice papers (`paper_type`). |
+| `paper_questions` | Questions in a paper, in order; a question appears once per paper. |
+| `attempts` | One try of a paper. `kind` (diagnostic / quiz / exam / practice); **only one unfinished diagnostic per student**. |
+| `responses` | One answer per question per attempt (unique). |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `papers` |  | title, paper_type, year, duration_minutes, total_marks, status | `created_by` → users<br>`unit_id` → units |
-| `paper_questions` |  | position, marks | `paper_id` → papers<br>`question_id` → questions |
-| `attempts` | A student taking a paper / quiz once. | status, started_at, submitted_at, score, feedback | `paper_id` → papers<br>`user_id` → users |
-| `responses` | The student's answer to one question inside an attempt. | answer_text, answer_image_path, is_correct, marks_awarded, time_spent_seconds | `attempt_id` → attempts<br>`question_id` → questions<br>`selected_option_id` → mcq_options |
+### `knowledge.py` / `evaluation.py` - Keshomigha
+| Table | Purpose |
+|---|---|
+| `model_answers` | Model answers of structured / essay questions. |
+| `answer_points` | Marking points (with embeddings for semantic marking). |
+| `keywords` | Keywords + synonyms per point (unique per point, case-insensitive). |
+| `evaluations` | AI marking of a written answer: keyword / semantic scores, confidence, plus a teacher's manual marks for the accuracy report. |
 
-### `knowledge.py` — owner Keshomigha — used by: knowledge_base
+### `performance.py` - Keshomigha (home: Mogith)
+| Table | Purpose |
+|---|---|
+| `mistakes` | Each mistake + its type; partial index on unresolved ones. |
+| `concept_mastery` | Mastery 0-1 per student per concept. |
+| `unit_mastery` | **History** of unit mastery (0-100): every diagnostic/quiz adds rows. Current = newest row per unit. |
+| `mastery_snapshots` | Overall mastery (0-100) per student per day, for weekly progress. |
+| `study_activity` | One row per student per study day (streak), with minutes and actions. |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `model_answers` |  | answer_text, total_marks, source, status | `created_by` → users<br>`question_id` → questions |
-| `answer_points` | One marking point of a model answer (e.g. "mentions ATP is used" = 1 mark). | point_text, marks, order_index | `model_answer_id` → model_answers |
-| `keywords` | A keyword (with synonyms) that shows an answer point was made. | keyword, synonyms, weight | `answer_point_id` → answer_points |
+### `recommendation.py` - Udith (daily plan: Mogith)
+| Table | Purpose |
+|---|---|
+| `resources` | YouTube videos, articles, internal notes; unique per (provider, external_id). |
+| `recommendations` | Next steps for a student (action type, priority 1-5, status). |
+| `study_plans` | Multi-day plans; **only one active plan per student**. |
+| `plan_items` | Tasks of a plan. |
+| `daily_plan_items` | "Today's plan" on the home screen. |
 
-### `evaluation.py` — owner Keshomigha — used by: evaluation
+### `community.py` - Keshomigha (backend), Samni (mobile)
+| Table | Purpose |
+|---|---|
+| `community_groups` | "General" (default) + one group per unit (`slug`). |
+| `group_members` | Membership + role. |
+| `posts` | Questions / discussions; kept with `author_id = NULL` if the author leaves. `accepted_reply_id` is a circular FK to `replies`. |
+| `replies` | Answers (students or AI, with RAG `sources`). |
+| `votes` | +1 / -1 on exactly one post **or** reply (CHECKs). |
+| `content_reports` | Reports on posts / replies - polymorphic `target_type` + `target_id`. |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `evaluations` |  | answer_text, answer_image_path, ocr_text, estimated_marks, max_marks, matched_points, feedback, status, prompt_version | `question_id` → questions<br>`response_id` → responses<br>`user_id` → users |
+### `rag.py` - Keshomigha (schema), Samni (RAG)
+| Table | Purpose |
+|---|---|
+| `source_documents` | Admin-approved documents ingested for RAG. |
+| `document_chunks` | Searchable chunks: `embedding` (HNSW) for meaning search + `tsv` (generated `tsvector`, GIN) for keyword search. |
 
-### `performance.py` — owner Keshomigha — used by: performance, home
+### `system.py` - shared
+| Table | Purpose |
+|---|---|
+| `ai_jobs` | Long-running AI jobs (the app polls them). |
+| `ai_usage_log` | Every AI call: tokens, images, cost, latency, user. |
+| `audit_log` | Admin actions with before / after. |
+| `app_config` | App-wide settings as JSON: `AL_EXAM_DATES`, `DAILY_LIMITS`... |
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `mistakes` |  | mistake_type, note | `concept_id` → concepts<br>`misconception_id` → misconceptions<br>`question_id` → questions<br>`response_id` → responses<br>`user_id` → users |
-| `concept_mastery` | How well one student knows one concept (0.0 - 1.0). | mastery_score, attempts_count, last_practiced_at | `concept_id` → concepts<br>`user_id` → users |
-| `unit_mastery` | Mastery (0-100) of one unit for one student, as a HISTORY of snapshots. | mastery, source | `unit_id` → units<br>`user_id` → users |
-| `study_activity` | One row per student per day they studied (answered a question, finished a plan item...). | activity_date | `user_id` → users |
+---
 
-### `recommendation.py` — owner Udith — used by: recommendations, home
+## 3. Main relations
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `resources` | An external or internal resource (YouTube video, article, note). | title, url, resource_type, provider, external_id, duration_seconds, status | `concept_id` → concepts<br>`topic_id` → topics |
-| `recommendations` |  | reason, score, is_dismissed | `concept_id` → concepts<br>`resource_id` → resources<br>`user_id` → users |
-| `study_plans` |  | title, start_date, end_date, is_active | `user_id` → users |
-| `plan_items` |  | title, due_date, is_done, order_index | `resource_id` → resources<br>`study_plan_id` → study_plans<br>`topic_id` → topics |
-| `daily_plan_items` | One task in a student's plan for one day ("Today's plan" on the home screen). | plan_date, position, kind, title, minutes, done, done_at | `topic_id` → topics<br>`unit_id` → units<br>`user_id` → users |
+```mermaid
+erDiagram
+    users ||--o| student_profiles : has
+    users ||--o| user_settings : has
+    users ||--o{ device_tokens : has
+    users ||--o{ notifications : gets
+    users ||--o{ email_codes : gets
 
-### `community.py` — owner Mogith — used by: community
+    units ||--o{ topics : contains
+    topics ||--o{ concepts : contains
+    topics ||--o{ notes : "explained by"
+    concepts ||--o{ visuals : "drawn by"
+    concepts ||--o{ misconceptions : has
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `community_groups` |  | name, description, is_private | `created_by` → users<br>`unit_id` → units |
-| `group_members` |  | role | `group_id` → community_groups<br>`user_id` → users |
-| `posts` |  | title, body, tags, moderation_status | `author_id` → users<br>`group_id` → community_groups<br>`topic_id` → topics |
-| `replies` |  | body, is_ai_suggested, is_accepted, moderation_status | `author_id` → users<br>`post_id` → posts |
-| `votes` | +1 / -1 on a post OR a reply (exactly one of post_id / reply_id is set). | value | `post_id` → posts<br>`reply_id` → replies<br>`user_id` → users |
-| `content_reports` | A user reports a post or reply for moderation. | target_type, target_id, reason, details, status | `reporter_id` → users<br>`reviewed_by` → users |
+    units ||--o{ questions : tags
+    topics ||--o{ questions : tags
+    questions ||--o{ mcq_options : has
+    questions }o--o{ concepts : "question_concepts"
+    mcq_options }o--o| misconceptions : "wrong because"
+    questions ||--o| question_stats : has
+    questions ||--o{ model_answers : "marked by"
+    model_answers ||--o{ answer_points : has
+    answer_points ||--o{ keywords : has
 
-### `rag.py` — owner Keshomigha (schema) / Samni (RAG) — used by: admin/rag_admin, ai_service/rag
+    papers ||--o{ paper_questions : contains
+    questions ||--o{ paper_questions : "used in"
+    users ||--o{ attempts : takes
+    papers ||--o{ attempts : "taken as"
+    attempts ||--o{ responses : has
+    responses ||--o{ evaluations : "marked by"
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `source_documents` |  | title, source_type, file_path, sha256, status, year, chunk_count, error_message | `unit_id` → units<br>`uploaded_by` → users |
-| `document_chunks` |  | chunk_index, text, heading_path, page, tsv, embedding | `concept_id` → concepts<br>`document_id` → source_documents<br>`topic_id` → topics<br>`unit_id` → units |
+    users ||--o{ unit_mastery : has
+    users ||--o{ concept_mastery : has
+    users ||--o{ mistakes : makes
+    users ||--o{ study_activity : logs
+    users ||--o{ recommendations : gets
+    users ||--o{ study_plans : follows
+    study_plans ||--o{ plan_items : has
 
-### `system.py` — owner shared — used by: jobs, admin, ai_service
+    community_groups ||--o{ posts : contains
+    posts ||--o{ replies : has
+    users ||--o{ votes : casts
 
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `ai_jobs` | A long-running AI task. The app polls GET /api/v1/jobs/{id} for its status. | job_type, status, input, result, error, attempts, started_at, finished_at | `requested_by` → users |
-| `ai_usage_log` | One row per call to an AI provider (tokens, latency, cost). | provider, model, operation, prompt_name, input_tokens, output_tokens, latency_ms, cost_usd, success | `job_id` → ai_jobs |
-| `audit_log` | Who did what in the admin portal. | action, target_type, target_id, details, ip_address | `actor_id` → users |
+    source_documents ||--o{ document_chunks : "split into"
+    ai_jobs ||--o{ ai_usage_log : costs
+```
+
+---
+
+## 4. Polymorphic references (no foreign key)
+
+| Column | Points to | Why no FK |
+|---|---|---|
+| `library_items.item_id` | notes / summaries / visuals / questions / resources / posts, chosen by `item_type` | One FK column cannot point at six tables. |
+| `content_reports.target_id` | posts or replies, chosen by `target_type` | Same reason. |
+
+Rules for code using them: check that the item exists before saving, and expect items that
+were deleted later (show "this item is no longer available" instead of crashing).
+`item_type` / `target_type` have CHECK constraints, so only known kinds can be stored.
+
+---
+
+## 5. Changing the schema safely
+
+1. **Never edit a migration that is merged into `develop`** - teammates have already applied it.
+2. Change the model in `shared/db/models/` (new model? also import it in `__init__.py`).
+3. `alembic revision --autogenerate -m "short description"` - a **draft** only.
+4. Read and fix the file. Autogenerate does **not** add: CHECK constraints (including enum
+   CHECKs), data fixes for existing rows, and it sometimes misses expression indexes.
+5. New columns on existing tables must be `nullable` or have a `server_default`.
+   Rename with `op.alter_column(..., new_column_name=...)`, never drop + add.
+6. Write a working `downgrade()`.
+7. `alembic upgrade head`, `alembic downgrade -1`, `alembic upgrade head`, then
+   `pytest tests/db` (it checks that models and migrations still match).
+8. Update this file.
+
+### Adding an enum value
+The CHECK constraint lists the allowed values, so a new value needs a migration:
+```python
+op.drop_constraint("ck_attempts_attempt_kind", "attempts", type_="check")
+op.create_check_constraint(
+    "ck_attempts_attempt_kind", "attempts", "kind IN ('diagnostic', 'quiz', 'exam', 'practice', 'new')"
+)
+```
+Do this for every table that uses the enum (`grep str_enum(TheEnum)`). Never remove or rename a
+value that may already be stored. `JobType` values also need an ai_service pipeline (a test checks).
+
+---
+
+## 6. Firebase Storage layout
+
+Only paths are stored in the database; files live in Firebase Storage.
+
+| Path | Column | Status |
+|---|---|---|
+| `uploads/{user_id}/{upload_id}.pdf` | `uploads.file_path` | used now (content module) |
+| `uploads/{user_id}/notes/{upload_id}.{ext}` | `uploads.file_path` | planned layout for new upload types |
+| `answers/{user_id}/{response_id}/page-{n}.jpg` | `responses.image_paths` | planned (evaluation) |
+| `visuals/{concept_id}/{visual_id}.png` | `visuals.image_path` | planned (visuals) |
+| `posts/{post_id}/{n}.jpg` | `posts.image_paths` | planned (community) |
+| project-relative path, e.g. `data/rag_sources/unit_06.pdf` | `source_documents.file_path` | used now (RAG ingestion) |
+
+In dev without a bucket, the same paths are used under `LOCAL_STORAGE_DIR`.
+
+---
+
+## 7. Names that differ from the original spec
+
+The code was already using these names, so they were kept (the spec name is in a comment):
+
+| Spec | Kept |
+|---|---|
+| `users.full_name` | `users.display_name` |
+| `units.code` / `order_index`, `past_paper_weight` | `units.number`, `exam_weight` |
+| `topics.code` | `topics.number` |
+| `concepts.title` | `concepts.name` |
+| `notes.kind`, `notes.sources` | `notes.note_type`, `notes.citations` |
+| `questions.type`, `stem_md`, `explanation_md`, `origin` | `question_type`, `stem`, `explanation`, `source` |
+| `mcq_options.label` 1-5 (SMALLINT), `text_md` | `label` `"A"`-`"E"`, `text` |
+| `papers.kind`, `time_limit_minutes` | `paper_type`, `duration_minutes` |
+| `paper_questions.order_index` | `position` |
+| `model_answers.answer_md` | `answer_text` |
+| `evaluations.points_covered`, `feedback_md` | `matched_points`, `feedback` |
+| `question_stats.times_answered` / `times_correct` | `attempts_count` / `correct_count` |
+| `unit_mastery` 0-1, one row per unit | 0-100, a **history** (newest row = current) |
+| `plan_items.scheduled_date`, `plan_id` | `due_date`, `study_plan_id` |
+| `daily_plan_items.order_index`, `estimated_minutes` | `position`, `minutes` |
+| `posts.body_md`, `replies.body_md`, `is_ai_answer` | `body`, `is_ai_suggested` |
+| `ai_jobs.type`, `result_ref` | `job_type`, `result` |
+| `ai_usage_log.feature` | `operation` |
+| `audit_log.entity_type` / `entity_id` | `target_type` / `target_id` |
