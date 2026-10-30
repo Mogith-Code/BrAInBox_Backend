@@ -8,7 +8,7 @@ Codes and tokens are NEVER stored in plain text - only an HMAC-SHA256 hash.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -18,7 +18,13 @@ class EmailCode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One 6-digit code sent to an email address (verify email or reset password)."""
 
     __tablename__ = "email_codes"
-    __table_args__ = (Index("ix_email_codes_email_purpose", "email", "purpose"),)
+    __table_args__ = (
+        Index("ix_email_codes_email_purpose", "email", "purpose"),
+        # "newest code for this email" lookups (the email is always stored lower-case)
+        Index("ix_email_codes_email_purpose_created", "email", "purpose", "created_at"),
+        CheckConstraint("purpose IN ('verify_email', 'reset_password')", name="purpose"),
+        CheckConstraint("attempts >= 0", name="attempts_not_negative"),
+    )
 
     # NULL for password-reset requests for unknown emails (we still store a row so the
     # response and the resend cooldown look the same - attackers can't tell who is registered).

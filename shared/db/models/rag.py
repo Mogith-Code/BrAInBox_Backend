@@ -8,18 +8,29 @@ Schema owner: Keshomigha. Used by `ai_service/rag/` (owner: Samni).
 """
 
 import uuid
+from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Computed, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Computed,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
-from shared.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
-from shared.db.models.syllabus import EMBEDDING_DIM
+from shared.db.base import EMBEDDING_DIM, Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
 from shared.enums import DocumentStatus, SourceType
 
 
 class SourceDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """An admin-approved PDF / text (syllabus, teacher's guide...) ingested for RAG."""
+
     __tablename__ = "source_documents"
 
     title: Mapped[str] = mapped_column(String(300))
@@ -33,7 +44,9 @@ class SourceDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("units.id", ondelete="SET NULL"), index=True
     )
     year: Mapped[int | None] = mapped_column(Integer)
+    page_count: Mapped[int | None] = mapped_column(Integer)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str | None] = mapped_column(Text)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
@@ -41,6 +54,8 @@ class SourceDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class DocumentChunk(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One searchable piece (a few paragraphs) of a source document."""
+
     __tablename__ = "document_chunks"
     __table_args__ = (
         UniqueConstraint("document_id", "chunk_index", name="uq_document_chunks_doc_index"),
@@ -63,6 +78,7 @@ class DocumentChunk(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     text: Mapped[str] = mapped_column(Text)
     heading_path: Mapped[str | None] = mapped_column(Text)  # e.g. "Unit 2 > Cell membrane"
     page: Mapped[int | None] = mapped_column(Integer)
+    token_count: Mapped[int | None] = mapped_column(Integer)
     unit_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("units.id", ondelete="SET NULL"), index=True
     )
@@ -80,3 +96,4 @@ class DocumentChunk(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str | None] = mapped_column(String(64))  # e.g. "gemini-embedding-001"

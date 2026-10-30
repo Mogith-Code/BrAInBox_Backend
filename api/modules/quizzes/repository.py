@@ -22,7 +22,7 @@ from shared.db.models import (
     Response,
     Topic,
 )
-from shared.enums import ContentStatus, QuestionType
+from shared.enums import AttemptKind, ContentStatus, QuestionType
 
 DIAGNOSTIC = "diagnostic"  # papers.paper_type of diagnostic tests
 
@@ -138,7 +138,13 @@ async def create_diagnostic(
         PaperQuestion(paper_id=paper.id, question_id=qid, position=i, marks=1)
         for i, qid in enumerate(question_ids, start=1)
     )
-    attempt = Attempt(paper_id=paper.id, user_id=user_id, status="in_progress")
+    attempt = Attempt(
+        paper_id=paper.id,
+        user_id=user_id,
+        kind=AttemptKind.DIAGNOSTIC,  # the database allows one unfinished diagnostic per student
+        status="in_progress",
+        question_ids=list(question_ids),
+    )
     session.add(attempt)
     await session.flush()
     return attempt
