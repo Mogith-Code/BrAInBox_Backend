@@ -8,6 +8,18 @@
 | **Jira epic** | BRN-E12 Performance Insights *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/performance` (tasks: `feature/performance/BRN-xx-short-name`) |
 
+## Implemented so far (used by quizzes and home)
+
+| Service function | What it does |
+|---|---|
+| `record_unit_mastery(user_id, {unit_id: mastery}, source)` | adds a snapshot per unit to `unit_mastery` (history, never updated) |
+| `current_unit_mastery(user_id)` | newest mastery per unit |
+| `unit_mastery_week_ago(user_id)` | newest mastery per unit older than 7 days (weekly change) |
+| `record_study_activity(user_id)` | marks today (Sri Lanka date) in `study_activity` |
+| `get_streak(user_id)` | consecutive study days ending today or yesterday |
+
+New tables in migration `0002`: `unit_mastery`, `study_activity`.
+
 ## Endpoints
 
 | Method | Path | Status | Description |

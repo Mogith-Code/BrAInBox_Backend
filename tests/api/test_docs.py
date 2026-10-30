@@ -4,6 +4,7 @@ EXPECTED_TAGS = {
     "Health",
     "Auth",
     "Profiles",
+    "Home",
     "Syllabus",
     "Content",
     "Visuals",

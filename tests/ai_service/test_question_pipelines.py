@@ -159,3 +159,14 @@ async def test_diagnostic_summary_with_fake_llm(ai_client):
     result = response.json()["result"]
     assert result["summary"].startswith("Fake AI summary")
     assert result["prompt_version"] == "diagnostic/summary.v1"
+
+
+async def test_next_action_reason_with_fake_llm(ai_client):
+    response = await ai_client.post(
+        "/sync/next-action",
+        json={"unit_code": "6", "unit_title": "Genetics", "topic_title": None, "mastery": 32},
+    )
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["reason"].startswith("Fake AI reason")
+    assert result["prompt_version"] == "home/next_action.v1"

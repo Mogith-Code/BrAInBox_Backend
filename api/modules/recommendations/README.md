@@ -8,6 +8,12 @@
 | **Jira epic** | BRN-E13 Recommendations & Study Plan *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/recommendations` (tasks: `feature/recommendations/BRN-xx-short-name`) |
 
+## Implemented so far: today's plan (used by home)
+
+`get_today_plan(...)` creates 3 tasks for today (recap / practice / read) from the weakest units on the first
+request of the day and stores them in `daily_plan_items` (done/undone is remembered); `set_plan_item_done(...)`
+ticks one. Empty on non-study days. New table in migration `0002`: `daily_plan_items`.
+
 ## Planned endpoints
 
 | Method | Path | Description |

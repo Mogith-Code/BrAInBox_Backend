@@ -25,6 +25,7 @@ from api.modules.community.router import router as community_router
 from api.modules.content.router import router as content_router
 from api.modules.evaluation.router import router as evaluation_router
 from api.modules.exams.router import router as exams_router
+from api.modules.home.router import router as home_router
 from api.modules.jobs.router import router as jobs_router
 from api.modules.knowledge_base.router import router as knowledge_base_router
 from api.modules.performance.router import router as performance_router
@@ -44,6 +45,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 MODULE_ROUTERS = [
     auth_router,
     profiles_router,
+    home_router,
     syllabus_router,
     content_router,
     visuals_router,

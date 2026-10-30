@@ -3,11 +3,18 @@
 PostgreSQL 15 + **pgvector**. Models: `shared/db/models/` (one file per area, all imported in `__init__.py`).
 Migrations: `migrations/versions/` (Alembic, async). Schema owner: **Keshomigha**.
 
+| Migration | What it adds |
+|---|---|
+| `0001_initial_schema` | pgvector extension + the first 43 tables |
+| `0002_onboarding_auth` | `email_codes`, `password_reset_tokens`, `unit_mastery`, `study_activity`, `daily_plan_items`; users: `phone`, `email_verified`, `consent_at`; student_profiles: onboarding setup fields; `units.exam_weight`, `topics.is_outdated`, `attempts.feedback` |
+
 Conventions:
 - Every table has a UUID primary key `id` (`gen_random_uuid()`) plus `created_at` / `updated_at`, except the link table `question_concepts`.
 - Every foreign key has an index. User-owned rows use `ON DELETE CASCADE`; `created_by`-style columns use `SET NULL`.
 - Enums (`shared/enums.py`) are stored as `VARCHAR(32)` with no database check, so new values need no migration.
 - Embeddings are `vector(768)`. `document_chunks` has an **HNSW** index (cosine) and a **GIN** index on the generated `tsv` column.
+- Secrets are never stored in plain text: `email_codes.code_hash` and `password_reset_tokens.token_hash` are HMAC-SHA256.
+- `unit_mastery` is a history (append-only): current = newest row per unit.
 
 ## Workflow for a schema change
 
@@ -25,15 +32,22 @@ alembic check                                  # 5. CI also runs this: models ==
 
 | Table | Purpose | Main columns | References |
 |---|---|---|---|
-| `users` | One row per Firebase account (students and admins). | firebase_uid, email, display_name, role, is_active, last_login_at | - |
-| `student_profiles` | Extra details for a student (one profile per user). | school, district, exam_year, avatar_url, bio | `user_id` → users |
+| `users` | One row per Firebase account (students and admins). | firebase_uid, email, display_name, phone, role, is_active, email_verified, consent_at, last_login_at | - |
+| `student_profiles` | Extra details for a student (one profile per user). | school, district, exam_year, avatar_url, bio, stream, subject, target_grade, confidence, study_days, hours_per_day, preferred_time, profile_completed_at, diagnostic_skipped_at | `user_id` → users |
+
+### `auth.py` — owner Mogith — used by: auth
+
+| Table | Purpose | Main columns | References |
+|---|---|---|---|
+| `email_codes` | One 6-digit code sent to an email address (verify email or reset password). | email, purpose, code_hash, attempts, expires_at, consumed_at | `user_id` → users |
+| `password_reset_tokens` | Single-use token given after a correct reset code; lets the app set a new password. | token_hash, expires_at, used_at | `user_id` → users |
 
 ### `syllabus.py` — owner Keshomigha — used by: syllabus
 
 | Table | Purpose | Main columns | References |
 |---|---|---|---|
-| `units` | One of the 10 A/L Biology units. | number, title, description | - |
-| `topics` | A topic inside a unit, e.g. "2.3 Cell membrane". | number, title, description, order_index | `unit_id` → units |
+| `units` | One of the 10 A/L Biology units. | number, title, description, exam_weight | - |
+| `topics` | A topic inside a unit, e.g. "2.3 Cell membrane". | number, title, description, order_index, is_outdated | `unit_id` → units |
 | `concepts` | A single idea students must master, e.g. "active transport". | name, description, embedding | `topic_id` → topics |
 
 ### `content.py` — owner Samni — used by: content
@@ -69,13 +83,13 @@ alembic check                                  # 5. CI also runs this: models ==
 | `question_reports` | A student reports a wrong / unclear question. | reason, details, status | `question_id` → questions<br>`user_id` → users |
 | `question_stats` | Running statistics for one question (one row per question). | attempts_count, correct_count, avg_time_seconds, discrimination_index | `question_id` → questions |
 
-### `exam.py` — owner Udith — used by: quizzes, exams
+### `exam.py` — owner Udith — used by: quizzes (diagnostic), exams
 
 | Table | Purpose | Main columns | References |
 |---|---|---|---|
 | `papers` |  | title, paper_type, year, duration_minutes, total_marks, status | `created_by` → users<br>`unit_id` → units |
 | `paper_questions` |  | position, marks | `paper_id` → papers<br>`question_id` → questions |
-| `attempts` | A student taking a paper / quiz once. | status, started_at, submitted_at, score | `paper_id` → papers<br>`user_id` → users |
+| `attempts` | A student taking a paper / quiz once. | status, started_at, submitted_at, score, feedback | `paper_id` → papers<br>`user_id` → users |
 | `responses` | The student's answer to one question inside an attempt. | answer_text, answer_image_path, is_correct, marks_awarded, time_spent_seconds | `attempt_id` → attempts<br>`question_id` → questions<br>`selected_option_id` → mcq_options |
 
 ### `knowledge.py` — owner Keshomigha — used by: knowledge_base
@@ -92,14 +106,16 @@ alembic check                                  # 5. CI also runs this: models ==
 |---|---|---|---|
 | `evaluations` |  | answer_text, answer_image_path, ocr_text, estimated_marks, max_marks, matched_points, feedback, status, prompt_version | `question_id` → questions<br>`response_id` → responses<br>`user_id` → users |
 
-### `performance.py` — owner Keshomigha — used by: performance
+### `performance.py` — owner Keshomigha — used by: performance, home
 
 | Table | Purpose | Main columns | References |
 |---|---|---|---|
 | `mistakes` |  | mistake_type, note | `concept_id` → concepts<br>`misconception_id` → misconceptions<br>`question_id` → questions<br>`response_id` → responses<br>`user_id` → users |
 | `concept_mastery` | How well one student knows one concept (0.0 - 1.0). | mastery_score, attempts_count, last_practiced_at | `concept_id` → concepts<br>`user_id` → users |
+| `unit_mastery` | Mastery (0-100) of one unit for one student, as a HISTORY of snapshots. | mastery, source | `unit_id` → units<br>`user_id` → users |
+| `study_activity` | One row per student per day they studied (answered a question, finished a plan item...). | activity_date | `user_id` → users |
 
-### `recommendation.py` — owner Udith — used by: recommendations
+### `recommendation.py` — owner Udith — used by: recommendations, home
 
 | Table | Purpose | Main columns | References |
 |---|---|---|---|
@@ -107,6 +123,7 @@ alembic check                                  # 5. CI also runs this: models ==
 | `recommendations` |  | reason, score, is_dismissed | `concept_id` → concepts<br>`resource_id` → resources<br>`user_id` → users |
 | `study_plans` |  | title, start_date, end_date, is_active | `user_id` → users |
 | `plan_items` |  | title, due_date, is_done, order_index | `resource_id` → resources<br>`study_plan_id` → study_plans<br>`topic_id` → topics |
+| `daily_plan_items` | One task in a student's plan for one day ("Today's plan" on the home screen). | plan_date, position, kind, title, minutes, done, done_at | `topic_id` → topics<br>`unit_id` → units<br>`user_id` → users |
 
 ### `community.py` — owner Mogith — used by: community
 
