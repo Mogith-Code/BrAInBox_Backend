@@ -141,3 +141,21 @@ async def test_explain_endpoint_never_fails(ai_client, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["result"] == {"explanations": {}}
+
+
+async def test_diagnostic_summary_with_fake_llm(ai_client):
+    unit = {"unit_code": "1", "unit_title": "Introduction"}
+    response = await ai_client.post(
+        "/sync/diagnostic-summary",
+        json={
+            "score": 9,
+            "total": 15,
+            "strongest": unit,
+            "needs_work": {"unit_code": "6", "unit_title": "Genetics"},
+            "units": [{**unit, "mastery": 82, "status": "strong"}],
+        },
+    )
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["summary"].startswith("Fake AI summary")
+    assert result["prompt_version"] == "diagnostic/summary.v1"

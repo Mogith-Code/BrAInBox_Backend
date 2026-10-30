@@ -40,6 +40,26 @@ class KeywordScoreRequest(BaseModel):
     question_id: str
 
 
+class UnitScore(BaseModel):
+    unit_code: str
+    unit_title: str
+    mastery: int = Field(ge=0, le=100)
+    status: str
+
+
+class UnitRefIn(BaseModel):
+    unit_code: str
+    unit_title: str
+
+
+class DiagnosticSummaryRequest(BaseModel):
+    score: int
+    total: int
+    strongest: UnitRefIn
+    needs_work: UnitRefIn
+    units: list[UnitScore] = Field(max_length=20)
+
+
 class SyncResponse(BaseModel):
     name: str
     status: str

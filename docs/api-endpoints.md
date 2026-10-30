@@ -76,11 +76,15 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
+| POST | `/api/v1/diagnostic/start` | ✅ 15 MCQs over 10 units (resumes the unfinished test) |
+| POST | `/api/v1/diagnostic/{attempt_id}/answer` | ✅ Save one answer `{question_id, option_id}` |
+| POST | `/api/v1/diagnostic/{attempt_id}/submit` | ✅ Mastery per unit, strongest / needs work, AI summary |
+| POST | `/api/v1/diagnostic/skip` | ✅ Skip for now |
+| GET | `/api/v1/diagnostic/result` | ✅ Latest diagnostic result |
 | POST | `/api/v1/quizzes` | Start a quiz for a topic/unit |
 | GET | `/api/v1/quizzes/{id}` | Quiz with questions |
 | POST | `/api/v1/quizzes/{id}/responses` | Submit answers |
 | GET | `/api/v1/quizzes/{id}/results` | Score + explanations |
-| POST | `/api/v1/quizzes/diagnostic` | Start the diagnostic test |
 
 ## exams — Udith
 
@@ -179,4 +183,5 @@ Every request needs `X-Service-Token`. Only `api/core/ai_client.py` calls these.
 | POST | `/jobs/run` | Run one AI job: `{job_id, job_type, payload}` → `{result}` |
 | POST | `/sync/explain-mcq` | ✅ Explain wrong MCQ answers: `{items: [...]}` → `{explanations: {question_id: text}}` |
 | POST | `/sync/tag-post` | Suggest tags for a community post (fast) |
+| POST | `/sync/diagnostic-summary` | ✅ 2-sentence diagnostic summary (prompt `diagnostic/summary.v1`) |
 | POST | `/sync/keyword-score` | Quick keyword score for an answer (fast) |

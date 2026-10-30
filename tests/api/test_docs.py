@@ -9,6 +9,7 @@ EXPECTED_TAGS = {
     "Visuals",
     "Questions",
     "Quizzes",
+    "Diagnostic",
     "Exams",
     "Quality",
     "Evaluation",

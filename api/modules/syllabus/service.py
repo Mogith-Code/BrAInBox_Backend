@@ -46,4 +46,43 @@ async def get_topics(session: AsyncSession, topic_ids: list[uuid.UUID]) -> list[
     return [found[i] for i in topic_ids]
 
 
+@dataclass
+class UnitInfo:
+    id: uuid.UUID
+    number: int
+    title: str
+    exam_weight: float  # past-paper weight (1.0 until real weights are entered)
+
+    @property
+    def code(self) -> str:
+        """What the app shows, e.g. "6" for Unit 6."""
+        return str(self.number)
+
+
+@dataclass
+class TopicBrief:
+    id: uuid.UUID
+    unit_id: uuid.UUID
+    number: str
+    title: str
+
+
+async def list_units(session: AsyncSession) -> list[UnitInfo]:
+    """All units, Unit 1 first."""
+    return [
+        UnitInfo(u.id, u.number, u.title, float(u.exam_weight or 1.0))
+        for u in await repository.list_units(session)
+    ]
+
+
+async def list_topics_by_unit(
+    session: AsyncSession, unit_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[TopicBrief]]:
+    """Current (not outdated) topics of each unit, in syllabus order."""
+    by_unit: dict[uuid.UUID, list[TopicBrief]] = {u: [] for u in unit_ids}
+    for t in await repository.list_current_topics(session, unit_ids):
+        by_unit[t.unit_id].append(TopicBrief(t.id, t.unit_id, t.number, t.title))
+    return by_unit
+
+
 # TODO(Keshomigha): list_units / list_topics(unit_id) / get_topic(topic_id)

@@ -4,7 +4,13 @@
     "topic": "Cell Structure",
     "unit": "Cell Biology",
     "question": "Which organelle is the main site of ATP production in a eukaryotic cell?",
-    "options": ["Ribosome", "Mitochondrion", "Golgi apparatus", "Lysosome", "Peroxisome"],
+    "options": [
+      "Ribosome",
+      "Mitochondrion",
+      "Golgi apparatus",
+      "Lysosome",
+      "Peroxisome"
+    ],
     "correct_answer": "Mitochondrion",
     "marks": 1,
     "year": null
@@ -14,7 +20,13 @@
     "topic": "Cell Structure",
     "unit": "Cell Biology",
     "question": "Protein synthesis takes place on which structure?",
-    "options": ["Ribosome", "Nucleolus", "Vacuole", "Centriole", "Cell wall"],
+    "options": [
+      "Ribosome",
+      "Nucleolus",
+      "Vacuole",
+      "Centriole",
+      "Cell wall"
+    ],
     "correct_answer": "Ribosome",
     "marks": 1,
     "year": null
@@ -24,7 +36,13 @@
     "topic": "Cell Structure",
     "unit": "Cell Biology",
     "question": "Which of the following is present in prokaryotic cells but absent in animal cells?",
-    "options": ["Cell membrane", "Ribosomes", "Cell wall", "Cytoplasm", "DNA"],
+    "options": [
+      "Cell membrane",
+      "Ribosomes",
+      "Cell wall",
+      "Cytoplasm",
+      "DNA"
+    ],
     "correct_answer": "Cell wall",
     "marks": 1,
     "year": null
@@ -34,7 +52,13 @@
     "topic": "Cell Structure",
     "unit": "Cell Biology",
     "question": "Which organelle is responsible for modifying, packaging and secreting proteins?",
-    "options": ["Golgi apparatus", "Chloroplast", "Centriole", "Nucleus", "Lysosome"],
+    "options": [
+      "Golgi apparatus",
+      "Chloroplast",
+      "Centriole",
+      "Nucleus",
+      "Lysosome"
+    ],
     "correct_answer": "Golgi apparatus",
     "marks": 1,
     "year": null
@@ -44,7 +68,13 @@
     "topic": "Photosynthesis",
     "unit": "Bioenergetics",
     "question": "In which organelle does photosynthesis occur?",
-    "options": ["Mitochondrion", "Chloroplast", "Nucleus", "Peroxisome", "Vacuole"],
+    "options": [
+      "Mitochondrion",
+      "Chloroplast",
+      "Nucleus",
+      "Peroxisome",
+      "Vacuole"
+    ],
     "correct_answer": "Chloroplast",
     "marks": 1,
     "year": null
@@ -54,8 +84,158 @@
     "topic": "Photosynthesis",
     "unit": "Bioenergetics",
     "question": "The light-independent reactions of photosynthesis take place in the:",
-    "options": ["Thylakoid membrane", "Stroma", "Cytoplasm", "Inner mitochondrial membrane", "Nucleus"],
+    "options": [
+      "Thylakoid membrane",
+      "Stroma",
+      "Cytoplasm",
+      "Inner mitochondrial membrane",
+      "Nucleus"
+    ],
     "correct_answer": "Stroma",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-INTRO-001",
+    "topic": "Characteristics of living organisms",
+    "unit": "Introduction to Biology",
+    "question": "Which of the following is a characteristic of ALL living organisms?",
+    "options": [
+      "Photosynthesis",
+      "Locomotion",
+      "Response to stimuli",
+      "Having a cell wall",
+      "Having chlorophyll"
+    ],
+    "correct_answer": "Response to stimuli",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-DIV-001",
+    "topic": "Classification of organisms",
+    "unit": "Evolution & Diversity of Organisms",
+    "question": "Which is the correct order of taxonomic ranks, from the largest group to the smallest?",
+    "options": [
+      "Kingdom, Phylum, Class, Order, Family",
+      "Kingdom, Class, Phylum, Family, Order",
+      "Phylum, Kingdom, Class, Order, Family",
+      "Kingdom, Phylum, Order, Class, Family",
+      "Class, Kingdom, Phylum, Family, Order"
+    ],
+    "correct_answer": "Kingdom, Phylum, Class, Order, Family",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-ANIM-001",
+    "topic": "Circulation and gas exchange",
+    "unit": "Animal Form & Function",
+    "question": "In humans, which blood vessel carries oxygenated blood from the lungs to the heart?",
+    "options": [
+      "Pulmonary artery",
+      "Pulmonary vein",
+      "Vena cava",
+      "Aorta",
+      "Hepatic portal vein"
+    ],
+    "correct_answer": "Pulmonary vein",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-GEN-001",
+    "topic": "Mendelian inheritance",
+    "unit": "Genetics",
+    "question": "Two parents heterozygous for two unlinked genes (AaBb x AaBb) are crossed. What is the expected phenotypic ratio of the offspring?",
+    "options": [
+      "3:1",
+      "1:2:1",
+      "9:3:3:1",
+      "1:1:1:1",
+      "9:7"
+    ],
+    "correct_answer": "9:3:3:1",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-GEN-002",
+    "topic": "Mendelian inheritance",
+    "unit": "Genetics",
+    "question": "What is the expected genotype ratio of the offspring of a monohybrid cross Aa x Aa?",
+    "options": [
+      "1 AA : 2 Aa : 1 aa",
+      "3 AA : 1 aa",
+      "1 AA : 1 aa",
+      "2 AA : 1 Aa : 1 aa",
+      "All Aa"
+    ],
+    "correct_answer": "1 AA : 2 Aa : 1 aa",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-MOL-001",
+    "topic": "DNA replication",
+    "unit": "Molecular Biology & Recombinant DNA Technology",
+    "question": "DNA replication is called semi-conservative because:",
+    "options": [
+      "each new DNA molecule has one parental strand and one new strand",
+      "both strands of each new molecule are newly made",
+      "only half of the genome is copied",
+      "the parental molecule is broken into short fragments",
+      "replication happens in only one direction"
+    ],
+    "correct_answer": "each new DNA molecule has one parental strand and one new strand",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-ENV-001",
+    "topic": "Ecosystems and energy flow",
+    "unit": "Environmental Biology",
+    "question": "About what percentage of the energy at one trophic level is passed on to the next trophic level?",
+    "options": [
+      "1%",
+      "10%",
+      "50%",
+      "75%",
+      "90%"
+    ],
+    "correct_answer": "10%",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-MIC-001",
+    "topic": "Structure of microorganisms",
+    "unit": "Microbiology",
+    "question": "Which of these structures is found in bacterial cells?",
+    "options": [
+      "A nucleus with a nuclear membrane",
+      "Mitochondria",
+      "70S ribosomes",
+      "Golgi apparatus",
+      "Endoplasmic reticulum"
+    ],
+    "correct_answer": "70S ribosomes",
+    "marks": 1,
+    "year": null
+  },
+  {
+    "id": "BIO-APP-001",
+    "topic": "Food production and agriculture",
+    "unit": "Applied Biology",
+    "question": "Which microorganism is commonly used to make bread rise?",
+    "options": [
+      "Lactobacillus bulgaricus",
+      "Saccharomyces cerevisiae",
+      "Escherichia coli",
+      "Penicillium notatum",
+      "Rhizobium sp."
+    ],
+    "correct_answer": "Saccharomyces cerevisiae",
     "marks": 1,
     "year": null
   }
