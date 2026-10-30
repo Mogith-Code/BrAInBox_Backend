@@ -13,8 +13,8 @@ logs:
 migrate:   ## apply database migrations
 	docker compose exec api alembic upgrade head
 
-seed:      ## load the 10 Biology units + sample topics
-	docker compose exec api python scripts/seed_syllabus.py
+seed:      ## dev seed: syllabus, community groups, app_config, 15 sample MCQs (idempotent)
+	docker compose exec api python -m scripts.seed_dev --with-samples
 
 ingest:    ## RAG: ingest data/rag_sources
 	docker compose exec ai_service python scripts/ingest_documents.py
