@@ -65,11 +65,18 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 ## visuals — Mogith
 
+Details, visibility rules and how visuals are made: [`api/modules/visuals/README.md`](../api/modules/visuals/README.md).
+
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/topics/{id}/visuals` | Approved visuals for a topic |
-| POST | `/api/v1/visuals/generate` | Request a visual -> GENERATE_VISUAL job |
-| POST | `/api/v1/visuals/{id}/report` | Report a wrong visual |
+| GET | `/api/v1/topics/{topic_id}/visuals` | ✅ `{topic_id, topic_title, unit_code, unit_title, visuals: [VisualOut]}`: approved + my own (not rejected/archived), newest first |
+| GET | `/api/v1/visuals/{visual_id}` | ✅ One `VisualOut` (`VISUAL_NOT_FOUND` if not approved and not mine) |
+| POST | `/api/v1/visuals/generate` | ✅ `{prompt (5-300), visual_type, style, topic_id?}` → 202 `{job_id}` (GENERATE_VISUAL); 20 per day (`VISUAL_LIMIT_REACHED` 429) |
+| POST | `/api/v1/visuals/{visual_id}/report` | ✅ `{reason, details? (≤500)}` → 201 (`ALREADY_REPORTED` 409 while my report is pending) |
+
+`VisualOut`: `id, title, topic_id, concept_id, kind, image_url, mermaid_code, alt_text, labels [{number, name, description, x, y}],
+style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loads without a login header
+(Firebase signed URL, or `/api/v1/files/visuals/...` in dev without a bucket).
 
 ## questions — Udith
 
@@ -165,7 +172,7 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/jobs/{id}` | Job status + result (only the requester or an admin) |
+| GET | `/api/v1/jobs/{job_id}` | ✅ `{id, job_type, status, progress, result, error, error_code, created_at, finished_at}`; only the requester or an admin (`JOB_NOT_FOUND` otherwise). `error` is a sentence for the student |
 
 ## admin (`/api/v1/admin`, role admin)
 
@@ -177,8 +184,25 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
 | `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | units / topics / concepts CRUD |
 | `analytics_admin.py` | Keshomigha | `/admin/analytics` | usage, performance, AI cost |
-| `moderation_admin.py` | Mogith | `/admin/moderation` | reports queue (posts, replies, visuals) |
+| `moderation_admin.py` | Mogith | `/admin/moderation` | ✅ `GET /reports` (visual reports with `visual_title` + `image_url`); planned: posts, replies, resolve |
 | `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
+
+## Error codes (for the app's `ErrorMessages`)
+
+Every error is `{"error": {"code": "...", "message": "..."}}`; some add fields (e.g. `retry_after`).
+Failed AI jobs return `status: "failed"` with `error` (a sentence) and `error_code` from `GET /jobs/{job_id}`.
+
+| Code | HTTP | Module | Meaning |
+|---|---|---|---|
+| `TOPIC_NOT_FOUND` | 404 | syllabus, content, visuals | unknown topic id |
+| `VISUAL_NOT_FOUND` | 404 | visuals | unknown visual, or another student's visual that is not approved |
+| `ALREADY_REPORTED` | 409 | visuals | my report of this visual is still pending |
+| `VISUAL_LIMIT_REACHED` | 429 | visuals | daily visual limit reached; `retry_after` (seconds) + `Retry-After` header |
+| `JOB_NOT_FOUND` | 404 | jobs | unknown job, or another student's job |
+| `NOT_BIOLOGY` | job `error_code` | visuals | "I can only draw Biology visuals." |
+| `AI_SERVICE_UNAVAILABLE` | 503 / job `error_code` | all AI features | the AI is busy or down; try again later |
+| `AI_DAILY_LIMIT` | 422 / job `error_code` | all AI features | today's free AI allowance (whole app) is used up; try tomorrow |
+| `FILE_NOT_FOUND` | 404 | visuals (dev file route) | no such stored image |
 
 ## Internal AI service (`ai_service`, port 8001, not public)
 

@@ -32,13 +32,15 @@ class TopicInfo:
     title: str
     unit_id: uuid.UUID
     unit_title: str
+    unit_number: int = 0  # e.g. 6 for Unit 6 (added for visuals: "unit_code")
 
 
 async def get_topics(session: AsyncSession, topic_ids: list[uuid.UUID]) -> list[TopicInfo]:
     """Topics in the same order as `topic_ids`. Raises NotFoundError if any id is unknown."""
     rows = await repository.get_topics_with_units(session, topic_ids)
     found = {
-        topic.id: TopicInfo(topic.id, topic.title, unit.id, unit.title) for topic, unit in rows
+        topic.id: TopicInfo(topic.id, topic.title, unit.id, unit.title, unit.number)
+        for topic, unit in rows
     }
     missing = [str(i) for i in topic_ids if i not in found]
     if missing:

@@ -7,6 +7,9 @@ Retry rules (from Udith's original paper generator):
   * only "try again later" errors are retried: 429 (rate limit) and 500/503/504 (overloaded)
   * each round tries GEMINI_MODEL first, then GEMINI_FALLBACK_MODEL (if set)
   * waits 1s, 2s, 4s... between rounds; any other error (bad request, auth) fails at once
+
+Free tier: every request is counted against GEMINI_DAILY_LIMIT (ai_service/daily_limits.py).
+Still 429 after all retries = Google's own free limit -> DailyLimitReached (a clear message).
 """
 
 import asyncio
@@ -17,6 +20,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from ai_service.config import get_settings
+from ai_service.daily_limits import DailyLimitReached, use_quota
 
 logger = logging.getLogger(__name__)
 
@@ -34,18 +38,23 @@ def _is_retryable(exc: Exception) -> bool:
 class GeminiLLM:
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str, fallback_model: str = ""):
+    def __init__(self, api_key: str, model: str, fallback_model: str = "", daily_limit: int = 0):
         from google import genai  # imported here so the app starts without the SDK
 
         self._client = genai.Client(api_key=api_key)
         self.model = model
         self.models = [m for m in (model, fallback_model) if m]
+        self.daily_limit = daily_limit  # 0 = no cap
 
     async def _call(self, prompt: str, config: Any, prompt_name: str | None) -> Any:
         settings = get_settings()
         last_error: Exception | None = None
         for attempt in range(settings.LLM_MAX_RETRIES):
             for model in self.models:
+                # Raises DailyLimitReached (not retried) when today's free requests are used up.
+                await use_quota(
+                    "gemini", "generate", model, self.daily_limit, prompt_name=prompt_name
+                )
                 started = time.perf_counter()
                 try:
                     response = await asyncio.wait_for(
@@ -63,6 +72,10 @@ class GeminiLLM:
                     logger.warning("Gemini %s busy (attempt %s): %s", model, attempt + 1, exc)
             if attempt < settings.LLM_MAX_RETRIES - 1:
                 await asyncio.sleep(2**attempt)
+        if getattr(last_error, "code", None) == 429:  # Google's own (free-tier) limit
+            raise DailyLimitReached(
+                "The free AI limit is reached for now. Please try again later."
+            ) from last_error
         raise RuntimeError(f"Gemini failed after retries: {last_error}") from last_error
 
     def _log_usage(

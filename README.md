@@ -139,6 +139,10 @@ Owners are enforced through [`.github/CODEOWNERS`](.github/CODEOWNERS). Search f
 | Firebase service-account JSON | `./secrets/firebase-service-account.json` + `GOOGLE_APPLICATION_CREDENTIALS` | Storage signed URLs, Cloud Vision OCR |
 | Storage bucket | `STORAGE_BUCKET` | uploads, generated images |
 | Gemini API key | `GEMINI_API_KEY` + `USE_FAKE_AI=false` | real LLM / embeddings / images |
+| Image provider | `IMAGE_PROVIDER` (`cloudflare` = free, default / `gemini` = paid), `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` | AI illustrations (see `ai_service/pipelines/visuals/README.md`) |
+| Free-tier caps | `GEMINI_DAILY_LIMIT`, `EMBEDDING_DAILY_LIMIT`, `IMAGE_DAILY_LIMIT`, `OCR_DAILY_LIMIT` | stop AI calls before the free allowance runs out (`ai_service/daily_limits.py`) |
+| Kroki server | `KROKI_URL` (default `https://kroki.io`, no key) | Mermaid diagrams → PNG |
+| Visual limit | `VISUALS_DAILY_LIMIT` (default 20) | visuals per student per 24 hours |
 | YouTube API key | `YOUTUBE_API_KEY` | recommendations |
 | Service token | `AI_SERVICE_TOKEN` (long random value outside dev) | api → ai_service |
 | GitHub handles | `.github/CODEOWNERS` | review assignment |

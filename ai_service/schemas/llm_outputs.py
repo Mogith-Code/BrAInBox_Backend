@@ -28,12 +28,63 @@ class TopicSummary(BaseModel):
 
 
 # ----------------------------------------------------------------- visuals (Mogith)
+class VisualLabel(BaseModel):
+    """One numbered label. x / y = where the marker goes, as 0-1 fractions of the image
+    (only for illustrations; null for Mermaid visuals, the app lists those under the diagram)."""
+
+    number: int
+    name: str
+    description: str = ""  # 1-2 short sentences at A/L level
+    x: float | None = None
+    y: float | None = None
+
+
 class VisualDecision(BaseModel):
     kind: Literal["diagram", "flowchart", "table", "illustration"]
     title: str
     mermaid_code: str | None = None
     image_prompt: str | None = None
     reason: str = ""
+    # Added for prompt decide_visual.v2.
+    # Required (no default), so a missing answer never counts as "safe".
+    is_biology: bool  # False = the request is not about Biology study -> refused
+    alt_text: str = ""  # one sentence read by TalkBack
+    labels: list[VisualLabel] = Field(default_factory=list)
+
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """Valid sample used by the fake LLM (offline / tests): a small Mermaid flowchart."""
+        return {
+            "kind": "diagram",
+            "title": "Osmosis across a membrane",
+            "mermaid_code": (
+                "flowchart LR\n"
+                '  A["1. Dilute solution<br/>high water potential"] --> '
+                'B["2. Partially permeable membrane"]\n'
+                '  B --> C["3. Concentrated solution<br/>low water potential"]'
+            ),
+            "image_prompt": None,
+            "reason": "A structure is clearest as a labelled diagram.",
+            "is_biology": True,
+            "alt_text": "Water moves from a dilute to a concentrated solution through a membrane.",
+            "labels": [
+                {
+                    "number": 1,
+                    "name": "Dilute solution",
+                    "description": "Has more free water molecules, so its water potential is higher.",
+                },
+                {
+                    "number": 2,
+                    "name": "Partially permeable membrane",
+                    "description": "Lets water molecules through but stops larger solute molecules.",
+                },
+                {
+                    "number": 3,
+                    "name": "Concentrated solution",
+                    "description": "Water moves into it by osmosis, down the water potential gradient.",
+                },
+            ],
+        }
 
 
 # ----------------------------------------------------------------- questions (Udith)
