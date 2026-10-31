@@ -201,6 +201,7 @@ Failed AI jobs return `status: "failed"` with `error` (a sentence) and `error_co
 | `JOB_NOT_FOUND` | 404 | jobs | unknown job, or another student's job |
 | `NOT_BIOLOGY` | job `error_code` | visuals | "I can only draw Biology visuals." |
 | `AI_SERVICE_UNAVAILABLE` | 503 / job `error_code` | all AI features | the AI is busy or down; try again later |
+| `AI_DAILY_LIMIT` | 422 / job `error_code` | all AI features | today's free AI allowance (whole app) is used up; try tomorrow |
 | `FILE_NOT_FOUND` | 404 | visuals (dev file route) | no such stored image |
 
 ## Internal AI service (`ai_service`, port 8001, not public)

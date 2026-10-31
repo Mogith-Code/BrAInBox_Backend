@@ -41,14 +41,39 @@ Providers used: `get_llm()`, `get_diagram_renderer()` (Kroki), `get_image_genera
 
 | Value | Model | Keys | Free? (checked 2026-11-01) |
 |---|---|---|---|
-| `gemini` (default) | `IMAGE_MODEL=gemini-2.5-flash-image` via `generate_content(..., response_modalities=["IMAGE"])` | `GEMINI_API_KEY` | ⚠️ Google's [pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists the Free Tier for this model as **"Not available"**; paid is about $0.039 per image. The [rate-limits page](https://ai.google.dev/gemini-api/docs/rate-limits) has no free RPM/RPD for it and says to check your own limits in [AI Studio](https://aistudio.google.com/rate-limit). Google also says this model shuts down on 15 March 2027. |
-| `cloudflare` | `@cf/black-forest-labs/flux-1-schnell` (Workers AI REST API) | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | ✅ [10 000 neurons per day free](https://developers.cloudflare.com/workers-ai/platform/pricing/) (shared by all models, resets 00:00 UTC). FLUX schnell costs 4.8 neurons per 512×512 tile + 9.6 per step; we use 4 steps, so roughly 40–45 neurons per image ≈ 200+ images a day. |
+| `gemini` | `IMAGE_MODEL=gemini-2.5-flash-image` via `generate_content(..., response_modalities=["IMAGE"])` | `GEMINI_API_KEY` | ⚠️ Google's [pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists the Free Tier for this model as **"Not available"**; paid is about $0.039 per image. The [rate-limits page](https://ai.google.dev/gemini-api/docs/rate-limits) has no free RPM/RPD for it and says to check your own limits in [AI Studio](https://aistudio.google.com/rate-limit). Google also says this model shuts down on 15 March 2027. |
+| `cloudflare` (default) | `@cf/black-forest-labs/flux-1-schnell` (Workers AI REST API) | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | ✅ [10 000 neurons per day free](https://developers.cloudflare.com/workers-ai/platform/pricing/) (shared by all models, resets 00:00 UTC). FLUX schnell costs 4.8 neurons per 512×512 tile + 9.6 per step; we use 4 steps, so roughly 40–45 neurons per image ≈ 200+ images a day. |
 
 `imagen-*` models still work with `IMAGE_PROVIDER=gemini` (paid only).
-Without a key for the chosen provider, or with `USE_FAKE_AI=true`, `FakeImageGenerator` returns a 1×1 PNG.
 
-**To draw illustrations for free, use `IMAGE_PROVIDER=cloudflare`.** Diagrams (the default kind) never use
-an image model, only Gemini text + Kroki, so they stay free either way.
+**The default is `cloudflare` because it is free.** Diagrams (the most common kind) never use an image
+model, only Gemini text + Kroki, so they are free with either provider.
+
+When pictures are **not** possible, the visual is made as a free Mermaid diagram instead (the prompt
+no longer offers "illustration"):
+- no key for the chosen provider while real AI is on (we never show the fake 1×1 picture to students),
+- today's `IMAGE_DAILY_LIMIT` is used up, or the last free picture went to another job a moment ago.
+
+With `USE_FAKE_AI=true` (tests, offline dev) `FakeImageGenerator` returns a 1×1 PNG.
+
+## Free-tier daily caps (whole app)
+
+`ai_service/daily_limits.py` counts every real provider call in `ai_usage_log` (BEFORE the call, so retries
+count too). At the cap the call is refused with `DailyLimitReached` (code `AI_DAILY_LIMIT`, message
+"Today's free ... are used up. Please try again tomorrow."), which the app shows as the job `error`.
+A `429` from Google after all retries gives the same kind of message. `0` = no cap (paid accounts only).
+
+| Setting | Default | Counts | Resets | Free allowance (official pages, checked 2026-11-01) |
+|---|---|---|---|---|
+| `GEMINI_DAILY_LIMIT` | 200 | Gemini text requests (all features) | midnight Pacific | `gemini-2.5-flash` and `-flash-lite` text: "Free of charge" on the free tier; the per-project RPM/RPD are shown only in [AI Studio](https://aistudio.google.com/rate-limit). **Set this a little below your project's RPD.** |
+| `EMBEDDING_DAILY_LIMIT` | 900 | embedding requests (1 per batch of up to 100 texts) | midnight Pacific | `gemini-embedding-001`: "Free of charge"; limits in AI Studio |
+| `IMAGE_DAILY_LIMIT` | 200 | pictures | 00:00 UTC (Cloudflare) | 10 000 neurons/day ≈ 230 FLUX schnell pictures (shared with any other Workers AI use); 720 requests/minute |
+| `OCR_DAILY_LIMIT` | 30 | Cloud Vision pages | midnight Pacific | Cloud Vision: first 1 000 units a month free |
+
+Without billing turned on, Google and Cloudflare answer `429` instead of charging when their own limit is
+reached, so the caps mainly give students a clear message (and protect you if billing is ever enabled).
+Kroki (`kroki.io`) is free with no key; self-host it if you need more.
+
 
 ## Kroki (Mermaid → PNG)
 

@@ -55,6 +55,7 @@ The topic list leaves out the student's visuals that are still being made (no Me
 | 429 | `VISUAL_LIMIT_REACHED` | more than `VISUALS_DAILY_LIMIT` (20) requests in 24 hours; `retry_after` = seconds (also the `Retry-After` header) |
 | job `error_code` | `NOT_BIOLOGY` | the job failed: "I can only draw Biology visuals." |
 | job `error_code` | `AI_SERVICE_UNAVAILABLE` | the job failed: the AI is busy, try again later |
+| job `error_code` | `AI_DAILY_LIMIT` | the job failed: today's free AI requests are used up (whole app), try tomorrow |
 
 ## How a visual is made (all free to run)
 
@@ -75,7 +76,8 @@ POST /visuals/generate
 
 - **Diagrams, flowcharts, tables** (the default): the LLM writes Mermaid text, never pixels, so labels are
   always spelled right. Kroki renders the PNG; `mermaid_code` is always kept, so the app can render it itself.
-- **Illustrations**: only when a picture really helps. The image model draws with **no text**; the labels come
+- **Illustrations**: only when a picture really helps, and only while free pictures are left today
+  (`IMAGE_DAILY_LIMIT`); otherwise the visual is made as a free Mermaid diagram. The image model draws with **no text**; the labels come
   as a list with `x, y` (0–1 of the image) where the app puts numbered markers.
 - PNGs are stored at `visuals/{concept_id or topic_id or "general"}/{visual_id}.png`; `width` / `height` are read with Pillow.
 
@@ -98,9 +100,10 @@ Checked on the `Pixel_9` emulator: `GET http://10.0.2.2:8000/api/v1/files/visual
 | Variable | Default | Where |
 |---|---|---|
 | `KROKI_URL` | `https://kroki.io` | ai_service |
-| `IMAGE_PROVIDER` | `gemini` (or `cloudflare`) | ai_service |
+| `IMAGE_PROVIDER` | `cloudflare` (free) or `gemini` (paid) | ai_service |
 | `IMAGE_MODEL` | `gemini-2.5-flash-image` | ai_service |
-| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | empty | ai_service |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | empty (= no pictures, diagrams only) | ai_service |
+| `IMAGE_DAILY_LIMIT`, `GEMINI_DAILY_LIMIT` | 200, 200 | ai_service: free-tier caps for the whole app |
 | `VISUALS_DAILY_LIMIT` | `20` | api |
 | `VISUAL_URL_EXPIRY_DAYS` | `7` | api |
 | `PUBLIC_BASE_URL` | empty (= request host) | api, dev only |
