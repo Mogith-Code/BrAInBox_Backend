@@ -8,9 +8,11 @@ from shared.settings import SharedSettings
 class AISettings(SharedSettings):
     # --- Gemini (LLM + embeddings + images)
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    # gemini-2.5-flash / -flash-lite are closed to NEW keys (404 "no longer available to new
+    # users", checked 2026-11-01). These two work on the free tier.
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     # Tried when GEMINI_MODEL is overloaded / rate limited (429, 5xx). Empty = no fallback.
-    GEMINI_FALLBACK_MODEL: str = ""
+    GEMINI_FALLBACK_MODEL: str = "gemini-3.5-flash-lite"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIM: int = 768  # must match vector(768) in the database
 
