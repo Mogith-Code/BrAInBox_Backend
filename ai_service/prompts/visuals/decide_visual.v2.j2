@@ -1,5 +1,6 @@
 {# Prompt: plan one visual for a student's request. Owner: Mogith.
-   Variables: prompt, visual_type, kind_hint, style, topic_title, concept_name, context #}
+   Variables: prompt, visual_type, kind_hint, style, topic_title, concept_name, context,
+   allow_illustration (false when no free pictures are left today) #}
 You make study visuals for Sri Lankan G.C.E. A/L Biology students (English medium).
 
 The student asked for: "{{ prompt }}"
@@ -24,8 +25,13 @@ Rules:
    - "flowchart"    : a process with ordered steps (Mermaid flowchart)
    - "table"        : a comparison, drawn as a Mermaid flowchart with one subgraph per item
    - "diagram"      : a structure shown as connected, labelled parts (Mermaid flowchart)
+{% if allow_illustration %}
    - "illustration" : only when a real picture helps much more than boxes (e.g. the shape of
                       a cell or organ). Give "image_prompt" and no Mermaid code.
+{% else %}
+   Pictures are not available right now: always choose "flowchart", "table" or "diagram",
+   even for a structure (show its parts as labelled, connected boxes).
+{% endif %}
 3. Mermaid rules (diagram / flowchart / table):
    - Start with "flowchart TB" or "flowchart LR". No ``` fences, no "click" lines, no styling.
    - Put every node text in double quotes, e.g. A["1. Bowman's capsule"]. Use <br/> for a new line.

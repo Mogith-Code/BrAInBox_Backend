@@ -387,6 +387,7 @@ async def test_gemini_image_reads_inline_data() -> None:
 
     generator = GeminiImageGenerator.__new__(GeminiImageGenerator)  # skip the real SDK client
     generator.model = "gemini-2.5-flash-image"
+    generator.daily_limit = 0  # no cap -> no database needed
     generator._client = SimpleNamespace(  # type: ignore[attr-defined]
         aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
     )
@@ -413,8 +414,8 @@ def test_image_provider_is_chosen_from_settings(monkeypatch: pytest.MonkeyPatch)
         get_image_generator()
 
 
-def test_default_image_model_has_a_free_alternative() -> None:
+def test_defaults_are_free() -> None:
     settings = get_settings()
-    assert settings.IMAGE_PROVIDER == "gemini"
-    assert settings.IMAGE_MODEL == "gemini-2.5-flash-image"
+    assert settings.IMAGE_PROVIDER == "cloudflare"  # free daily allowance
+    assert settings.IMAGE_MODEL == "gemini-2.5-flash-image"  # only if IMAGE_PROVIDER=gemini
     assert settings.KROKI_URL == "https://kroki.io"

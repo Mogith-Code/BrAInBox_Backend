@@ -11,17 +11,24 @@ import base64
 
 import httpx
 
+from ai_service.daily_limits import use_quota
+
 
 class GeminiImageGenerator:
-    name = "gemini-image"
+    """Paid only: Google lists no free tier for its image models."""
 
-    def __init__(self, api_key: str, model: str):
+    name = "gemini-image"
+    quota_provider = "gemini"  # whose "day" the IMAGE_DAILY_LIMIT follows
+
+    def __init__(self, api_key: str, model: str, daily_limit: int = 0):
         from google import genai  # imported here so the app starts without the SDK
 
         self._client = genai.Client(api_key=api_key)
         self.model = model
+        self.daily_limit = daily_limit
 
     async def generate_image(self, prompt: str) -> bytes:
+        await use_quota("gemini", "image", self.model, self.daily_limit, images=1)
         # Older Imagen models have their own endpoint (paid only).
         if self.model.startswith("imagen"):
             return await self._imagen(prompt)
@@ -66,6 +73,7 @@ class CloudflareImageGenerator:
     """
 
     name = "cloudflare-image"
+    quota_provider = "cloudflare"
     STEPS = 4  # FLUX.1 schnell: 4 is the default, 8 is the maximum (more steps cost more)
 
     def __init__(
@@ -75,13 +83,17 @@ class CloudflareImageGenerator:
         model: str,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,  # tests pass a mock transport
+        daily_limit: int = 0,  # pictures per day (00:00 UTC); 0 = no cap
     ):
+        self.model = model
+        self.daily_limit = daily_limit
         self._url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
         self._headers = {"Authorization": f"Bearer {api_token}"}
         self._timeout = timeout
         self._transport = transport
 
     async def generate_image(self, prompt: str) -> bytes:
+        await use_quota("cloudflare", "image", self.model, self.daily_limit, images=1)
         async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
             response = await client.post(
                 self._url, headers=self._headers, json={"prompt": prompt, "steps": self.STEPS}

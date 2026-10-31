@@ -9,6 +9,8 @@ Steps:
   3a. diagram / flowchart / table: validate the Mermaid code, render a PNG with Kroki and store
       it. Kroki down? The visual is still made with its Mermaid code only (the app renders it).
   3b. illustration: the image model draws the picture (no text in it) and we store it.
+      Only while free pictures are left today (IMAGE_DAILY_LIMIT) and an image provider is
+      set up. Otherwise the LLM is told to use a (free) Mermaid kind instead.
   4. Return everything; the api saves it on the `visuals` row (api/modules/visuals/service.py).
 """
 
@@ -18,11 +20,12 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ai_service.daily_limits import DailyLimitReached
 from ai_service.errors import UserInputError
 from ai_service.pipelines.visuals import illustration
 from ai_service.pipelines.visuals.diagram_mermaid import validate_mermaid
 from ai_service.prompts import prompt_id, render_prompt
-from ai_service.providers import get_diagram_renderer, get_llm
+from ai_service.providers import can_draw_illustrations, get_diagram_renderer, get_llm
 from ai_service.rag.context_builder import BuiltContext, build_context
 from ai_service.rag.retrieval.retriever import retrieve
 from ai_service.schemas.llm_outputs import VisualDecision, VisualLabel
@@ -63,8 +66,9 @@ async def gather_context(query: str, topic_id: uuid.UUID | None) -> BuiltContext
     return build_context(chunks, max_chars=3000)
 
 
-async def decide(prompt: str) -> VisualDecision:
-    """Ask the LLM for a decision. Retries when the JSON or the Mermaid code is invalid."""
+async def decide(prompt: str, *, allow_illustration: bool = True) -> VisualDecision:
+    """Ask the LLM for a decision. Retries when the JSON or the Mermaid code is invalid,
+    or when it picks an illustration that is not allowed right now."""
     errors: list[str] = []
     for _ in range(MAX_RETRIES + 1):
         try:
@@ -74,8 +78,13 @@ async def decide(prompt: str) -> VisualDecision:
         except ValidationError as exc:
             errors.append(", ".join(".".join(map(str, e["loc"])) for e in exc.errors()))
             continue
-        if not decision.is_biology or decision.kind not in MERMAID_KINDS:
+        if not decision.is_biology:
             return decision
+        if decision.kind == "illustration":
+            if allow_illustration:
+                return decision
+            errors.append("illustration not allowed")
+            continue
         try:
             decision.mermaid_code = validate_mermaid(decision.mermaid_code)
             return decision
@@ -143,19 +152,23 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         logger.warning("RAG search failed for visual %s; continuing without it", visual_id)
 
-    # 2. Decide (includes the safety check).
-    prompt = render_prompt(
-        PROMPT_NAME,
-        PROMPT_VERSION,
-        prompt=student_prompt,
-        visual_type=visual_type,
-        kind_hint=KIND_HINTS[visual_type],
-        style=style,
-        topic_title=topic_title,
-        concept_name=payload.get("concept_name") or "",
-        context=context_text,
-    )
-    decision = await decide(prompt)
+    # 2. Decide (includes the safety check). Pictures only while free ones are left.
+    def build_prompt(allow_illustration: bool) -> str:
+        return render_prompt(
+            PROMPT_NAME,
+            PROMPT_VERSION,
+            prompt=student_prompt,
+            visual_type=visual_type,
+            kind_hint=KIND_HINTS[visual_type],
+            style=style,
+            topic_title=topic_title,
+            concept_name=payload.get("concept_name") or "",
+            context=context_text,
+            allow_illustration=allow_illustration,
+        )
+
+    allow = await can_draw_illustrations()
+    decision = await decide(build_prompt(allow), allow_illustration=allow)
     if not decision.is_biology:
         raise NotBiologyError(NOT_BIOLOGY_MESSAGE)
 
@@ -167,9 +180,17 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
     mermaid_code: str | None = None
     if decision.kind == "illustration":
         description = (decision.image_prompt or decision.title).strip()
-        stored = await illustration.create_illustration(description, style, path)
-        image_path, width, height = stored.path, stored.width, stored.height
-    else:
+        try:
+            stored = await illustration.create_illustration(description, style, path)
+            image_path, width, height = stored.path, stored.width, stored.height
+        except DailyLimitReached:
+            # The last free picture of today went to another job a moment ago: make a free
+            # Mermaid diagram instead of failing.
+            logger.info("No free pictures left; visual %s becomes a diagram", visual_id)
+            decision = await decide(build_prompt(False), allow_illustration=False)
+            if not decision.is_biology:
+                raise NotBiologyError(NOT_BIOLOGY_MESSAGE) from None
+    if decision.kind != "illustration":
         mermaid_code = decision.mermaid_code
         png = await get_diagram_renderer().render_png(mermaid_code or "")
         if png is not None:
