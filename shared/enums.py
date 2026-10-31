@@ -111,6 +111,22 @@ class VisualKind(StrEnum):
     TABLE = "table"  # kept: already used
 
 
+class VisualStyle(StrEnum):
+    """The style cards on "Generate a visual" (Figma B10)."""
+
+    FLAT_COLOUR = "flat_colour"
+    TEXTBOOK_LINE = "textbook_line"
+    CROSS_SECTION = "cross_section"
+
+
+class VisualType(StrEnum):
+    """What the student wants to see. Only a hint for the AI (not stored)."""
+
+    PROCESS = "process"  # -> flowchart
+    STRUCTURE = "structure"  # -> diagram or illustration
+    COMPARISON = "comparison"  # -> table / flowchart
+
+
 class ReportStatus(StrEnum):
     OPEN = "open"
     RESOLVED = "resolved"

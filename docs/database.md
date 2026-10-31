@@ -10,7 +10,7 @@ python scripts/seed_dev.py --with-samples         # syllabus, groups, settings, 
 docker compose exec api python -m scripts.seed_dev --with-samples    # same, inside Docker
 ```
 
-Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema`.
+Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation`.
 53 app tables (54 with Alembic's own `alembic_version`).
 
 ---
@@ -74,8 +74,8 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 ### `visual.py` - Mogith
 | Table | Purpose |
 |---|---|
-| `visuals` | Mermaid diagrams and AI illustrations, with verification and safety flags. |
-| `visual_reports` | Students report wrong / unclear visuals. |
+| `visuals` | Mermaid diagrams and AI illustrations, with verification and safety flags. `style`, PNG `width` / `height` and `is_ai_generated` added in 0004. |
+| `visual_reports` | Students report wrong / unclear visuals. One `pending` report per student per visual (`uq_visual_reports_one_pending`). |
 
 ### `question.py` - Udith
 | Table | Purpose |
@@ -252,7 +252,7 @@ Only paths are stored in the database; files live in Firebase Storage.
 | `uploads/{user_id}/{upload_id}.pdf` | `uploads.file_path` | used now (content module) |
 | `uploads/{user_id}/notes/{upload_id}.{ext}` | `uploads.file_path` | planned layout for new upload types |
 | `answers/{user_id}/{response_id}/page-{n}.jpg` | `responses.image_paths` | planned (evaluation) |
-| `visuals/{concept_id}/{visual_id}.png` | `visuals.image_path` | planned (visuals) |
+| `visuals/{concept_id or topic_id or general}/{visual_id}.png` | `visuals.image_path` | ✅ visuals (Kroki PNGs + illustrations) |
 | `posts/{post_id}/{n}.jpg` | `posts.image_paths` | planned (community) |
 | project-relative path, e.g. `data/rag_sources/unit_06.pdf` | `source_documents.file_path` | used now (RAG ingestion) |
 
