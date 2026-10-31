@@ -13,7 +13,19 @@ class AISettings(SharedSettings):
     GEMINI_FALLBACK_MODEL: str = ""
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIM: int = 768  # must match vector(768) in the database
-    IMAGE_MODEL: str = "imagen-4.0-generate-001"
+
+    # --- Images (visuals module)
+    # Who draws illustrations: "gemini" (IMAGE_MODEL below) or "cloudflare" (Workers AI FLUX).
+    IMAGE_PROVIDER: str = "gemini"
+    # gemini-2.5-flash-image ("Nano Banana") uses generate_content. "imagen-*" models still work.
+    IMAGE_MODEL: str = "gemini-2.5-flash-image"
+    CLOUDFLARE_ACCOUNT_ID: str = ""
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_IMAGE_MODEL: str = "@cf/black-forest-labs/flux-1-schnell"
+    IMAGE_TIMEOUT_SECONDS: float = 60.0
+    # Kroki turns Mermaid text into a PNG (free, open source, can be self-hosted with Docker).
+    KROKI_URL: str = "https://kroki.io"
+    KROKI_TIMEOUT_SECONDS: float = 15.0
 
     # --- OCR (Google Cloud Vision, uses GOOGLE_APPLICATION_CREDENTIALS)
     OCR_LANGUAGE_HINTS: str = "en"

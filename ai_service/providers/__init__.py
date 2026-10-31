@@ -12,6 +12,7 @@ from typing import Any
 
 from ai_service.config import get_settings
 from ai_service.providers.base import (
+    DiagramRenderer,
     EmbeddingProvider,
     ImageProvider,
     LLMProvider,
@@ -72,12 +73,53 @@ def get_ocr() -> OCRProvider:
 
 
 def get_image_generator() -> ImageProvider:
-    from ai_service.providers.image_gen import GeminiImageGenerator
+    """The image model chosen with IMAGE_PROVIDER ("gemini" or "cloudflare").
+
+    The fake is used when USE_FAKE_AI=true or the chosen provider has no key.
+    """
+    from ai_service.providers.image_gen import CloudflareImageGenerator, GeminiImageGenerator
 
     s = get_settings()
-    return _get(  # type: ignore[no-any-return]
-        "image", lambda: GeminiImageGenerator(s.GEMINI_API_KEY, s.IMAGE_MODEL), FakeImageGenerator
-    )
+    if "image" not in _cache:
+        provider = s.IMAGE_PROVIDER.strip().lower()
+        if provider == "cloudflare":
+            has_keys = bool(s.CLOUDFLARE_ACCOUNT_ID and s.CLOUDFLARE_API_TOKEN)
+            if s.USE_FAKE_AI or not has_keys:
+                _cache["image"] = FakeImageGenerator()
+            else:
+                _cache["image"] = CloudflareImageGenerator(
+                    s.CLOUDFLARE_ACCOUNT_ID,
+                    s.CLOUDFLARE_API_TOKEN,
+                    s.CLOUDFLARE_IMAGE_MODEL,
+                    timeout=s.IMAGE_TIMEOUT_SECONDS,
+                )
+        elif provider == "gemini":
+            _get(
+                "image",
+                lambda: GeminiImageGenerator(s.GEMINI_API_KEY, s.IMAGE_MODEL),
+                FakeImageGenerator,
+            )
+        else:
+            raise ValueError(
+                f"Unknown IMAGE_PROVIDER: {s.IMAGE_PROVIDER!r} (use gemini or cloudflare)"
+            )
+    return _cache["image"]  # type: ignore[no-any-return]
+
+
+def get_diagram_renderer() -> DiagramRenderer:
+    """Kroki (Mermaid -> PNG). Tests (ENVIRONMENT=test) get a fake, so they never use the network.
+
+    Kroki is free and needs no key, so dev uses the real one even with USE_FAKE_AI=true.
+    """
+    from ai_service.providers.diagram_renderer import FakeDiagramRenderer, KrokiRenderer
+
+    s = get_settings()
+    if "diagram" not in _cache:
+        if s.ENVIRONMENT == "test":
+            _cache["diagram"] = FakeDiagramRenderer()
+        else:
+            _cache["diagram"] = KrokiRenderer(s.KROKI_URL, timeout=s.KROKI_TIMEOUT_SECONDS)
+    return _cache["diagram"]  # type: ignore[no-any-return]
 
 
 def get_storage() -> StorageProvider:
@@ -103,6 +145,7 @@ def provider_names() -> dict[str, str]:
     return {
         "llm": getattr(get_llm(), "name", "?"),
         "embedder": getattr(get_embedder(), "name", "?"),
+        "image": getattr(get_image_generator(), "name", "?"),
     }
 
 
