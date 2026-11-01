@@ -18,3 +18,12 @@ def get_context(topic: str, k: int = 4, unit_no: Optional[int] = None) -> List[d
         {"text": doc, "meta": meta}
         for doc, meta in zip(res["documents"][0], res["metadatas"][0])
     ]
+
+
+def get_unit_chunks(unit_no: int) -> List[dict]:
+    """All chunks of one unit."""
+    res = _collection.get(where={"unit_no": unit_no}, include=["documents", "metadatas"])
+    return [
+        {"text": doc, "meta": meta}
+        for doc, meta in zip(res["documents"], res["metadatas"])
+    ]

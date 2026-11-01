@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
+from app.config import DEBUG_SHOW_ANSWERS
 from app.models.schemas import (
     EvaluateRequest,
     EvaluateResponse,
@@ -7,16 +8,18 @@ from app.models.schemas import (
     ExamResponse,
     PaperRequest,
     PaperResponse,
+    Question,
+    StudentQuestion,
+    UnitPaperRequest,
 )
 from app.services.evaluator import evaluate_paper
-from app.services.generator import generate_mcqs, generate_paper
+from app.services.explainer import add_explanations
+from app.services.generator import generate_mcqs, generate_paper, generate_paper_by_units
 from app.services.paper_store import get_paper, save_paper
 from app.services.question_bank import get_questions_by_topic
-from app.config import DEBUG_SHOW_ANSWERS
-from app.models.schemas import Question, StudentQuestion
-from app.services.explainer import add_explanations
 
 router = APIRouter(prefix="/exam", tags=["Exam"])
+
 
 def to_student_view(q: Question) -> StudentQuestion:
     return StudentQuestion(
@@ -54,11 +57,37 @@ def generate_paper_endpoint(req: PaperRequest):
     questions, warnings = generate_paper(req.topics, req.num_questions)
     if not questions:
         raise HTTPException(status_code=502, detail=f"Could not generate any questions. {warnings}")
-    paper_id = save_paper(questions)           # full questions (with answers) saved server-side
+    paper_id = save_paper(questions)
     return PaperResponse(
         paper_id=paper_id,
         subject=req.subject,
         topics=req.topics,
+        total_questions=len(questions),
+        questions=[to_student_view(q) for q in questions],
+        warnings=warnings,
+    )
+
+
+@router.post("/generate-paper-by-units", response_model=PaperResponse, response_model_exclude_none=True)
+def generate_paper_by_units_endpoint(req: UnitPaperRequest):
+    units = sorted(set(req.units))
+    if any(u < 1 or u > 10 for u in units):
+        raise HTTPException(status_code=422, detail="Units must be between 1 and 10")
+    if req.num_questions < len(units):
+        raise HTTPException(
+            status_code=422,
+            detail="num_questions must be at least the number of selected units",
+        )
+
+    questions, warnings = generate_paper_by_units(units, req.num_questions)
+    if not questions:
+        raise HTTPException(status_code=502, detail=f"Could not generate any questions. {warnings}")
+
+    paper_id = save_paper(questions)
+    return PaperResponse(
+        paper_id=paper_id,
+        subject=req.subject,
+        topics=list(dict.fromkeys(q.topic for q in questions)),
         total_questions=len(questions),
         questions=[to_student_view(q) for q in questions],
         warnings=warnings,

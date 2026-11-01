@@ -104,3 +104,8 @@ class EvaluateRequest(BaseModel):
     paper_id: str
     answers: List[AnswerItem]
     explain: bool = True        # set false to skip AI explanations
+
+class UnitPaperRequest(BaseModel):
+    subject: str = "Biology"
+    units: List[int] = Field(min_length=1, max_length=10)
+    num_questions: int = Field(default=20, ge=1, le=60)
