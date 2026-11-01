@@ -47,9 +47,9 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/units` | All 10 units |
-| GET | `/api/v1/units/{id}/topics` | Topics of a unit |
-| GET | `/api/v1/topics/{id}` | One topic with its concepts |
+| GET | `/api/v1/units` | ✅ Current units, Unit 1 first, with `topic_count` |
+| GET | `/api/v1/units/{id}/topics` | ✅ The unit and its current topics, with `concept_count` |
+| GET | `/api/v1/topics/{id}` | ✅ One topic with its unit and current concepts (`is_outdated` flag) |
 
 ## content — Samni
 
