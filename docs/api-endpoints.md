@@ -175,7 +175,7 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | `rag_admin.py` | Samni | `/admin/rag` | `POST /documents` (upload + RAG_INGEST job), `GET /documents`, `POST /documents/{id}/reindex` |
 | `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
 | `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
-| `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | units / topics / concepts CRUD |
+| `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts: list (outdated included), add, edit, mark outdated; delete only empty + unused topics/concepts (units are never deleted) |
 | `analytics_admin.py` | Keshomigha | `/admin/analytics` | usage, performance, AI cost |
 | `moderation_admin.py` | Mogith | `/admin/moderation` | reports queue (posts, replies, visuals) |
 | `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |

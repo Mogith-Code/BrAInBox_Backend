@@ -26,6 +26,38 @@ Lists show the **current** syllabus only: units, topics and concepts with `is_ou
 and not counted. `GET /topics/{id}` still opens an outdated topic (old notes and questions link to it) and
 returns `is_outdated: true`, so the app can show an "Outdated syllabus" tag.
 
+## Admin: syllabus manager (`/api/v1/admin/syllabus`, role admin)
+
+Routes live in `admin/syllabus_admin.py`; the logic is the `admin_*` functions in this module's
+`service.py`. Admins see **everything**, outdated rows included. Edits are partial (PATCH: send only
+the fields to change); required fields (`number`, `title`, `name`) can't be cleared → 400 `FIELD_REQUIRED`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/admin/syllabus/units` | All units with `topic_count` |
+| POST | `/admin/syllabus/units` | 201. Number taken → 409 `UNIT_NUMBER_TAKEN` |
+| PATCH | `/admin/syllabus/units/{id}` | Edit, or `is_outdated: true` |
+| GET | `/admin/syllabus/units/{id}/topics` | All topics with `concept_count` |
+| POST | `/admin/syllabus/units/{id}/topics` | 201. Number taken in this unit → 409 `TOPIC_NUMBER_TAKEN` |
+| PATCH | `/admin/syllabus/topics/{id}` | Edit, or `is_outdated: true` |
+| DELETE | `/admin/syllabus/topics/{id}` | 204 |
+| GET | `/admin/syllabus/topics/{id}/concepts` | All concepts |
+| POST | `/admin/syllabus/topics/{id}/concepts` | 201. Code taken → 409 `CONCEPT_CODE_TAKEN` |
+| PATCH | `/admin/syllabus/concepts/{id}` | Edit, or `is_outdated: true` |
+| DELETE | `/admin/syllabus/concepts/{id}` | 204 |
+
+**Delete rules.** Anything students have used should be **marked outdated**, not deleted:
+- **Units are never deleted.** Deleting one would also delete students' unit-mastery history.
+- A **topic** can be deleted only when it has no concepts (409 `TOPIC_HAS_CONCEPTS`) and no question,
+  note or visual points at it (409 `IN_USE`).
+- A **concept** can be deleted only when no question, note, visual or misconception points at it
+  (409 `IN_USE`). Its students' `concept_mastery` rows are removed with it.
+
+**Embeddings.** Changing a concept's `name`, `description` or `learning_outcome` clears its stored
+embedding (it no longer matches the text); the next embedding run recomputes it.
+
+**Audit log.** Not written yet: `admin.service.record_audit` is still a TODO (Mogith).
+
 ### For other modules (`service.py`)
 
 | Function | Used by |
