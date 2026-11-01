@@ -12,6 +12,7 @@ JOB_RUNNER=cloudtasks  -> Google Cloud Tasks (TODO for production)
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -55,11 +56,21 @@ def enqueue_job(job: AIJob, background_tasks: BackgroundTasks) -> None:
         raise ValueError(f"Unknown JOB_RUNNER: {runner}")
 
 
-async def run_job_inline(session: AsyncSession, job: AIJob, client: AIClient) -> AIJob:
+# Called after a job succeeded, before the final commit (see run_job_inline).
+OnSuccess = Callable[[AIJob], Awaitable[None]]
+
+
+async def run_job_inline(
+    session: AsyncSession, job: AIJob, client: AIClient, on_success: OnSuccess | None = None
+) -> AIJob:
     """Run a job right now, inside the current request, and save the outcome on the row.
 
     Use this when the client waits for the answer (e.g. generating a paper).
     `job.result` is the ai_service response: {"job_id", "job_type", "result": {...}}.
+
+    `on_success(job)` lets the owning module save its rows (e.g. the finished visual) in the
+    SAME commit as status "succeeded", so the app never sees "succeeded" before the data
+    exists. If it raises, the job ends as "failed".
     """
     job.status = JobStatus.RUNNING
     job.started_at = datetime.now(UTC)
@@ -68,6 +79,8 @@ async def run_job_inline(session: AsyncSession, job: AIJob, client: AIClient) ->
 
     try:
         job.result = await client.run_job(str(job.id), job.job_type.value, job.input)
+        if on_success is not None:
+            await on_success(job)
         job.status = JobStatus.SUCCEEDED
     except Exception as exc:
         logger.exception("Job %s failed", job.id)

@@ -4,14 +4,26 @@ Files are never served by the api itself; the app downloads them with short-live
 
 Dev without a bucket (STORAGE_BUCKET empty, ENVIRONMENT != prod): `upload_bytes` writes to
 LOCAL_STORAGE_DIR instead, the folder the ai_service reads (ai_service/providers/storage.py).
+
+Image URLs for the app (`public_image_url`):
+  * with a bucket: a signed URL (no login header needed, valid VISUAL_URL_EXPIRY_DAYS days)
+  * dev without a bucket: GET /api/v1/files/visuals/... on this API (see visuals/router.py)
 """
 
+import logging
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from fastapi.concurrency import run_in_threadpool
+
 from api.core.config import get_settings
 from api.core.errors import ServiceUnavailableError
+
+logger = logging.getLogger(__name__)
+
+# Only these folders may be served by the dev file route (never student uploads).
+PUBLIC_DEV_FOLDERS = ("visuals/",)
 
 _bucket: Any = None
 
@@ -71,3 +83,45 @@ def _write_local(root: str, path: str, data: bytes) -> None:
         raise ValueError(f"Storage path outside the storage folder: {path}")
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_bytes(data)
+
+
+def uses_local_files() -> bool:
+    """True in dev without a bucket: files live in LOCAL_STORAGE_DIR."""
+    settings = get_settings()
+    return not settings.STORAGE_BUCKET and settings.ENVIRONMENT != "prod"
+
+
+def local_file(path: str) -> Path | None:
+    """Dev only: the file for a public path (visuals/...), or None if it is not allowed/missing."""
+    if not uses_local_files():
+        return None
+    root = Path(get_settings().LOCAL_STORAGE_DIR).resolve()
+    file = (root / path).resolve()
+    # Check the RESOLVED path, so "visuals/../uploads/x.pdf" cannot reach student uploads.
+    allowed = [(root / folder).resolve() for folder in PUBLIC_DEV_FOLDERS]
+    if not any(file.is_relative_to(folder) for folder in allowed) or not file.is_file():
+        return None
+    return file
+
+
+async def public_image_url(path: str | None, base_url: str) -> str | None:
+    """A URL the phone can load WITHOUT an Authorization header, or None.
+
+    `base_url` is the address the app called (e.g. "http://10.0.2.2:8000/"). Never raises:
+    without a URL the app still shows the Mermaid code or the alt text.
+    """
+    if not path:
+        return None
+    settings = get_settings()
+    if settings.STORAGE_BUCKET:
+        minutes = settings.VISUAL_URL_EXPIRY_DAYS * 24 * 60
+        try:
+            # Signing may call Google (e.g. on Cloud Run), so keep it off the event loop.
+            return await run_in_threadpool(generate_signed_url, path, minutes)
+        except Exception:
+            logger.exception("Could not sign a URL for %s", path)
+            return None
+    if uses_local_files():
+        root = (settings.PUBLIC_BASE_URL or base_url).rstrip("/")
+        return f"{root}/api/v1/files/{path}"
+    return None
