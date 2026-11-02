@@ -4,18 +4,22 @@ Credentials: GOOGLE_APPLICATION_CREDENTIALS (service account JSON, never committ
 """
 
 from ai_service.config import get_settings
+from ai_service.daily_limits import use_quota
 
 
 class VisionOCR:
     name = "google-vision"
 
-    def __init__(self) -> None:
+    def __init__(self, daily_limit: int = 0) -> None:
         from google.cloud import vision
+
+        self.daily_limit = daily_limit  # pages per day; 0 = no cap (Vision: 1,000 free a month)
 
         self._vision = vision
         self._client = vision.ImageAnnotatorAsyncClient()
 
     async def extract_text(self, image_bytes: bytes) -> str:
+        await use_quota("vision", "ocr", "document_text_detection", self.daily_limit)
         vision = self._vision
         hints = [h.strip() for h in get_settings().OCR_LANGUAGE_HINTS.split(",") if h.strip()]
         request = vision.AnnotateImageRequest(

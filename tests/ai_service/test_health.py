@@ -18,7 +18,11 @@ async def test_health_with_token(ai_client):
     body = response.json()
     assert body["status"] == "ok"
     assert body["fake_ai"] is True
-    assert body["providers"] == {"llm": "fake-llm", "embedder": "fake-embedder"}
+    assert body["providers"] == {
+        "llm": "fake-llm",
+        "embedder": "fake-embedder",
+        "image": "fake-image",
+    }
 
 
 async def test_docs_are_open_and_branded(ai_anon_client):

@@ -12,6 +12,7 @@ from typing import Any
 
 from ai_service.config import get_settings
 from ai_service.providers.base import (
+    DiagramRenderer,
     EmbeddingProvider,
     ImageProvider,
     LLMProvider,
@@ -50,7 +51,11 @@ def get_llm() -> LLMProvider:
 
     s = get_settings()
     return _get(
-        "llm", lambda: GeminiLLM(s.GEMINI_API_KEY, s.GEMINI_MODEL, s.GEMINI_FALLBACK_MODEL), FakeLLM
+        "llm",
+        lambda: GeminiLLM(
+            s.GEMINI_API_KEY, s.GEMINI_MODEL, s.GEMINI_FALLBACK_MODEL, s.GEMINI_DAILY_LIMIT
+        ),
+        FakeLLM,
     )  # type: ignore[no-any-return]
 
 
@@ -60,7 +65,9 @@ def get_embedder() -> EmbeddingProvider:
     s = get_settings()
     return _get(  # type: ignore[no-any-return]
         "embedder",
-        lambda: GeminiEmbedder(s.GEMINI_API_KEY, s.GEMINI_EMBEDDING_MODEL, s.EMBEDDING_DIM),
+        lambda: GeminiEmbedder(
+            s.GEMINI_API_KEY, s.GEMINI_EMBEDDING_MODEL, s.EMBEDDING_DIM, s.EMBEDDING_DAILY_LIMIT
+        ),
         lambda: FakeEmbedder(s.EMBEDDING_DIM),
     )
 
@@ -68,16 +75,76 @@ def get_embedder() -> EmbeddingProvider:
 def get_ocr() -> OCRProvider:
     from ai_service.providers.ocr_vision import VisionOCR
 
-    return _get("ocr", VisionOCR, FakeOCR)  # type: ignore[no-any-return]
+    limit = get_settings().OCR_DAILY_LIMIT
+    return _get("ocr", lambda: VisionOCR(limit), FakeOCR)  # type: ignore[no-any-return]
 
 
 def get_image_generator() -> ImageProvider:
-    from ai_service.providers.image_gen import GeminiImageGenerator
+    """The image model chosen with IMAGE_PROVIDER ("cloudflare" = free, or "gemini" = paid).
+
+    The fake is used when USE_FAKE_AI=true or the chosen provider has no key. Real pictures
+    are capped by IMAGE_DAILY_LIMIT (ai_service/daily_limits.py).
+    """
+    from ai_service.providers.image_gen import CloudflareImageGenerator, GeminiImageGenerator
 
     s = get_settings()
-    return _get(  # type: ignore[no-any-return]
-        "image", lambda: GeminiImageGenerator(s.GEMINI_API_KEY, s.IMAGE_MODEL), FakeImageGenerator
-    )
+    if "image" not in _cache:
+        provider = s.IMAGE_PROVIDER.strip().lower()
+        if provider == "cloudflare":
+            has_keys = bool(s.CLOUDFLARE_ACCOUNT_ID and s.CLOUDFLARE_API_TOKEN)
+            if s.USE_FAKE_AI or not has_keys:
+                _cache["image"] = FakeImageGenerator()
+            else:
+                _cache["image"] = CloudflareImageGenerator(
+                    s.CLOUDFLARE_ACCOUNT_ID,
+                    s.CLOUDFLARE_API_TOKEN,
+                    s.CLOUDFLARE_IMAGE_MODEL,
+                    timeout=s.IMAGE_TIMEOUT_SECONDS,
+                    daily_limit=s.IMAGE_DAILY_LIMIT,
+                )
+        elif provider == "gemini":
+            _get(
+                "image",
+                lambda: GeminiImageGenerator(s.GEMINI_API_KEY, s.IMAGE_MODEL, s.IMAGE_DAILY_LIMIT),
+                FakeImageGenerator,
+            )
+        else:
+            raise ValueError(
+                f"Unknown IMAGE_PROVIDER: {s.IMAGE_PROVIDER!r} (use gemini or cloudflare)"
+            )
+    return _cache["image"]  # type: ignore[no-any-return]
+
+
+async def can_draw_illustrations() -> bool:
+    """True if an illustration can be drawn now; otherwise visuals use (free) Mermaid diagrams.
+
+    No: no real image provider is set up (no key) while real AI is on, so we would only
+    have the fake 1x1 picture; or today's free pictures (IMAGE_DAILY_LIMIT) are used up.
+    """
+    from ai_service.daily_limits import has_quota
+
+    s = get_settings()
+    generator = get_image_generator()
+    quota_provider = getattr(generator, "quota_provider", None)
+    if quota_provider is None:  # the fake: fine for tests / offline dev, never for students
+        return s.use_fakes
+    return await has_quota(quota_provider, "image", s.IMAGE_DAILY_LIMIT)
+
+
+def get_diagram_renderer() -> DiagramRenderer:
+    """Kroki (Mermaid -> PNG). Tests (ENVIRONMENT=test) get a fake, so they never use the network.
+
+    Kroki is free and needs no key, so dev uses the real one even with USE_FAKE_AI=true.
+    """
+    from ai_service.providers.diagram_renderer import FakeDiagramRenderer, KrokiRenderer
+
+    s = get_settings()
+    if "diagram" not in _cache:
+        if s.ENVIRONMENT == "test":
+            _cache["diagram"] = FakeDiagramRenderer()
+        else:
+            _cache["diagram"] = KrokiRenderer(s.KROKI_URL, timeout=s.KROKI_TIMEOUT_SECONDS)
+    return _cache["diagram"]  # type: ignore[no-any-return]
 
 
 def get_storage() -> StorageProvider:
@@ -103,6 +170,7 @@ def provider_names() -> dict[str, str]:
     return {
         "llm": getattr(get_llm(), "name", "?"),
         "embedder": getattr(get_embedder(), "name", "?"),
+        "image": getattr(get_image_generator(), "name", "?"),
     }
 
 

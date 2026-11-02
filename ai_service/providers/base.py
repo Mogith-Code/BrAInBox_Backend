@@ -56,6 +56,12 @@ class ImageProvider(Protocol):
         ...
 
 
+class DiagramRenderer(Protocol):
+    async def render_png(self, mermaid_code: str) -> bytes | None:
+        """PNG bytes of a Mermaid diagram, or None if it could not be rendered."""
+        ...
+
+
 class StorageProvider(Protocol):
     async def save(self, path: str, data: bytes, content_type: str) -> str:
         """Store bytes and return the storage path."""
