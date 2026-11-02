@@ -6,7 +6,7 @@ Options are answered by letter: "A" = first option, "B" = second, ... "E".
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModuleStatus(BaseModel):
@@ -21,6 +21,36 @@ class PaperGenerateRequest(BaseModel):
     topic_ids: list[uuid.UUID] = Field(min_length=1, max_length=10)
     num_questions: int = Field(default=20, ge=1, le=60)
     title: str | None = Field(default=None, max_length=200)
+
+
+class UnitPaperGenerateRequest(BaseModel):
+    units: list[int] = Field(default_factory=list, description="Unit numbers (1..10)")
+    unit_numbers: list[int] = Field(default_factory=list, description="Unit numbers (1..10)")
+    subject: str = "Biology"
+    num_questions: int = Field(default=8, ge=1, le=60)
+    title: str | None = Field(default=None, max_length=200)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "subject": "Biology",
+                "units": [2, 6],
+                "num_questions": 8,
+                "title": "Model Paper: Units 2 & 6",
+            }
+        }
+    }
+
+    @model_validator(mode="after")
+    def unify_units(self) -> "UnitPaperGenerateRequest":
+        if not self.unit_numbers and self.units:
+            self.unit_numbers = self.units
+        elif not self.units and self.unit_numbers:
+            self.units = self.unit_numbers
+        if not self.unit_numbers:
+            raise ValueError("At least one unit must be specified in 'units' or 'unit_numbers'")
+        return self
+
 
 
 class StudentQuestion(BaseModel):

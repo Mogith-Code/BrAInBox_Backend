@@ -35,6 +35,7 @@ from api.modules.exams.schemas import (
     StudentQuestion,
     SubmitRequest,
     TopicScore,
+    UnitPaperGenerateRequest,
 )
 from api.modules.performance import service as performance_service
 from api.modules.questions import service as questions_service
@@ -219,6 +220,96 @@ async def generate_paper(
         ],
         warnings=warnings,
     )
+
+
+async def generate_paper_by_units(
+    session: AsyncSession, user: CurrentUser, req: UnitPaperGenerateRequest, ai: AIClient
+) -> PaperOut:
+    """Generate an AI model paper for the chosen units (1..10) and save it for this student."""
+    unit_numbers = sorted(set(req.unit_numbers))
+    if any(u < 1 or u > 10 for u in unit_numbers):
+        raise AppError(
+            "Unit numbers must be between 1 and 10", code="INVALID_UNITS", status_code=422
+        )
+    if req.num_questions < len(unit_numbers):
+        raise AppError(
+            "num_questions must be at least the number of selected units",
+            code="NOT_ENOUGH_QUESTIONS",
+            status_code=422,
+        )
+
+    all_units = await syllabus_service.list_units(session)
+    units_by_number = {u.number: u for u in all_units}
+    selected_units = [units_by_number[n] for n in unit_numbers if n in units_by_number]
+    if len(selected_units) != len(unit_numbers):
+        missing = [str(n) for n in unit_numbers if n not in units_by_number]
+        raise NotFoundError(
+            f"Units not found in syllabus: {', '.join(missing)}", code="UNIT_NOT_FOUND"
+        )
+
+    payload = {
+        "num_questions": req.num_questions,
+        "units": [
+            {
+                "unit_id": str(u.id),
+                "unit_number": u.number,
+                "title": u.title,
+            }
+            for u in selected_units
+        ],
+    }
+
+    job = await jobs.create_job(session, JobType.BUILD_PAPER, payload, requested_by=user.id)
+    job = await jobs.run_job_inline(session, job, ai)
+    if job.status != JobStatus.SUCCEEDED or not job.result:
+        raise AppError(
+            "The AI service could not generate the paper. Please try again.",
+            code="AI_GENERATION_FAILED",
+            status_code=502,
+        )
+
+    output: dict[str, Any] = job.result.get("result", {})
+    warnings: list[str] = output.get("warnings", [])
+    if not output.get("questions"):
+        raise AppError(
+            f"Could not generate any questions. {' '.join(warnings)}".strip(),
+            code="NO_QUESTIONS_GENERATED",
+            status_code=502,
+        )
+
+    title = req.title or "Model paper: Units " + ", ".join(str(n) for n in unit_numbers)
+    paper, saved = await repository.save_generated_paper(
+        session,
+        title=title[:200],
+        user_id=user.id,
+        questions=output["questions"],
+        prompt_version=output.get("prompt_version"),
+    )
+    await session.commit()
+
+    show = _show_answers()
+    unit_titles = {str(u.id): f"Unit {u.number}: {u.title}" for u in selected_units}
+    return PaperOut(
+        paper_id=paper.id,
+        title=paper.title,
+        total_questions=len(saved),
+        questions=[
+            StudentQuestion(
+                id=q.id,
+                topic_id=q.topic_id,
+                topic=unit_titles.get(str(q.topic_id), f"Unit {q.topic_id}")
+                if q.topic_id
+                else "General",
+                question=q.question,
+                options=q.options,
+                marks=q.marks,
+                correct_answer=q.correct_answer if show else None,
+            )
+            for q in saved
+        ],
+        warnings=warnings,
+    )
+
 
 
 # --------------------------------------------------------------------------- submit

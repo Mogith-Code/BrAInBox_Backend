@@ -80,6 +80,17 @@ async def test_generate_needs_at_least_one_topic(client):
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+async def test_generate_by_units_validation(client):
+    # Empty unit list
+    res = await client.post("/api/v1/papers/generate-by-units", json={"unit_numbers": []})
+    assert res.status_code == 422
+
+    # Invalid unit number
+    res = await client.post("/api/v1/papers/generate-by-units", json={"unit_numbers": [0, 11]})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "INVALID_UNITS"
+
+
 # --------------------------------------------------------------------------- full flow (DB)
 
 
@@ -94,20 +105,22 @@ class FakeAIClient:
         self.calls.append(job_type)
         if self.fail:
             raise ServiceUnavailableError("ai_service down")
+        items = payload.get("topics") or payload.get("units") or []
         questions = [
             {
-                "question": f"Question {i} about {topic['title']}?",
+                "question": f"Question {i} about {item['title']}?",
                 "options": OPTIONS,
                 "correct_answer": "Mitochondrion",  # = letter B
                 "explanation": "",
                 "marks": 1,
-                "topic_id": topic["topic_id"],
+                "topic_id": item.get("topic_id"),
             }
-            for topic in payload["topics"]
+            for item in items
             for i in range(payload["num_questions"])
         ]
         result = {"questions": questions, "warnings": [], "prompt_version": "test.v1"}
         return {"job_id": job_id, "job_type": job_type, "result": result}
+
 
     async def sync(self, name, payload):  # type: ignore[no-untyped-def]
         self.calls.append(name)
