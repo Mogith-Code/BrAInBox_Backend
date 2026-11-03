@@ -121,7 +121,6 @@ class FakeAIClient:
         result = {"questions": questions, "warnings": [], "prompt_version": "test.v1"}
         return {"job_id": job_id, "job_type": job_type, "result": result}
 
-
     async def sync(self, name, payload):  # type: ignore[no-untyped-def]
         self.calls.append(name)
         explanations = {i["question_id"]: "Because ATP is made there." for i in payload["items"]}

@@ -2,7 +2,7 @@
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ModuleStatus(BaseModel):
@@ -47,4 +47,3 @@ class ExplainQuestionRequest(BaseModel):
 class ExplainQuestionResponse(BaseModel):
     question_id: uuid.UUID
     explanation: str
-

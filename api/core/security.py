@@ -158,7 +158,6 @@ async def get_current_user(claims: FirebaseClaimsDep, session: SessionDep) -> Cu
     )
 
 
-
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 

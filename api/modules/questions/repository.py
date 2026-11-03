@@ -115,4 +115,3 @@ async def list_by_topic(
     for opt in options:
         by_question[opt.question_id].append(opt)
     return [(q, by_question[q.id]) for q in questions]
-

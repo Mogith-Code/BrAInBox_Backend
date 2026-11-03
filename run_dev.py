@@ -5,7 +5,6 @@ Usage:
 """
 
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -58,4 +57,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

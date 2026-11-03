@@ -74,4 +74,3 @@ async def explain_question(
 ) -> ExplainQuestionResponse:
     """Get an AI explanation for why the correct answer is right and why the chosen option is wrong."""
     return await service.explain_question(session, question_id, req.selected_option_id, ai)
-

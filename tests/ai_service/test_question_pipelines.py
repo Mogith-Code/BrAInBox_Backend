@@ -202,4 +202,3 @@ async def test_unit_without_sources_becomes_a_warning(monkeypatch):
     assert result["questions"] == []
     assert len(result["warnings"]) == 1
     assert "No syllabus content found" in result["warnings"][0]
-

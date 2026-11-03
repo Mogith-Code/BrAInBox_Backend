@@ -5,22 +5,22 @@ Usage:
 """
 
 import asyncio
+import sqlite3
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import select, text
 
 from scripts.import_question_bank import DEFAULT_FILE as QUESTIONS_FILE
 from scripts.import_question_bank import run as import_questions
 from scripts.seed_syllabus import DEFAULT_FILE as SYLLABUS_FILE
 from scripts.seed_syllabus import seed as seed_syllabus
-from pgvector.sqlalchemy import Vector
 from shared.db.base import Base
 from shared.db.models import *  # noqa: F403 (loads all models into Base.metadata)
-from shared.db.models import User, DocumentChunk, SourceDocument, Unit
+from shared.db.models import DocumentChunk, SourceDocument, Unit, User
 from shared.db.session import SessionLocal, engine
-from shared.enums import UserRole, SourceType, DocumentStatus
-import sqlite3
+from shared.enums import DocumentStatus, SourceType, UserRole
 
 
 async def main() -> None:
@@ -37,27 +37,33 @@ async def main() -> None:
             print("  -> pgvector extension available!")
         except Exception:
             await conn.rollback()
-            await conn.execute(text("""
+            await conn.execute(
+                text("""
                 DO $$
                 BEGIN
                     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
                         CREATE DOMAIN vector AS float4[];
                     END IF;
                 END $$;
-            """))
+            """)
+            )
             await conn.commit()
             print("  -> Created vector type domain for development!")
 
         # Check for old prototype 'papers' table that lacks 'id'
-        res = await conn.execute(text("""
-            SELECT column_name FROM information_schema.columns 
+        res = await conn.execute(
+            text("""
+            SELECT column_name FROM information_schema.columns
             WHERE table_name='papers' AND column_name='id'
-        """))
+        """)
+        )
         if not res.fetchone():
             # Old papers table exists without 'id'
-            table_check = await conn.execute(text("""
+            table_check = await conn.execute(
+                text("""
                 SELECT 1 FROM information_schema.tables WHERE table_name='papers'
-            """))
+            """)
+            )
             if table_check.fetchone():
                 print("  -> Backing up and replacing old prototype 'papers' table...")
                 await conn.execute(text("DROP TABLE IF EXISTS old_papers_backup CASCADE"))
@@ -106,7 +112,9 @@ async def main() -> None:
 
     print("\n[6/6] Ensuring RAG syllabus chunks are loaded...")
     async with SessionLocal() as session:
-        chunk_count = (await session.execute(text("SELECT count(*) FROM document_chunks"))).scalar() or 0
+        chunk_count = (
+            await session.execute(text("SELECT count(*) FROM document_chunks"))
+        ).scalar() or 0
         if chunk_count == 0:
             chroma_db_path = Path("data/chroma_db/chroma.sqlite3")
             if chroma_db_path.exists():
@@ -125,20 +133,22 @@ async def main() -> None:
                 rows = cur.fetchall()
                 units_res = await session.execute(select(Unit))
                 units = {u.number: u for u in units_res.scalars().all()}
-                
+
                 by_unit: dict[int, list] = {}
                 for r in rows:
                     _, doc_text, unit_name, unit_no, source_file, page_start = r
                     if doc_text and unit_no:
-                        by_unit.setdefault(int(unit_no), []).append((doc_text, unit_name, source_file, page_start))
-                
+                        by_unit.setdefault(int(unit_no), []).append(
+                            (doc_text, unit_name, source_file, page_start)
+                        )
+
                 for unit_no, chunks in sorted(by_unit.items()):
                     unit = units.get(unit_no)
                     if not unit:
                         continue
                     source_file = chunks[0][2] or f"unit_{unit_no}.pdf"
                     file_key = f"syllabus/{source_file}"
-                    
+
                     doc = SourceDocument(
                         title=f"Unit {unit_no}: {unit.title}",
                         source_type=SourceType.SYLLABUS,
@@ -149,17 +159,19 @@ async def main() -> None:
                     )
                     session.add(doc)
                     await session.flush()
-                    
+
                     for idx, (doc_text, unit_name, _, page) in enumerate(chunks):
-                        session.add(DocumentChunk(
-                            document_id=doc.id,
-                            chunk_index=idx,
-                            text=doc_text,
-                            heading_path=f"Unit {unit_no} > {unit_name or unit.title}",
-                            page=page or 1,
-                            token_count=len(doc_text.split()),
-                            unit_id=unit.id,
-                        ))
+                        session.add(
+                            DocumentChunk(
+                                document_id=doc.id,
+                                chunk_index=idx,
+                                text=doc_text,
+                                heading_path=f"Unit {unit_no} > {unit_name or unit.title}",
+                                page=page or 1,
+                                token_count=len(doc_text.split()),
+                                unit_id=unit.id,
+                            )
+                        )
                 await session.commit()
                 print(f"  -> Loaded {len(rows)} syllabus chunks into document_chunks!")
         else:

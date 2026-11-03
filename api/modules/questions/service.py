@@ -114,6 +114,7 @@ async def explain_question(
     ]
     response = await ai.sync("explain-mcq", {"items": items})
     explanations = response.get("result", {}).get("explanations", {})
-    explanation_text = explanations.get(str(question.id), question.explanation or "No explanation available.")
+    explanation_text = explanations.get(
+        str(question.id), question.explanation or "No explanation available."
+    )
     return ExplainQuestionResponse(question_id=question.id, explanation=explanation_text)
-

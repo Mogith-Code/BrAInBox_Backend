@@ -130,7 +130,8 @@ class PgVectorStore:
             _PGVECTOR_AVAILABLE = True
             # cosine similarity = 1 - cosine distance
             return [
-                _to_retrieved(row[0], row[1], row[2], vector_score=1.0 - float(row[3])) for row in rows
+                _to_retrieved(row[0], row[1], row[2], vector_score=1.0 - float(row[3]))
+                for row in rows
             ]
         except Exception as exc:
             _PGVECTOR_AVAILABLE = False
@@ -149,7 +150,10 @@ class PgVectorStore:
             stmt = self._apply_filters(stmt, filters).order_by(rank.desc()).limit(limit)
             rows = (await self.session.execute(stmt)).all()
             if rows:
-                return [_to_retrieved(row[0], row[1], row[2], keyword_score=float(row[3])) for row in rows]
+                return [
+                    _to_retrieved(row[0], row[1], row[2], keyword_score=float(row[3]))
+                    for row in rows
+                ]
         except Exception as exc:
             logger.debug("keyword_search query error: %s", exc)
 

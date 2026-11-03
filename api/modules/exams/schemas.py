@@ -52,7 +52,6 @@ class UnitPaperGenerateRequest(BaseModel):
         return self
 
 
-
 class StudentQuestion(BaseModel):
     """A question as the student sees it (no answer)."""
 
