@@ -95,11 +95,15 @@ async def get_firebase_claims(
     """Verify the Firebase ID token and return its claims (uid, email, ...)."""
     settings = get_settings()
 
+    token = credentials.credentials if credentials else None
+
     # In dev/test: allow dev tokens (e.g. "dev-token" or "dev-admin")
-    if settings.ENVIRONMENT != "prod":
-        token = credentials.credentials if credentials else None
-        if token in DEV_CLAIMS:
-            return DEV_CLAIMS[token]
+    if settings.ENVIRONMENT != "prod" and token in DEV_CLAIMS:
+        return DEV_CLAIMS[token]
+
+    # In local development ("dev"): allow Swagger UI requests without a token to use dev-student
+    if settings.ENVIRONMENT == "dev" and not token:
+        return DEV_CLAIMS["dev-token"]
 
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("Missing bearer token")
