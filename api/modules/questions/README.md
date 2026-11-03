@@ -8,13 +8,14 @@
 | **Jira epic** | BRN-E06 Question Bank *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/questions` (tasks: `feature/questions/BRN-xx-short-name`) |
 
-## Planned endpoints
+## Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/v1/questions/{id}` | One question with options (no answer key) |
-| GET | `/api/v1/topics/{id}/questions` | Practice questions for a topic |
-| POST | `/api/v1/questions/{id}/explain` | Explain an MCQ answer (sync AI call) |
+| Method | Path | Status | Description |
+|---|---|---|---|
+| GET | `/api/v1/questions/{id}` | ✅ done | One question with options (no answer key) |
+| GET | `/api/v1/topics/{id}/questions` | ✅ done | Practice questions for a topic |
+| POST | `/api/v1/questions/{id}/explain` | ✅ done | Explain an MCQ answer (sync AI call) |
+
 
 Placeholder right now: `GET /api/v1/questions/status` → `{"module": "questions", "status": "todo"}` (needs login).
 
