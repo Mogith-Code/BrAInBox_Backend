@@ -13,6 +13,7 @@
 | Method | Path | Status | Description |
 |---|---|---|---|
 | POST | `/api/v1/papers/generate` | ✅ done | AI model paper for 1–10 topics (BUILD_PAPER job, run inline) |
+| POST | `/api/v1/papers/generate-by-units` | ✅ done | AI model paper for 1–10 units (BUILD_PAPER job, batching + spread rule) |
 | POST | `/api/v1/papers/{id}/submit` | ✅ done | Mark answers ("A".."E"), score per topic, weak topics, AI explanations; saves an attempt |
 | GET | `/api/v1/papers` | planned | List papers |
 | GET | `/api/v1/papers/{id}` | planned | One paper |

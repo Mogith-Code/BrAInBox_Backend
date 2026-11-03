@@ -83,10 +83,28 @@ def _get_firebase_app() -> Any:
     return _firebase_app
 
 
+DEV_CLAIMS = {
+    "dev-token": {"uid": "dev-student", "email": "student@dev.local", "name": "Dev Student"},
+    "dev-admin": {"uid": "dev-admin", "email": "admin@dev.local", "name": "Dev Admin"},
+}
+
+
 async def get_firebase_claims(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> dict[str, Any]:
     """Verify the Firebase ID token and return its claims (uid, email, ...)."""
+    settings = get_settings()
+
+    token = credentials.credentials if credentials else None
+
+    # In dev/test: allow dev tokens (e.g. "dev-token" or "dev-admin")
+    if settings.ENVIRONMENT != "prod" and token in DEV_CLAIMS:
+        return DEV_CLAIMS[token]
+
+    # In local development ("dev"): allow Swagger UI requests without a token to use dev-student
+    if settings.ENVIRONMENT == "dev" and not token:
+        return DEV_CLAIMS["dev-token"]
+
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("Missing bearer token")
 
@@ -111,6 +129,21 @@ async def get_current_user(claims: FirebaseClaimsDep, session: SessionDep) -> Cu
     """Return the registered, active user for this token."""
     result = await session.execute(select(User).where(User.firebase_uid == claims["uid"]))
     user = result.scalar_one_or_none()
+
+    # In dev/test: auto-provision development user if needed
+    if user is None and claims.get("uid") in ("dev-student", "dev-admin"):
+        role = UserRole.ADMIN if claims["uid"] == "dev-admin" else UserRole.STUDENT
+        user = User(
+            firebase_uid=claims["uid"],
+            email=claims.get("email", f"{claims['uid']}@test.local"),
+            display_name=claims.get("name", "Dev User"),
+            role=role,
+            email_verified=True,
+            is_active=True,
+        )
+        session.add(user)
+        await session.commit()
+
     if user is None:
         raise UnauthorizedError(
             "User is not registered. Call POST /api/v1/auth/register first.",

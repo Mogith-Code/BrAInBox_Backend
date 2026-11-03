@@ -58,6 +58,60 @@ async def random_approved_mcqs(
     return [(q, by_question[q.id]) for q in questions]
 
 
-# TODO(Udith): add the queries this module needs, one small async function each, e.g.
-#   async def get_by_id(session: AsyncSession, id: uuid.UUID) -> Question | None:
-#       return await session.get(Question, id)
+async def get_by_id(
+    session: AsyncSession, question_id: uuid.UUID
+) -> tuple[Question, list[MCQOption]] | None:
+    """Fetch one question with its MCQ options."""
+    question = await session.get(Question, question_id)
+    if not question:
+        return None
+    options = (
+        (
+            await session.execute(
+                select(MCQOption)
+                .where(MCQOption.question_id == question_id)
+                .order_by(MCQOption.label)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return question, list(options)
+
+
+async def list_by_topic(
+    session: AsyncSession, topic_id: uuid.UUID, limit: int = 10
+) -> list[tuple[Question, list[MCQOption]]]:
+    """Approved questions for a topic, with their options in order."""
+    questions = (
+        (
+            await session.execute(
+                select(Question)
+                .where(
+                    Question.topic_id == topic_id,
+                    Question.status == ContentStatus.APPROVED,
+                )
+                .order_by(Question.created_at)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not questions:
+        return []
+    options = (
+        (
+            await session.execute(
+                select(MCQOption)
+                .where(MCQOption.question_id.in_([q.id for q in questions]))
+                .order_by(MCQOption.label)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_question: dict[uuid.UUID, list[MCQOption]] = {q.id: [] for q in questions}
+    for opt in options:
+        by_question[opt.question_id].append(opt)
+    return [(q, by_question[q.id]) for q in questions]

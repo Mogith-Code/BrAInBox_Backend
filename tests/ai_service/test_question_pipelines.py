@@ -170,3 +170,36 @@ async def test_next_action_reason_with_fake_llm(ai_client):
     result = response.json()["result"]
     assert result["reason"].startswith("Fake AI reason")
     assert result["prompt_version"] == "home/next_action.v1"
+
+
+async def test_build_paper_by_units_with_fake_llm(monkeypatch):
+    monkeypatch.setattr(generate_questions, "retrieve", fake_retrieve([chunk()]))
+    u1, u2 = str(uuid.uuid4()), str(uuid.uuid4())
+    result = await paper_builder.run(
+        {
+            "num_questions": 2,
+            "units": [
+                {"unit_id": u1, "unit_number": 2, "title": "Cellular Basis"},
+                {"unit_id": u2, "unit_number": 6, "title": "Genetics"},
+            ],
+        }
+    )
+    assert result["warnings"] == []
+    assert result["prompt_version"] == "questions/generate_mcq.v2"
+    assert len(result["questions"]) == 2
+    assert {q["unit_id"] for q in result["questions"]} == {u1, u2}
+    for q in result["questions"]:
+        assert q["correct_answer"] in q["options"]
+
+
+async def test_unit_without_sources_becomes_a_warning(monkeypatch):
+    monkeypatch.setattr(generate_questions, "retrieve", fake_retrieve([]))
+    result = await paper_builder.run(
+        {
+            "num_questions": 2,
+            "units": [{"unit_id": "u1", "unit_number": 8, "title": "Environmental"}],
+        }
+    )
+    assert result["questions"] == []
+    assert len(result["warnings"]) == 1
+    assert "No syllabus content found" in result["warnings"][0]

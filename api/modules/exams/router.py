@@ -27,6 +27,7 @@ from api.modules.exams.schemas import (
     PaperGenerateRequest,
     PaperOut,
     SubmitRequest,
+    UnitPaperGenerateRequest,
 )
 
 router = APIRouter(tags=["Exams"])
@@ -50,6 +51,20 @@ async def generate_paper(
     """Questions are split evenly across the topics and grounded in the approved syllabus
     sources. Answers are never returned (except with DEBUG_SHOW_ANSWERS in dev)."""
     return await service.generate_paper(session, user, req, ai)
+
+
+@router.post(
+    "/papers/generate-by-units",
+    response_model=PaperOut,
+    response_model_exclude_none=True,
+    summary="Generate an AI model paper from syllabus units",
+)
+async def generate_paper_by_units(
+    req: UnitPaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+) -> PaperOut:
+    """Generate a model paper by selecting 1..10 syllabus units. Questions are split evenly
+    across the units and grounded in the syllabus."""
+    return await service.generate_paper_by_units(session, user, req, ai)
 
 
 @router.post(

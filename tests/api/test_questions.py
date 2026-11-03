@@ -1,4 +1,6 @@
-"""Placeholder tests for the questions module. Owner: Udith."""
+"""Tests for the questions module. Owner: Udith."""
+
+import uuid
 
 
 async def test_questions_status_requires_login(anon_client):
@@ -13,4 +15,13 @@ async def test_questions_status_placeholder(client):
     assert response.json() == {"module": "questions", "status": "todo"}
 
 
-# TODO(Udith): add tests for every real endpoint of this module.
+async def test_get_question_not_found(client):
+    response = await client.get(f"/api/v1/questions/{uuid.uuid4()}")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "QUESTION_NOT_FOUND"
+
+
+async def test_topic_questions_not_found(client):
+    response = await client.get(f"/api/v1/topics/{uuid.uuid4()}/questions")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "TOPIC_NOT_FOUND"
