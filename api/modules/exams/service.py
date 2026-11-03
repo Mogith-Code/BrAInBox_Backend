@@ -288,6 +288,8 @@ async def generate_paper_by_units(
     await session.commit()
 
     show = _show_answers()
+    # Unit questions have no topic, so label each one with its unit ("Unit 6: Genetics").
+    # `saved` is in the same order as output["questions"].
     unit_titles = {str(u.id): f"Unit {u.number}: {u.title}" for u in selected_units}
     return PaperOut(
         paper_id=paper.id,
@@ -297,15 +299,13 @@ async def generate_paper_by_units(
             StudentQuestion(
                 id=q.id,
                 topic_id=q.topic_id,
-                topic=unit_titles.get(str(q.topic_id), f"Unit {q.topic_id}")
-                if q.topic_id
-                else "General",
+                topic=unit_titles.get(str(item.get("unit_id")), "General"),
                 question=q.question,
                 options=q.options,
                 marks=q.marks,
                 correct_answer=q.correct_answer if show else None,
             )
-            for q in saved
+            for q, item in zip(saved, output["questions"], strict=True)
         ],
         warnings=warnings,
     )

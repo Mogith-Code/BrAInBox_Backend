@@ -69,6 +69,8 @@ async def save_generated_paper(
     for position, item in enumerate(questions, start=1):
         question = Question(
             topic_id=uuid.UUID(item["topic_id"]) if item.get("topic_id") else None,
+            # Unit papers (generate-by-units) have a unit but no topic
+            unit_id=uuid.UUID(item["unit_id"]) if item.get("unit_id") else None,
             question_type=QuestionType.MCQ,
             stem=item["question"],
             explanation=item.get("explanation") or None,
