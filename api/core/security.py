@@ -95,13 +95,11 @@ async def get_firebase_claims(
     """Verify the Firebase ID token and return its claims (uid, email, ...)."""
     settings = get_settings()
 
-    # In dev/test: allow dev tokens or default to dev student if Firebase is not configured
+    # In dev/test: allow dev tokens (e.g. "dev-token" or "dev-admin")
     if settings.ENVIRONMENT != "prod":
         token = credentials.credentials if credentials else None
         if token in DEV_CLAIMS:
             return DEV_CLAIMS[token]
-        if not token and not settings.FIREBASE_PROJECT_ID:
-            return DEV_CLAIMS["dev-token"]
 
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("Missing bearer token")

@@ -173,7 +173,6 @@ async def test_next_action_reason_with_fake_llm(ai_client):
 
 
 async def test_build_paper_by_units_with_fake_llm(monkeypatch):
-    monkeypatch.setattr(paper_builder, "retrieve", fake_retrieve([chunk()]))
     monkeypatch.setattr(generate_questions, "retrieve", fake_retrieve([chunk()]))
     unit_id = str(uuid.uuid4())
     result = await paper_builder.run(
@@ -191,7 +190,6 @@ async def test_build_paper_by_units_with_fake_llm(monkeypatch):
 
 
 async def test_unit_without_sources_becomes_a_warning(monkeypatch):
-    monkeypatch.setattr(paper_builder, "retrieve", fake_retrieve([]))
     monkeypatch.setattr(generate_questions, "retrieve", fake_retrieve([]))
     result = await paper_builder.run(
         {
