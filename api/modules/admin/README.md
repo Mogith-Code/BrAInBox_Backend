@@ -20,7 +20,7 @@ Everything here is mounted under **`/api/v1/admin`** and requires role **`admin`
 | `rag_admin.py` | Samni | `/admin/rag` | `POST /documents` (upload + RAG_INGEST job), `GET /documents`, `POST /documents/{id}/reindex` |
 | `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
 | `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
-| `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | units / topics / concepts CRUD |
+| `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts manager (details in `syllabus/README.md`) |
 | `analytics_admin.py` | Keshomigha | `/admin/analytics` | usage, performance, AI cost |
 | `moderation_admin.py` | Mogith | `/admin/moderation` | reports queue (posts, replies, visuals) |
 | `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
