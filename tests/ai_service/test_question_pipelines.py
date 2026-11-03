@@ -174,18 +174,21 @@ async def test_next_action_reason_with_fake_llm(ai_client):
 
 async def test_build_paper_by_units_with_fake_llm(monkeypatch):
     monkeypatch.setattr(generate_questions, "retrieve", fake_retrieve([chunk()]))
-    unit_id = str(uuid.uuid4())
+    u1, u2 = str(uuid.uuid4()), str(uuid.uuid4())
     result = await paper_builder.run(
         {
             "num_questions": 2,
-            "units": [{"unit_id": unit_id, "unit_number": 2, "title": "Cellular Basis"}],
+            "units": [
+                {"unit_id": u1, "unit_number": 2, "title": "Cellular Basis"},
+                {"unit_id": u2, "unit_number": 6, "title": "Genetics"},
+            ],
         }
     )
     assert result["warnings"] == []
     assert result["prompt_version"] == "questions/generate_mcq.v2"
     assert len(result["questions"]) == 2
+    assert {q["unit_id"] for q in result["questions"]} == {u1, u2}
     for q in result["questions"]:
-        assert q["unit_id"] == unit_id
         assert q["correct_answer"] in q["options"]
 
 

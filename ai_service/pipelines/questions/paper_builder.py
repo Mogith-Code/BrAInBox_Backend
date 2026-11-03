@@ -42,7 +42,11 @@ async def _build_from_units(payload: dict[str, Any]) -> dict[str, Any]:
     for unit, count in zip(units, counts, strict=True):
         if count == 0:
             continue
-        unit_id = uuid.UUID(unit["unit_id"]) if unit.get("unit_id") else None
+        unit_id_raw = unit.get("unit_id")
+        try:
+            unit_id = uuid.UUID(str(unit_id_raw)) if unit_id_raw else None
+        except (ValueError, AttributeError):
+            unit_id = None
         unit_no = unit.get("unit_number")
         unit_title = str(unit.get("title") or f"Unit {unit_no}").strip()
 
@@ -73,7 +77,7 @@ async def _build_from_units(payload: dict[str, Any]) -> dict[str, Any]:
                 )
 
         questions.extend(unit_generated)
-        if len(unit_generated) < count:
+        if 0 < len(unit_generated) < count:
             warnings.append(f"{unit_title}: only {len(unit_generated)} of {count} questions")
 
     return {"questions": questions, "warnings": warnings, "prompt_version": PROMPT_ID}
