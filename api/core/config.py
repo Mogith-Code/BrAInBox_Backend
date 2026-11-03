@@ -46,6 +46,15 @@ class ApiSettings(SharedSettings):
     # --- A/L exam dates per year, JSON in the env, e.g. {"2027": "2027-08-02"} (real dates TBD)
     AL_EXAM_DATES: dict[int, date] = {}
 
+    # --- Visuals
+    # How many visuals one student may ask for in 24 hours (each one costs an AI call).
+    VISUALS_DAILY_LIMIT: int = 20
+    # Signed image URLs (Firebase Storage) stay valid this long. 7 days is the maximum.
+    VISUAL_URL_EXPIRY_DAYS: int = 7
+    # Dev only (no STORAGE_BUCKET): image URLs point at this API, e.g. http://10.0.2.2:8000.
+    # Empty = the address the app used for the request (works for the emulator and localhost).
+    PUBLIC_BASE_URL: str = ""
+
     API_VERSION: str = "0.1.0"
 
     def cors_exact_origins(self) -> list[str]:
