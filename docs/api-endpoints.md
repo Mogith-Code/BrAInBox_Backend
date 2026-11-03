@@ -82,9 +82,9 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/questions/{id}` | One question with options (no answer key) |
-| GET | `/api/v1/topics/{id}/questions` | Practice questions for a topic |
-| POST | `/api/v1/questions/{id}/explain` | Explain an MCQ answer (sync AI call) |
+| GET | `/api/v1/questions/{id}` | ✅ One question with options (no answer key, no explanation). Approved or my own only, else `QUESTION_NOT_FOUND` |
+| GET | `/api/v1/topics/{id}/questions` | ✅ Approved practice questions for a topic (`limit` 1-50, default 10) |
+| POST | `/api/v1/questions/{id}/explain` | ✅ `{selected_option_id?}` → `{question_id, explanation}` (sync AI call, after answering) |
 
 ## quizzes — Udith
 
@@ -105,6 +105,7 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/v1/papers/generate` | ✅ AI model paper for 1–10 topics (BUILD_PAPER) |
+| POST | `/api/v1/papers/generate-by-units` | ✅ `{units: [1-10], num_questions, title?}` → paper; questions spread over the units, each labelled "Unit N: title" (`INVALID_UNITS`, `UNIT_NOT_FOUND`, `NO_QUESTIONS_GENERATED`) |
 | POST | `/api/v1/papers/{id}/submit` | ✅ Mark answers, topic scores, weak topics, explanations |
 | GET | `/api/v1/papers` | List papers |
 | GET | `/api/v1/papers/{id}` | One paper |
