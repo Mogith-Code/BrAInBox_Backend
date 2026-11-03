@@ -47,9 +47,9 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/units` | All 10 units |
-| GET | `/api/v1/units/{id}/topics` | Topics of a unit |
-| GET | `/api/v1/topics/{id}` | One topic with its concepts |
+| GET | `/api/v1/units` | ✅ Current units, Unit 1 first, with `topic_count` |
+| GET | `/api/v1/units/{id}/topics` | ✅ The unit and its current topics, with `concept_count` |
+| GET | `/api/v1/topics/{id}` | ✅ One topic with its unit and current concepts (`is_outdated` flag) |
 
 ## content — Samni
 
@@ -182,7 +182,7 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | `rag_admin.py` | Samni | `/admin/rag` | `POST /documents` (upload + RAG_INGEST job), `GET /documents`, `POST /documents/{id}/reindex` |
 | `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
 | `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
-| `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | units / topics / concepts CRUD |
+| `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts: list (outdated included), add, edit, mark outdated; delete only empty + unused topics/concepts (units are never deleted) |
 | `analytics_admin.py` | Keshomigha | `/admin/analytics` | usage, performance, AI cost |
 | `moderation_admin.py` | Mogith | `/admin/moderation` | ✅ `GET /reports` (visual reports with `visual_title` + `image_url`); planned: posts, replies, resolve |
 | `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
