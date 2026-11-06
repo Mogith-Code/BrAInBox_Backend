@@ -40,7 +40,12 @@ from api.modules.performance.schemas import (
     TopicFeedback,
     TopicInsightsResponse,
     TopicPerformance,
+    UnitInsightsResponse,
+    UnitMasteryOut,
+    UnitRank,
 )
+from api.modules.syllabus import service as syllabus_service
+from api.modules.syllabus.schemas import UnitOut
 from shared.db.models import UnitMastery
 
 MODULE_NAME = "performance"
@@ -383,6 +388,81 @@ async def unit_mastery_week_ago(session: AsyncSession, user_id: uuid.UUID) -> di
     return await repository.latest_unit_mastery(
         session, user_id, before=clock.now() - timedelta(days=7)
     )
+
+
+# ---------------------------------------------------------------- GET /insights/units
+
+NOT_ASSESSED_TEXT = "Not assessed yet"
+UNIT_NOTE = (
+    "Unit mastery (0-100) comes from your newest diagnostic, quiz or exam for each unit. "
+    + GRADE_NOTE
+)
+
+
+def _unit_out(unit: UnitOut, latest: UnitMastery | None, week_ago: int | None) -> UnitMasteryOut:
+    if latest is None:
+        return UnitMasteryOut(
+            unit_id=unit.id,
+            number=unit.number,
+            title=unit.title,
+            topic_count=unit.topic_count,
+            mastery=None,
+            grade=None,
+            grade_label=None,
+            status=TopicStatus.NOT_ATTEMPTED,
+            understanding=NOT_ASSESSED_TEXT,
+            change_week=None,
+            source=None,
+            measured_at=None,
+        )
+    band = grading.grade_for(latest.mastery)
+    return UnitMasteryOut(
+        unit_id=unit.id,
+        number=unit.number,
+        title=unit.title,
+        topic_count=unit.topic_count,
+        mastery=latest.mastery,
+        grade=band.grade,
+        grade_label=band.label,
+        status=band.status,
+        understanding=band.understanding,
+        # Only compare a unit with ITSELF a week ago; a unit first measured this week has no change.
+        change_week=latest.mastery - week_ago if week_ago is not None else None,
+        source=latest.source,
+        measured_at=latest.created_at,
+    )
+
+
+def build_unit_insights(
+    units: list[UnitOut], latest: dict[uuid.UUID, UnitMastery], week_ago: dict[uuid.UUID, int]
+) -> UnitInsightsResponse:
+    """Pure: one row per current syllabus unit (Unit 1 first). Units without a measurement are
+    `not_attempted` with mastery None - never 0 % - and are left out of the average."""
+    rows = [_unit_out(u, latest.get(u.id), week_ago.get(u.id)) for u in units]
+    ranks = [
+        UnitRank(unit_id=u.id, number=u.number, title=u.title, mastery=latest[u.id].mastery)
+        for u in units
+        if u.id in latest
+    ]
+    return UnitInsightsResponse(
+        units=rows,
+        assessed_units=len(ranks),
+        total_units=len(rows),
+        average_mastery=(round(sum(r.mastery for r in ranks) / len(ranks), 1) if ranks else None),
+        # Ties: the lower unit number wins, so the answer doesn't change between requests.
+        strongest=max(ranks, key=lambda r: (r.mastery, -r.number)) if ranks else None,
+        weakest=min(ranks, key=lambda r: (r.mastery, r.number)) if ranks else None,
+        grade_bands=grade_bands_out(),
+        note=UNIT_NOTE,
+    )
+
+
+async def get_unit_insights(session: AsyncSession, user: CurrentUser) -> UnitInsightsResponse:
+    """GET /insights/units: the logged-in student's mastery per unit."""
+    units = await syllabus_service.get_units(session)
+    latest = await repository.latest_unit_mastery_rows(session, user.id)
+    week_ago = await unit_mastery_week_ago(session, user.id)
+    return build_unit_insights(units, latest, week_ago)
 
 
 # ---------------------------------------------------------------- streak
