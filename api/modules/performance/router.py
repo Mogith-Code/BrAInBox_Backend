@@ -3,10 +3,10 @@
 Implemented:
     GET    /api/v1/insights/topics                         Topic-wise MCQ scores, weak topics,
                                                            feedback (own data; ?attempt_id= for one)
+    GET    /api/v1/insights/units                          Mastery per unit (own data)
 
 Planned endpoints (details in README.md):
     GET    /api/v1/insights/summary                        Overall progress
-    GET    /api/v1/insights/units                          Mastery per unit
     GET    /api/v1/insights/concepts                       Weakest concepts
     GET    /api/v1/mistakes                                My mistakes (filter by type/unit)
     (service) record_mistake() and update_mastery() called by quizzes/exams/evaluation
@@ -21,7 +21,11 @@ from fastapi import APIRouter
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.performance import service
-from api.modules.performance.schemas import ModuleStatus, TopicInsightsResponse
+from api.modules.performance.schemas import (
+    ModuleStatus,
+    TopicInsightsResponse,
+    UnitInsightsResponse,
+)
 
 router = APIRouter(tags=["Performance"])
 
@@ -45,3 +49,14 @@ async def topic_insights(
     """Scores every Biology topic from the student's own finished attempts (or only
     `attempt_id`). Topics with fewer than 5 valid answers are marked `insufficient_data`."""
     return await service.get_topic_insights(session, user, attempt_id)
+
+
+@router.get(
+    "/insights/units",
+    response_model=UnitInsightsResponse,
+    summary="My mastery per unit, with the change over the last week",
+)
+async def unit_insights(user: CurrentUserDep, session: SessionDep) -> UnitInsightsResponse:
+    """Every current unit, Unit 1 first, with the newest mastery (0-100) and its grade.
+    A unit never measured has `mastery: null` and status `not_attempted` (never 0 %)."""
+    return await service.get_unit_insights(session, user)

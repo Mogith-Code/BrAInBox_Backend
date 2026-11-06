@@ -140,7 +140,7 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 |---|---|---|
 | GET | `/api/v1/insights/topics` | ✅ My topic-wise MCQ scores, grades, weak topics and feedback (`?attempt_id=` for one attempt) |
 | GET | `/api/v1/insights/summary` | Overall progress |
-| GET | `/api/v1/insights/units` | Mastery per unit |
+| GET | `/api/v1/insights/units` | ✅ My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
 | GET | `/api/v1/insights/concepts` | Weakest concepts |
 | GET | `/api/v1/mistakes` | My mistakes (filter by type/unit) |
 | - | (service) | record_mistake() and update_mastery() called by quizzes/exams/evaluation |

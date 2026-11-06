@@ -1,11 +1,13 @@
 """Tests for the performance module: topic-wise MCQ scores, weak topics, feedback.
 Owner: Keshomigha."""
 
+import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import delete
 
 from api.modules.exams.service import GradingQuestion, evaluate_paper
 from api.modules.performance import repository, service
@@ -17,6 +19,9 @@ from api.modules.performance.grading import (
 )
 from api.modules.performance.repository import AnswerRow
 from api.modules.performance.schemas import MisconceptionOut, ResourceOut
+from api.modules.syllabus import service as syllabus_service
+from api.modules.syllabus.schemas import UnitOut
+from shared.db.models import Unit, UnitMastery
 from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
 from tests.conftest import STUDENT, _client
 
@@ -463,3 +468,141 @@ async def test_insights_after_submitting_a_paper(exam_data):  # noqa: F811 (fixt
     assert (topic["percent"], topic["grade"], topic["status"]) == (40.0, "S", "weak")
     assert body["weak_topics"] == ["Test topic"]
     assert len(body["feedback"][0]["review_questions"]) == 3
+
+
+# --------------------------------------------------------------------------- unit insights (no DB)
+
+NOW = datetime(2026, 11, 6, 9, 0, tzinfo=UTC)
+
+
+def _units(*numbers: int) -> list[UnitOut]:
+    return [
+        UnitOut(id=uuid.uuid4(), number=n, title=f"Unit {n} title", topic_count=3) for n in numbers
+    ]
+
+
+def _snapshot(mastery: int, source: str = "diagnostic") -> SimpleNamespace:
+    return SimpleNamespace(mastery=mastery, source=source, created_at=NOW)
+
+
+def test_unit_insights_for_a_new_student():
+    result = service.build_unit_insights(_units(1, 2), latest={}, week_ago={})
+    assert [u.number for u in result.units] == [1, 2]
+    assert all(u.mastery is None for u in result.units)  # not assessed, never 0 %
+    assert all(u.status == TopicStatus.NOT_ATTEMPTED for u in result.units)
+    assert result.assessed_units == 0 and result.total_units == 2
+    assert result.average_mastery is None
+    assert result.strongest is None and result.weakest is None
+
+
+def test_unit_grades_use_the_shared_grade_bands():
+    units = _units(1, 2, 3)
+    latest = {units[0].id: _snapshot(75), units[1].id: _snapshot(54), units[2].id: _snapshot(20)}
+    rows = service.build_unit_insights(units, latest, week_ago={}).units
+    assert [(u.grade, u.status) for u in rows] == [
+        ("A", TopicStatus.STRONG),
+        ("S", TopicStatus.WEAK),
+        ("F", TopicStatus.VERY_WEAK),
+    ]
+    assert rows[0].source == "diagnostic" and rows[0].measured_at == NOW
+
+
+def test_weekly_change_compares_a_unit_only_with_itself():
+    units = _units(1, 2)
+    latest = {units[0].id: _snapshot(70, "exam"), units[1].id: _snapshot(40)}
+    week_ago = {units[0].id: 55}  # unit 2 was first measured this week
+    rows = service.build_unit_insights(units, latest, week_ago).units
+    assert rows[0].change_week == 15
+    assert rows[1].change_week is None
+
+
+def test_average_strongest_and_weakest_skip_units_not_assessed():
+    units = _units(1, 2, 3, 4)
+    latest = {units[0].id: _snapshot(80), units[1].id: _snapshot(40), units[3].id: _snapshot(40)}
+    result = service.build_unit_insights(units, latest, week_ago={})
+    assert result.assessed_units == 3
+    assert result.average_mastery == 53.3  # (80 + 40 + 40) / 3, unit 3 left out
+    assert result.strongest.number == 1
+    assert result.weakest.number == 2  # tie at 40: the lower unit number wins
+
+
+def test_measurements_of_units_not_in_the_syllabus_are_ignored():
+    units = _units(1)
+    latest = {units[0].id: _snapshot(60), uuid.uuid4(): _snapshot(10)}  # e.g. an outdated unit
+    result = service.build_unit_insights(units, latest, week_ago={})
+    assert result.total_units == 1 and result.assessed_units == 1
+    assert result.weakest.mastery == 60
+
+
+# --------------------------------------------------------------------------- unit insights (API)
+
+
+async def test_unit_insights_requires_login(anon_client):
+    assert (await anon_client.get("/api/v1/insights/units")).status_code == 401
+
+
+async def test_unit_insights_for_the_logged_in_student(client, monkeypatch):
+    units = _units(1, 2)
+    asked_for = []
+
+    async def get_units(session):
+        return units
+
+    async def latest_rows(session, user_id):
+        asked_for.append(user_id)
+        return {units[1].id: _snapshot(62)}
+
+    async def week_ago(session, user_id, before=None):
+        return {}
+
+    monkeypatch.setattr(syllabus_service, "get_units", get_units)
+    monkeypatch.setattr(repository, "latest_unit_mastery_rows", latest_rows)
+    monkeypatch.setattr(repository, "latest_unit_mastery", week_ago)
+
+    response = await client.get("/api/v1/insights/units")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert asked_for == [STUDENT.id]  # only the student's own data
+    assert [u["status"] for u in body["units"]] == ["not_attempted", "developing"]
+    assert body["units"][1]["mastery"] == 62
+    assert body["units"][1]["grade"] == "C"
+    assert body["weakest"]["number"] == 2
+    assert [b["grade"] for b in body["grade_bands"]] == ["A", "B", "C", "S", "F"]
+
+
+# --------------------------------------------------------------------------- unit insights (DB)
+
+
+@pytest.mark.db
+async def test_unit_insights_from_the_database(client, student_in_db, db_session):
+    unit = Unit(number=random.randint(100_000, 999_000), title="Mastery test unit")
+    db_session.add(unit)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    db_session.add_all(
+        [
+            UnitMastery(
+                user_id=STUDENT.id,
+                unit_id=unit.id,
+                mastery=40,
+                source="diagnostic",
+                created_at=now - timedelta(days=9),
+            ),
+            UnitMastery(
+                user_id=STUDENT.id,
+                unit_id=unit.id,
+                mastery=65,
+                source="exam",
+                created_at=now - timedelta(hours=1),
+            ),
+        ]
+    )
+    await db_session.commit()
+    try:
+        body = (await client.get("/api/v1/insights/units")).json()
+        mine = next(u for u in body["units"] if u["unit_id"] == str(unit.id))
+        assert (mine["mastery"], mine["source"], mine["change_week"]) == (65, "exam", 25)
+        assert (mine["grade"], mine["status"]) == ("B", "good")
+    finally:
+        await db_session.execute(delete(Unit).where(Unit.id == unit.id))
+        await db_session.commit()
