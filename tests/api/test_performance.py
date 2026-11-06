@@ -3,12 +3,13 @@ Owner: Keshomigha."""
 
 import random
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete
 
+from api.core import clock
 from api.modules.exams.service import GradingQuestion, evaluate_paper
 from api.modules.performance import repository, service
 from api.modules.performance.grading import (
@@ -606,3 +607,114 @@ async def test_unit_insights_from_the_database(client, student_in_db, db_session
     finally:
         await db_session.execute(delete(Unit).where(Unit.id == unit.id))
         await db_session.commit()
+
+
+# --------------------------------------------------------------------------- summary (no DB)
+
+TODAY = date(2026, 11, 6)
+
+
+def _summary(units=None, latest=None, week_ago=None, rows=None, days=None):  # type: ignore[no-untyped-def]
+    unit_insights = service.build_unit_insights(units or [], latest or {}, week_ago or {})
+    return service.build_summary(
+        unit_insights, service.analyse_answers(rows or []), days or set(), TODAY
+    )
+
+
+def test_summary_for_a_new_student():
+    s = _summary(units=_units(1, 2))
+    assert (s.overall_mastery, s.mastery_change_week) == (None, None)
+    assert (s.units_assessed, s.total_units) == (0, 2)
+    assert s.strongest_unit is None and s.weakest_unit is None
+    assert (s.mcq.attempted, s.mcq.percent, s.mcq.grade) == (0, None, None)  # never 0 %
+    assert s.attempts_completed == 0
+    assert s.topics.model_dump() == dict.fromkeys(s.topics.model_dump(), 0)
+    assert s.weak_topics == []
+    assert (s.streak_days, s.study_days_last_7, s.last_study_date) == (0, 0, None)
+
+
+def test_summary_mastery_matches_unit_insights():
+    units = _units(1, 2, 3)
+    latest = {units[0].id: _snapshot(70), units[1].id: _snapshot(40), units[2].id: _snapshot(31)}
+    week_ago = {units[0].id: 50, units[1].id: 50}  # unit 3 is new this week
+    s = _summary(units=units, latest=latest, week_ago=week_ago)
+    assert s.overall_mastery == 47.0  # (70 + 40 + 31) / 3, as in /insights/units
+    assert s.mastery_change_week == 5.0  # (+20 and -10) / 2: unit 3 has no change to count
+    assert (s.strongest_unit.number, s.weakest_unit.number) == (1, 3)
+
+
+def test_summary_mcq_score_and_topic_levels():
+    rows = Rows()
+    rows.many(GENETICS, correct=1, wrong=5)  # 16.7 % over 6: very weak (F), reliable
+    rows.many(CELLS, correct=5, wrong=0)  # 100 %: strong (A)
+    rows.many(PHYSIOLOGY, correct=2, wrong=0)  # only 2 answers: insufficient data
+    s = _summary(rows=rows.rows)
+    assert (s.mcq.correct, s.mcq.attempted) == (8, 13)
+    assert s.attempts_completed == 1
+    assert (s.topics.strong, s.topics.very_weak, s.topics.insufficient_data) == (1, 1, 1)
+    assert s.weak_topics == ["Genetics"]  # insufficient-data topics are never "weak"
+
+
+def test_summary_streak_and_study_days():
+    days = {TODAY, TODAY - timedelta(days=1), TODAY - timedelta(days=3), TODAY - timedelta(days=10)}
+    s = _summary(days=days)
+    assert s.streak_days == 2  # today + yesterday; the gap two days ago ends it
+    assert s.study_days_last_7 == 3  # today, yesterday, 3 days ago (10 days ago is too old)
+    assert s.last_study_date == TODAY
+
+
+def test_summary_streak_survives_until_the_student_studies_today():
+    s = _summary(days={TODAY - timedelta(days=1), TODAY - timedelta(days=2)})
+    assert s.streak_days == 2
+    assert s.last_study_date == TODAY - timedelta(days=1)
+
+
+# --------------------------------------------------------------------------- summary (API)
+
+
+async def test_summary_requires_login(anon_client):
+    assert (await anon_client.get("/api/v1/insights/summary")).status_code == 401
+
+
+async def test_summary_for_the_logged_in_student(client, monkeypatch):
+    units = _units(1, 2)
+    rows = Rows()
+    rows.many(CELLS, correct=4, wrong=1)
+    asked_for = []
+
+    async def get_units(session):
+        return units
+
+    async def latest_rows(session, user_id):
+        asked_for.append(user_id)
+        return {units[0].id: _snapshot(80)}
+
+    async def no_week_ago(session, user_id, before=None):
+        return {}
+
+    async def answers(session, user_id, attempt_id=None):
+        asked_for.append(user_id)
+        return rows.rows
+
+    async def study_days(session, user_id, since):
+        asked_for.append(user_id)
+        return {clock.today()}  # the app's Sri Lanka date, like the service uses
+
+    monkeypatch.setattr(syllabus_service, "get_units", get_units)
+    monkeypatch.setattr(repository, "latest_unit_mastery_rows", latest_rows)
+    monkeypatch.setattr(repository, "latest_unit_mastery", no_week_ago)
+    monkeypatch.setattr(repository, "get_mcq_answer_rows", answers)
+    monkeypatch.setattr(repository, "study_days_since", study_days)
+
+    response = await client.get("/api/v1/insights/summary")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert asked_for == [STUDENT.id] * 3  # only the student's own data
+    assert (body["overall_mastery"], body["units_assessed"], body["total_units"]) == (80.0, 1, 2)
+    assert (body["mcq"]["correct"], body["mcq"]["attempted"], body["mcq"]["percent"]) == (
+        4,
+        5,
+        80.0,
+    )
+    assert body["topics"]["strong"] == 1
+    assert (body["streak_days"], body["study_days_last_7"]) == (1, 1)
