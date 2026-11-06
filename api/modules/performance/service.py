@@ -32,6 +32,7 @@ from api.modules.performance.grading import (
 from api.modules.performance.repository import AnswerRow
 from api.modules.performance.schemas import (
     GradeBandOut,
+    InsightsSummaryResponse,
     MisconceptionOut,
     ModuleStatus,
     OverallResult,
@@ -40,6 +41,7 @@ from api.modules.performance.schemas import (
     TopicFeedback,
     TopicInsightsResponse,
     TopicPerformance,
+    TopicStatusCounts,
     UnitInsightsResponse,
     UnitMasteryOut,
     UnitRank,
@@ -490,3 +492,57 @@ async def get_streak(session: AsyncSession, user_id: uuid.UUID) -> int:
         session, user_id, today - timedelta(days=STREAK_LOOKBACK_DAYS)
     )
     return count_streak(days, today)
+
+
+# =========================================================================== GET /insights/summary
+# One number per Insights card. Built from the same pieces as /insights/units and
+# /insights/topics, so the overview never disagrees with the detail screens.
+
+SUMMARY_NOTE = (
+    "Mastery comes from your newest diagnostic, quiz or exam per unit; MCQ scores from all "
+    "your finished attempts. " + GRADE_NOTE
+)
+
+
+def _topic_counts(topics: list[TopicPerformance]) -> TopicStatusCounts:
+    counts = TopicStatusCounts()
+    for t in topics:
+        if t.status != TopicStatus.NOT_ATTEMPTED:
+            setattr(counts, t.status.value, getattr(counts, t.status.value) + 1)
+    return counts
+
+
+def build_summary(
+    units: UnitInsightsResponse, analysis: TopicAnalysis, study_days: set[date], today: date
+) -> InsightsSummaryResponse:
+    """Pure: combine unit mastery, MCQ results and study days into the overview."""
+    # Each unit is compared only with itself (see build_unit_insights), then averaged.
+    changes = [u.change_week for u in units.units if u.change_week is not None]
+    week = {today - timedelta(days=n) for n in range(7)}
+    return InsightsSummaryResponse(
+        overall_mastery=units.average_mastery,
+        mastery_change_week=round(sum(changes) / len(changes), 1) if changes else None,
+        units_assessed=units.assessed_units,
+        total_units=units.total_units,
+        strongest_unit=units.strongest,
+        weakest_unit=units.weakest,
+        mcq=analysis.overall,
+        attempts_completed=analysis.attempts_analysed,
+        topics=_topic_counts(analysis.topics),
+        weak_topics=[t.topic for t in analysis.topics if t.reliable and t.status in WEAK_STATUSES],
+        streak_days=count_streak(study_days, today),
+        study_days_last_7=len(study_days & week),
+        last_study_date=max((d for d in study_days if d <= today), default=None),
+        note=SUMMARY_NOTE,
+    )
+
+
+async def get_insights_summary(session: AsyncSession, user: CurrentUser) -> InsightsSummaryResponse:
+    """GET /insights/summary: the logged-in student's overview."""
+    today = clock.today()
+    units = await get_unit_insights(session, user)
+    analysis = analyse_answers(await repository.get_mcq_answer_rows(session, user.id))
+    study_days = await repository.study_days_since(
+        session, user.id, today - timedelta(days=STREAK_LOOKBACK_DAYS)
+    )
+    return build_summary(units, analysis, study_days, today)

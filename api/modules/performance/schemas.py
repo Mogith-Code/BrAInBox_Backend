@@ -1,7 +1,7 @@
 """Request / response models (Pydantic) for the performance module. Owner: Keshomigha."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -143,4 +143,39 @@ class UnitInsightsResponse(BaseModel):
     strongest: UnitRank | None
     weakest: UnitRank | None
     grade_bands: list[GradeBandOut]
+    note: str
+
+
+# ---------------------------------------------------------------- insights summary
+class TopicStatusCounts(BaseModel):
+    """How many topics the student is at each level (topics with at least one answer)."""
+
+    strong: int = 0
+    good: int = 0
+    developing: int = 0
+    weak: int = 0
+    very_weak: int = 0
+    insufficient_data: int = 0  # fewer than min_questions_per_topic valid answers
+
+
+class InsightsSummaryResponse(BaseModel):
+    """The Insights overview: one number per card, all from the student's own data."""
+
+    # Units (same numbers as GET /insights/units)
+    overall_mastery: float | None  # average over assessed units; None when none is assessed
+    # Average of each unit's own weekly change; None when no unit has a value 7+ days old.
+    mastery_change_week: float | None
+    units_assessed: int
+    total_units: int
+    strongest_unit: UnitRank | None
+    weakest_unit: UnitRank | None
+    # MCQs (same numbers as GET /insights/topics)
+    mcq: OverallResult
+    attempts_completed: int
+    topics: TopicStatusCounts
+    weak_topics: list[str]  # reliable topics graded S or F, weakest first
+    # Study habit
+    streak_days: int
+    study_days_last_7: int  # days with study activity in the last 7 days, today included
+    last_study_date: date | None
     note: str
