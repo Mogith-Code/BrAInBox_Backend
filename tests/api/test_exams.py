@@ -114,6 +114,7 @@ class FakeAIClient:
                 "explanation": "",
                 "marks": 1,
                 "topic_id": item.get("topic_id"),
+                "unit_id": item.get("unit_id"),  # set for unit papers
             }
             for item in items
             for i in range(payload["num_questions"])
@@ -217,3 +218,49 @@ async def test_submit_unknown_paper(exam_data):
         response = await c.post(f"/api/v1/papers/{uuid.uuid4()}/submit", json={"answers": []})
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "PAPER_NOT_FOUND"
+
+
+# --------------------------------------------------------------------------- unit papers (DB)
+
+
+@pytest.fixture
+async def free_unit(db_session):  # type: ignore[no-untyped-def]
+    """A unit with an unused number 1-10 (unit papers only accept 1-10), removed afterwards."""
+    from sqlalchemy import select
+
+    used = set((await db_session.execute(select(Unit.number))).scalars())
+    free = [n for n in range(1, 11) if n not in used]
+    if not free:
+        pytest.skip("units 1-10 already exist in the test database")
+    if await db_session.get(User, STUDENT.id) is None:
+        db_session.add(
+            User(id=STUDENT.id, firebase_uid=STUDENT.firebase_uid, role=UserRole.STUDENT)
+        )
+    unit = Unit(number=free[0], title="Genetics")
+    db_session.add(unit)
+    await db_session.commit()
+    yield unit
+    for stmt in (
+        delete(Question).where(Question.created_by == STUDENT.id),
+        delete(Paper).where(Paper.created_by == STUDENT.id),
+        delete(AIJob).where(AIJob.requested_by == STUDENT.id),
+        delete(User).where(User.id == STUDENT.id),
+        delete(Unit).where(Unit.id == unit.id),
+    ):
+        await db_session.execute(stmt)
+    await db_session.commit()
+
+
+@pytest.mark.db
+async def test_unit_paper_labels_questions_with_their_unit(free_unit, db_session):
+    async with _client(_app_with(FakeAIClient())) as c:
+        response = await c.post(
+            "/api/v1/papers/generate-by-units",
+            json={"units": [free_unit.number], "num_questions": 2},
+        )
+    assert response.status_code == 200, response.text
+    paper = response.json()
+    assert paper["title"] == f"Model paper: Units {free_unit.number}"
+    assert [q["topic"] for q in paper["questions"]] == [f"Unit {free_unit.number}: Genetics"] * 2
+    saved = await db_session.get(Question, uuid.UUID(paper["questions"][0]["id"]))
+    assert saved is not None and saved.unit_id == free_unit.id  # the unit is saved too

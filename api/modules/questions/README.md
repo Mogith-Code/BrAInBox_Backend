@@ -12,7 +12,7 @@
 
 | Method | Path | Status | Description |
 |---|---|---|---|
-| GET | `/api/v1/questions/{id}` | ✅ done | One question with options (no answer key) |
+| GET | `/api/v1/questions/{id}` | ✅ done | One question with options (no answer key, no explanation). Approved questions, or the student's own AI ones |
 | GET | `/api/v1/topics/{id}/questions` | ✅ done | Practice questions for a topic |
 | POST | `/api/v1/questions/{id}/explain` | ✅ done | Explain an MCQ answer (sync AI call) |
 

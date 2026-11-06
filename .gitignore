@@ -41,3 +41,8 @@ data/local_storage/
 # Eval data may contain real student answers
 ai_service/evals/data/*
 !ai_service/evals/data/.gitkeep
+
+# Never commit these: they hold NIE book text (copyrighted) or local vector databases
+data/ocr_cache/
+data/chroma_db/
+*.sqlite3

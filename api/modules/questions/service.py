@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.ai_client import AIClient
 from api.core.errors import NotFoundError
+from api.core.security import CurrentUser
 from api.modules.questions import repository
 from api.modules.questions.schemas import (
     ExplainQuestionResponse,
@@ -23,6 +24,8 @@ from api.modules.questions.schemas import (
     TopicPracticeQuestionsOut,
 )
 from api.modules.syllabus import service as syllabus_service
+from shared.db.models import MCQOption, Question
+from shared.enums import ContentStatus
 
 MODULE_NAME = "questions"
 
@@ -51,12 +54,27 @@ async def get_example_questions(
     return examples
 
 
-async def get_question(session: AsyncSession, question_id: uuid.UUID) -> QuestionDetailOut:
-    """Fetch one question with its MCQ options (correct answer is hidden)."""
+async def _visible_question(
+    session: AsyncSession, user: CurrentUser, question_id: uuid.UUID
+) -> tuple[Question, list[MCQOption]]:
+    """A question this student may see: approved (question bank), or one of their own AI
+    questions (from their papers). Anything else is "not found", so it isn't leaked."""
     row = await repository.get_by_id(session, question_id)
-    if not row:
-        raise NotFoundError(f"Question '{question_id}' not found", code="QUESTION_NOT_FOUND")
-    question, options = row
+    if row is not None:
+        question = row[0]
+        own = question.created_by == user.id
+        if question.status == ContentStatus.APPROVED or own or user.is_admin:
+            return row
+    raise NotFoundError(f"Question '{question_id}' not found", code="QUESTION_NOT_FOUND")
+
+
+async def get_question(
+    session: AsyncSession, user: CurrentUser, question_id: uuid.UUID
+) -> QuestionDetailOut:
+    """Fetch one question with its MCQ options. The correct answer and the explanation are
+    hidden (the explanation gives the answer away); use POST /questions/{id}/explain after
+    answering."""
+    question, options = await _visible_question(session, user, question_id)
     return QuestionDetailOut(
         id=question.id,
         topic_id=question.topic_id,
@@ -64,7 +82,6 @@ async def get_question(session: AsyncSession, question_id: uuid.UUID) -> Questio
         stem=question.stem,
         marks=question.marks,
         options=[QuestionOptionOut(id=o.id, label=o.label, text=o.text) for o in options],
-        explanation=question.explanation,
     )
 
 
@@ -83,7 +100,6 @@ async def list_topic_questions(
             stem=q.stem,
             marks=q.marks,
             options=[QuestionOptionOut(id=o.id, label=o.label, text=o.text) for o in options],
-            explanation=q.explanation,
         )
         for q, options in rows
     ]
@@ -92,15 +108,13 @@ async def list_topic_questions(
 
 async def explain_question(
     session: AsyncSession,
+    user: CurrentUser,
     question_id: uuid.UUID,
     selected_option_id: uuid.UUID | None,
     ai: AIClient,
 ) -> ExplainQuestionResponse:
     """Explain an MCQ answer using the AI service."""
-    row = await repository.get_by_id(session, question_id)
-    if not row:
-        raise NotFoundError(f"Question '{question_id}' not found", code="QUESTION_NOT_FOUND")
-    question, options = row
+    question, options = await _visible_question(session, user, question_id)
     correct = next((o.text for o in options if o.is_correct), None) or ""
     selected = next((o.text for o in options if o.id == selected_option_id), None)
 

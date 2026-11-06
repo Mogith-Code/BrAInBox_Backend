@@ -9,8 +9,9 @@ Rule: routers only validate input, check the role and call `service`. No SQL her
 """
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from api.core.ai_client import AIClientDep
 from api.core.database import SessionDep
@@ -41,8 +42,11 @@ async def module_status(user: CurrentUserDep) -> ModuleStatus:
 async def get_question(
     question_id: uuid.UUID, user: CurrentUserDep, session: SessionDep
 ) -> QuestionDetailOut:
-    """Fetch one question with its options for student practice."""
-    return await service.get_question(session, question_id)
+    """Fetch one question with its options for student practice. Only approved questions
+    (or the student's own AI questions) are shown; the answer and explanation stay hidden.
+
+    Errors: 401 not logged in · 404 `QUESTION_NOT_FOUND`."""
+    return await service.get_question(session, user, question_id)
 
 
 @router.get(
@@ -54,7 +58,7 @@ async def list_topic_questions(
     topic_id: uuid.UUID,
     user: CurrentUserDep,
     session: SessionDep,
-    limit: int = 10,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> TopicPracticeQuestionsOut:
     """Approved practice questions for a topic from the question bank."""
     return await service.list_topic_questions(session, topic_id, limit=limit)
@@ -73,4 +77,4 @@ async def explain_question(
     ai: AIClientDep,
 ) -> ExplainQuestionResponse:
     """Get an AI explanation for why the correct answer is right and why the chosen option is wrong."""
-    return await service.explain_question(session, question_id, req.selected_option_id, ai)
+    return await service.explain_question(session, user, question_id, req.selected_option_id, ai)
