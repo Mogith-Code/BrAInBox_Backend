@@ -178,6 +178,19 @@ async def latest_unit_mastery(
     return {unit_id: mastery for unit_id, mastery in result.all()}
 
 
+async def latest_unit_mastery_rows(
+    session: AsyncSession, user_id: uuid.UUID
+) -> dict[uuid.UUID, UnitMastery]:
+    """{unit_id: newest snapshot row} - like latest_unit_mastery, plus source and date."""
+    result = await session.execute(
+        select(UnitMastery)
+        .where(UnitMastery.user_id == user_id)
+        .ext(distinct_on(UnitMastery.unit_id))
+        .order_by(UnitMastery.unit_id, UnitMastery.created_at.desc())
+    )
+    return {row.unit_id: row for row in result.scalars()}
+
+
 # ---------------------------------------------------------------- study activity (streak)
 async def add_study_day(session: AsyncSession, user_id: uuid.UUID, day: date) -> None:
     """One row per student per day; a second call on the same day does nothing."""
