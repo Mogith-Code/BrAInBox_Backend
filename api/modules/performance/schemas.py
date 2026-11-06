@@ -1,6 +1,7 @@
 """Request / response models (Pydantic) for the performance module. Owner: Keshomigha."""
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -104,5 +105,42 @@ class TopicInsightsResponse(BaseModel):
     weak_topics: list[str]  # reliable topics graded S or F, weakest first
     insufficient_data_topics: list[str]
     feedback: list[TopicFeedback]
+    grade_bands: list[GradeBandOut]
+    note: str
+
+
+# ---------------------------------------------------------------- unit insights
+class UnitMasteryOut(BaseModel):
+    """The student's current mastery of one unit (0-100), from the newest measurement."""
+
+    unit_id: uuid.UUID
+    number: int
+    title: str
+    topic_count: int
+    mastery: int | None  # None = never measured (shown as "not assessed", never 0 %)
+    grade: str | None
+    grade_label: str | None
+    status: TopicStatus  # strong .. very_weak, or not_attempted
+    understanding: str
+    # Change since 7 days ago; None when there is no measurement older than 7 days to compare.
+    change_week: int | None
+    source: str | None  # what measured it last: diagnostic | practice | exam | quiz
+    measured_at: datetime | None
+
+
+class UnitRank(BaseModel):
+    unit_id: uuid.UUID
+    number: int
+    title: str
+    mastery: int
+
+
+class UnitInsightsResponse(BaseModel):
+    units: list[UnitMasteryOut]  # syllabus order (Unit 1 first)
+    assessed_units: int
+    total_units: int
+    average_mastery: float | None  # over assessed units only; None when none is assessed
+    strongest: UnitRank | None
+    weakest: UnitRank | None
     grade_bands: list[GradeBandOut]
     note: str
