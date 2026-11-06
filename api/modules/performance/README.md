@@ -25,7 +25,7 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 | Method | Path | Status | Description |
 |---|---|---|---|
 | GET | `/api/v1/insights/topics` | ✅ done | My topic-wise MCQ scores, grades, weak topics and feedback. `?attempt_id=` limits it to one attempt |
-| GET | `/api/v1/insights/summary` | planned | Overall progress |
+| GET | `/api/v1/insights/summary` | ✅ done | My overview: overall mastery + weekly change, MCQ score, topic levels, streak and study days |
 | GET | `/api/v1/insights/units` | ✅ done | My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
 | GET | `/api/v1/insights/concepts` | planned | Weakest concepts |
 | GET | `/api/v1/mistakes` | planned | My mistakes (filter by type/unit) |
@@ -44,6 +44,22 @@ Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "st
    A unit first measured this week has `change_week: null` (nothing to compare with).
 5. `average_mastery`, `strongest` and `weakest` use assessed units only (ties: the lower unit number).
    Snapshots of units no longer in the syllabus are ignored.
+
+### How the summary is calculated (`GET /insights/summary`)
+
+One number per Insights card, built from the **same functions** as the detail endpoints, so the
+overview never disagrees with them:
+
+| Field | Comes from |
+|---|---|
+| `overall_mastery`, `units_assessed`, `total_units`, `strongest_unit`, `weakest_unit` | `/insights/units` (`average_mastery`, ...) |
+| `mastery_change_week` | average of each unit's own `change_week` (units without one are skipped; `null` if none) |
+| `mcq`, `attempts_completed` | `/insights/topics` (`overall`, `attempts_analysed`) |
+| `topics` | number of topics per status; `weak_topics` = reliable S/F topics, weakest first |
+| `streak_days` | consecutive study days ending today, or yesterday if not studied yet today |
+| `study_days_last_7`, `last_study_date` | `study_activity` (Sri Lanka date) |
+
+A new student gets `null` and `0`, never made-up values.
 
 ## Grade bands (`grading.py`)
 
