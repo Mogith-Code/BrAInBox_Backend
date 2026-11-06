@@ -26,12 +26,24 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 |---|---|---|---|
 | GET | `/api/v1/insights/topics` | ✅ done | My topic-wise MCQ scores, grades, weak topics and feedback. `?attempt_id=` limits it to one attempt |
 | GET | `/api/v1/insights/summary` | planned | Overall progress |
-| GET | `/api/v1/insights/units` | planned | Mastery per unit |
+| GET | `/api/v1/insights/units` | ✅ done | My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
 | GET | `/api/v1/insights/concepts` | planned | Weakest concepts |
 | GET | `/api/v1/mistakes` | planned | My mistakes (filter by type/unit) |
 | - | (service) | planned | record_mistake() and update_mastery() called by quizzes/exams/evaluation |
 
 Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "status": "todo"}` (needs login).
+
+### How unit insights are calculated (`GET /insights/units`)
+
+1. One row per **current** syllabus unit (from `syllabus.service.get_units`), Unit 1 first.
+2. `mastery` = the student's **newest** `unit_mastery` snapshot for that unit (written by the
+   diagnostic today; quizzes and exams later). `source` and `measured_at` say what measured it and when.
+3. Grade and status come from the same bands as topic insights (`grading.py`). A unit never measured has
+   `mastery: null`, status `not_attempted` and "Not assessed yet" - **never 0 %**.
+4. `change_week` = newest mastery − the newest snapshot **older than 7 days**, for that same unit.
+   A unit first measured this week has `change_week: null` (nothing to compare with).
+5. `average_mastery`, `strongest` and `weakest` use assessed units only (ties: the lower unit number).
+   Snapshots of units no longer in the syllabus are ignored.
 
 ## Grade bands (`grading.py`)
 
