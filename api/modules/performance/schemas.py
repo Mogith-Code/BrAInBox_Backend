@@ -6,6 +6,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from api.modules.performance.grading import TopicStatus
+from shared.enums import MistakeType
 
 
 class ModuleStatus(BaseModel):
@@ -179,3 +180,32 @@ class InsightsSummaryResponse(BaseModel):
     study_days_last_7: int  # days with study activity in the last 7 days, today included
     last_study_date: date | None
     note: str
+
+
+# ---------------------------------------------------------------- mistake journal
+class MistakeOut(BaseModel):
+    """One wrong MCQ answer. The question may be gone (deleted later): then its fields are null."""
+
+    id: uuid.UUID
+    question_id: uuid.UUID | None
+    question: str | None
+    your_answer: str | None
+    correct_answer: str | None
+    explanation: str | None  # the question's stored explanation
+    mistake_type: MistakeType
+    misconception: MisconceptionOut | None
+    correction: str | None  # how to fix the misconception, if one is linked
+    topic_id: uuid.UUID | None
+    topic: str | None
+    topic_number: str | None
+    unit_id: uuid.UUID | None
+    unit_number: int | None
+    unit: str | None
+    source: str | None  # where it happened: diagnostic | quiz | exam | practice
+    is_resolved: bool
+    resolved_at: datetime | None
+    created_at: datetime
+
+
+class MistakeUpdate(BaseModel):
+    resolved: bool  # true = the student fixed it ("Fixed" toggle), false = open again

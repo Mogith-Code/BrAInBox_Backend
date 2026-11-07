@@ -9,10 +9,12 @@ Only this module's `service.py` may import this file.
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from shared.db.models import (
     Attempt,
@@ -21,6 +23,7 @@ from shared.db.models import (
     Mistake,
     ModelAnswer,
     Question,
+    QuestionConcept,
     Resource,
     Response,
     StudyActivity,
@@ -28,16 +31,10 @@ from shared.db.models import (
     Unit,
     UnitMastery,
 )
-from shared.enums import ContentStatus, QuestionType
+from shared.enums import ContentStatus, MistakeType, QuestionType
 
 # Attempts in these states have been marked, so their responses can be analysed.
 FINISHED_ATTEMPT_STATUSES = ("submitted", "graded")
-
-
-async def count_mistakes(session: AsyncSession) -> int:
-    """Example query showing the pattern (replace with real queries)."""
-    result = await session.execute(select(func.count()).select_from(Mistake))
-    return result.scalar_one()
 
 
 async def get_attempt(session: AsyncSession, attempt_id: uuid.UUID) -> Attempt | None:
@@ -208,3 +205,155 @@ async def study_days_since(session: AsyncSession, user_id: uuid.UUID, since: dat
         )
     )
     return set(result.scalars())
+
+
+# ---------------------------------------------------------------- mistakes: recording
+async def recorded_response_ids(
+    session: AsyncSession, response_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Which of these responses already have a mistake row."""
+    if not response_ids:
+        return set()
+    result = await session.execute(
+        select(Mistake.response_id).where(Mistake.response_id.in_(response_ids))
+    )
+    return {response_id for response_id in result.scalars() if response_id is not None}
+
+
+async def get_main_concepts(
+    session: AsyncSession, question_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, uuid.UUID]:
+    """{question_id: the concept it tests most}. Questions without a concept are left out."""
+    if not question_ids:
+        return {}
+    result = await session.execute(
+        select(QuestionConcept.question_id, QuestionConcept.concept_id)
+        .where(QuestionConcept.question_id.in_(question_ids))
+        .ext(distinct_on(QuestionConcept.question_id))
+        # concept_id as the tie-break, so the same concept is chosen every time
+        .order_by(
+            QuestionConcept.question_id, QuestionConcept.weight.desc(), QuestionConcept.concept_id
+        )
+    )
+    return {question_id: concept_id for question_id, concept_id in result.all()}
+
+
+async def add_mistakes(session: AsyncSession, rows: list[Mistake]) -> None:
+    session.add_all(rows)
+    await session.flush()
+
+
+# ---------------------------------------------------------------- mistakes: journal
+@dataclass
+class MistakeRow:
+    """One mistake with everything the journal shows."""
+
+    mistake: Mistake
+    question: str | None
+    explanation: str | None
+    your_answer: str | None
+    topic_id: uuid.UUID | None
+    topic: str | None
+    topic_number: str | None
+    unit_id: uuid.UUID | None
+    unit_number: int | None
+    unit: str | None
+    source: str | None
+    misconception: Misconception | None
+
+
+def _mistakes_query(user_id: uuid.UUID) -> Select[Any]:
+    selected = aliased(MCQOption)
+    return (
+        select(
+            Mistake,
+            Question.stem.label("question"),
+            Question.explanation.label("explanation"),
+            selected.text.label("your_answer"),
+            Topic.id.label("topic_id"),
+            Topic.title.label("topic"),
+            Topic.number.label("topic_number"),
+            Unit.id.label("unit_id"),
+            Unit.number.label("unit_number"),
+            Unit.title.label("unit"),
+            Attempt.kind.label("source"),
+            Misconception,
+        )
+        .select_from(Mistake)
+        # All outer joins: a deleted question or response must not hide the mistake.
+        .outerjoin(Question, Question.id == Mistake.question_id)
+        .outerjoin(Response, Response.id == Mistake.response_id)
+        .outerjoin(selected, selected.id == Response.selected_option_id)
+        .outerjoin(Attempt, Attempt.id == Response.attempt_id)
+        .outerjoin(Topic, Topic.id == Question.topic_id)
+        .outerjoin(Unit, Unit.id == func.coalesce(Topic.unit_id, Question.unit_id))
+        .outerjoin(Misconception, Misconception.id == Mistake.misconception_id)
+        .where(Mistake.user_id == user_id)
+    )
+
+
+def _mistake_row(row: Any) -> MistakeRow:
+    return MistakeRow(
+        mistake=row.Mistake,
+        question=row.question,
+        explanation=row.explanation,
+        your_answer=row.your_answer,
+        topic_id=row.topic_id,
+        topic=row.topic,
+        topic_number=row.topic_number,
+        unit_id=row.unit_id,
+        unit_number=row.unit_number,
+        unit=row.unit,
+        source=str(row.source) if row.source is not None else None,
+        misconception=row.Misconception,
+    )
+
+
+async def list_mistakes(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    mistake_type: MistakeType | None = None,
+    unit_id: uuid.UUID | None = None,
+    resolved: bool | None = None,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[MistakeRow], int]:
+    """One page of the student's mistakes (newest first) and the total matching the filters."""
+    stmt = _mistakes_query(user_id)
+    if mistake_type is not None:
+        stmt = stmt.where(Mistake.mistake_type == mistake_type)
+    if unit_id is not None:
+        stmt = stmt.where(Unit.id == unit_id)
+    if resolved is not None:
+        stmt = stmt.where(
+            Mistake.resolved_at.is_not(None) if resolved else Mistake.resolved_at.is_(None)
+        )
+    total = await session.scalar(stmt.with_only_columns(func.count(Mistake.id)))
+    rows = await session.execute(
+        stmt.order_by(Mistake.created_at.desc(), Mistake.id).offset(offset).limit(limit)
+    )
+    return [_mistake_row(row) for row in rows.all()], total or 0
+
+
+async def get_mistake_row(
+    session: AsyncSession, user_id: uuid.UUID, mistake_id: uuid.UUID
+) -> MistakeRow | None:
+    """This student's mistake, or None (also when it belongs to someone else)."""
+    result = await session.execute(_mistakes_query(user_id).where(Mistake.id == mistake_id))
+    row = result.first()
+    return _mistake_row(row) if row else None
+
+
+async def get_correct_answers(
+    session: AsyncSession, question_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """{question_id: the correct option's text}."""
+    if not question_ids:
+        return {}
+    result = await session.execute(
+        select(MCQOption.question_id, MCQOption.text).where(
+            MCQOption.question_id.in_(question_ids), MCQOption.is_correct.is_(True)
+        )
+    )
+    return {question_id: text for question_id, text in result.all()}
