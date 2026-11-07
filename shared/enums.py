@@ -261,6 +261,14 @@ class MasterySource(StrEnum):
     QUIZ = "quiz"  # kept: allowed by unit_mastery.source
 
 
+class TopicProgressStatus(StrEnum):
+    """A student's progress with one topic (user_topic_progress.status)."""
+
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    MASTERED = "mastered"
+
+
 # ============================================================================ recommendations
 
 

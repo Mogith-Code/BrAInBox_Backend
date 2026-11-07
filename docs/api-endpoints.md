@@ -2,7 +2,7 @@
 
 All routes are under `/api/v1` and need `Authorization: Bearer <Firebase ID token>`, except `GET /api/v1/health`.
 Admin routes are under `/api/v1/admin` and need role `admin`.
-Every module currently has one placeholder: `GET /api/v1/<module>/status`. Admin areas have `GET /api/v1/admin/<area>/status`.
+Modules not built yet have a placeholder: `GET /api/v1/<module>/status`. Admin areas not built yet have `GET /api/v1/admin/<area>/status`.
 The live list is always at `http://localhost:8000/docs`.
 
 Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
@@ -48,8 +48,164 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/units` | ✅ Current units, Unit 1 first, with `topic_count` |
-| GET | `/api/v1/units/{id}/topics` | ✅ The unit and its current topics, with `concept_count` |
-| GET | `/api/v1/topics/{id}` | ✅ One topic with its unit and current concepts (`is_outdated` flag) |
+| GET | `/api/v1/subjects/{subject_id}/units` | ✅ Units of a subject + my progress (Learn) |
+| GET | `/api/v1/units/{unit_id}/topics` | ✅ Topics of a unit + sub-topics + my progress (Learn) |
+| GET | `/api/v1/topics/{topic_id}` | ✅ One topic with its sub-topics + my progress (Learn) |
+| POST | `/api/v1/topics/{topic_id}/start` | ✅ Mark a topic as started (Learn, handled by the performance module) |
+
+### Learn navigation (subject → units → topics → sub-topics)
+
+Data comes from `data/syllabus/al_biology_syllabus.json` (`python scripts/seed_syllabus.py`).
+Responses are **camelCase**. Ids in the path can be the public code or the UUID:
+
+| Level | `id` (public code) | Stored in |
+|---|---|---|
+| subject | `biology` | `subjects.code` |
+| unit | `u6` | `units.code` |
+| topic | `bio-6.1` | `topics.code` |
+| sub-topic | `bio-6.1.1` | `concepts.code` |
+
+`uuid` is the database id. Use it wherever another endpoint asks for a `topic_id`, e.g.
+`POST /uploads/text` or `POST /papers/generate`.
+
+Progress comes from `user_topic_progress` for the logged-in student. A topic with no row is
+`not_started`, `progressPct` 0, `isWeak` false.
+
+- Topic `status`: `not_started` | `in_progress` | `mastered`. `progressPct` = the topic score (0–100).
+- Unit `progressPct` = average topic score in the unit (not-started topics count as 0).
+- Unit `status`: **`not_started`** when no topic of the unit has any activity. Otherwise, from
+  `progressPct`: `strong` (≥ 75) | `improving` (40–74) | `weak` (< 40).
+
+How progress changes:
+
+| Event | Effect on the topic |
+|---|---|
+| `POST /topics/{topic_id}/start` | `not_started` → `in_progress`, score 0. Never changes an existing score or `mastered` |
+| `POST /papers/{id}/submit`, `POST /diagnostic/{attempt_id}/submit` | Recomputed from all my finished attempts, the same score as `GET /insights/topics` |
+
+| Topic result | `status` | `progressPct` | `isWeak` |
+|---|---|---|---|
+| No valid answers | unchanged | unchanged | unchanged |
+| Fewer than 5 valid answers | `in_progress` | percent correct | `false` |
+| 5+ valid answers, 75 % or more | `mastered` | percent correct | `false` |
+| 5+ valid answers, 55–74 % | `in_progress` | percent correct | `false` |
+| 5+ valid answers, below 55 % | `in_progress` | percent correct | `true` |
+
+Questions with no topic (papers from `POST /papers/generate-by-units`) don't change topic progress.
+
+**`GET /api/v1/subjects/biology/units`** → 200
+
+```json
+[
+  {
+    "id": "u6",
+    "uuid": "08bd699e-c905-46b8-817e-44e73bde406a",
+    "number": 6,
+    "title": "Genetics",
+    "periods": 22,
+    "icon": "dna",
+    "topicCount": 5,
+    "progressPct": 48,
+    "status": "improving"
+  },
+  {
+    "id": "u7",
+    "uuid": "2f6c1a50-7f0e-4a55-9a53-6f0b5c1d9e12",
+    "number": 7,
+    "title": "Evolution",
+    "periods": 10,
+    "icon": "tree",
+    "topicCount": 4,
+    "progressPct": 0,
+    "status": "not_started"
+  }
+]
+```
+
+**`POST /api/v1/topics/bio-6.1/start`** → 200 (no body). Safe to call every time the topic is opened.
+
+```json
+{
+  "id": "bio-6.1",
+  "uuid": "d1cf1dbb-eea9-4242-975d-b56e15e8a5c2",
+  "status": "in_progress",
+  "progressPct": 0,
+  "isWeak": false
+}
+```
+
+**`GET /api/v1/units/u6/topics`** → 200 (`topics` shortened to one item)
+
+```json
+{
+  "unit": {
+    "id": "u6",
+    "uuid": "08bd699e-c905-46b8-817e-44e73bde406a",
+    "number": 6,
+    "title": "Genetics",
+    "periods": 22,
+    "icon": "dna",
+    "topicCount": 5,
+    "progressPct": 48,
+    "status": "improving"
+  },
+  "summary": {"mastered": 1, "weak": 2},
+  "topics": [
+    {
+      "id": "bio-6.1",
+      "uuid": "d1cf1dbb-eea9-4242-975d-b56e15e8a5c2",
+      "code": "6.1",
+      "title": "Mendelian inheritance",
+      "order": 1,
+      "status": "mastered",
+      "progressPct": 90,
+      "isWeak": false,
+      "subtopics": [
+        {"id": "bio-6.1.1", "title": "Law of segregation"},
+        {"id": "bio-6.1.2", "title": "Law of independent assortment"},
+        {"id": "bio-6.1.3", "title": "Monohybrid cross"},
+        {"id": "bio-6.1.4", "title": "Dihybrid cross"},
+        {"id": "bio-6.1.5", "title": "Test cross"}
+      ]
+    }
+  ]
+}
+```
+
+**`GET /api/v1/topics/bio-6.1`** → 200
+
+```json
+{
+  "id": "bio-6.1",
+  "uuid": "d1cf1dbb-eea9-4242-975d-b56e15e8a5c2",
+  "code": "6.1",
+  "title": "Mendelian inheritance",
+  "order": 1,
+  "status": "mastered",
+  "progressPct": 90,
+  "isWeak": false,
+  "subtopics": [
+    {"id": "bio-6.1.1", "title": "Law of segregation"},
+    {"id": "bio-6.1.2", "title": "Law of independent assortment"},
+    {"id": "bio-6.1.3", "title": "Monohybrid cross"},
+    {"id": "bio-6.1.4", "title": "Dihybrid cross"},
+    {"id": "bio-6.1.5", "title": "Test cross"}
+  ],
+  "unitId": "u6",
+  "unitNumber": 6,
+  "unitTitle": "Genetics",
+  "isOutdated": false
+}
+```
+
+Lists show the current syllabus only (`is_outdated` rows are hidden, and an outdated unit is a
+404). `GET /topics/{id}` still opens an outdated topic, with `isOutdated: true`.
+
+Errors: 401 `UNAUTHORIZED` · 404 `SUBJECT_NOT_FOUND` / `UNIT_NOT_FOUND` / `TOPIC_NOT_FOUND`, e.g.
+
+```json
+{"error": {"code": "UNIT_NOT_FOUND", "message": "Unit 'u99' not found"}}
+```
 
 ## content — Samni
 

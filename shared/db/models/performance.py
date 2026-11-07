@@ -1,4 +1,5 @@
-"""Student performance: mistakes, mastery per concept / unit, study activity. Owner: Keshomigha."""
+"""Student performance: mistakes, mastery per concept / unit, study activity and
+progress per topic. Owner: Keshomigha."""
 
 import uuid
 from datetime import date, datetime
@@ -6,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -23,7 +25,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
-from shared.enums import MistakeType
+from shared.enums import MistakeType, TopicProgressStatus
 
 
 class Mistake(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -140,3 +142,28 @@ class StudyActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     activity_date: Mapped[date] = mapped_column(Date)
     minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     actions_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class UserTopicProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """How far one student is with one topic. Shown on the Learn screens (syllabus module).
+
+    No row yet = not started, score 0. `updated_at` is the last change.
+    """
+
+    __tablename__ = "user_topic_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "topic_id", name="uq_user_topic_progress_user_topic"),
+        CheckConstraint("score BETWEEN 0 AND 100", name="score_range"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[TopicProgressStatus] = mapped_column(
+        str_enum(TopicProgressStatus), default=TopicProgressStatus.NOT_STARTED
+    )
+    score: Mapped[int] = mapped_column(Integer, default=0)  # 0..100
+    is_weak: Mapped[bool] = mapped_column(Boolean, default=False)

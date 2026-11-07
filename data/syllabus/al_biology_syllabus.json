@@ -1,0 +1,120 @@
+{
+  "subject": { "id": "biology", "name": "Biology", "level": "G.C.E. A/L", "country": "LK" },
+  "note": "Unit list and period counts follow the NIE A/L Biology syllabus. Topic codes (e.g. 6.1) and sub-topic splits are a BrAInBox structure for the app - verify against the official NIE syllabus / teacher guide before release.",
+  "units": [
+    {
+      "id": "u1", "number": 1, "title": "Introduction to Biology", "periods": 5, "icon": "microscope",
+      "topics": [
+        { "code": "1.1", "title": "Nature and scope of biology", "subtopics": ["Definition and scope of biology", "Multidisciplinary nature of biology", "Importance of biology in daily life"] },
+        { "code": "1.2", "title": "Biology and challenges facing humanity", "subtopics": ["Food security", "Health and disease", "Environmental problems", "Energy and natural resources"] },
+        { "code": "1.3", "title": "Characteristics of living organisms", "subtopics": ["Organisation", "Metabolism", "Growth and development", "Responsiveness", "Reproduction", "Adaptation and evolution"] },
+        { "code": "1.4", "title": "Levels of organisation", "subtopics": ["Cell to biosphere hierarchy", "Cell as the basic unit of life"] }
+      ]
+    },
+    {
+      "id": "u2", "number": 2, "title": "Chemical and Cellular Basis of Life", "periods": 85, "icon": "flask",
+      "topics": [
+        { "code": "2.1", "title": "Chemical basis of life", "subtopics": ["Elements in living matter", "Properties and biological importance of water"] },
+        { "code": "2.2", "title": "Biological molecules", "subtopics": ["Carbohydrates", "Lipids", "Proteins", "Nucleic acids"] },
+        { "code": "2.3", "title": "Microscopy and cell theory", "subtopics": ["Light and electron microscopes", "Cell theory"] },
+        { "code": "2.4", "title": "Cell structure and function", "subtopics": ["Prokaryotic vs eukaryotic cells", "Plant vs animal cells", "Organelles and their functions", "Plasma membrane and transport"] },
+        { "code": "2.5", "title": "Cell cycle and cell division", "subtopics": ["Cell cycle", "Mitosis", "Meiosis", "Significance of mitosis and meiosis"] },
+        { "code": "2.6", "title": "Metabolism and enzymes", "subtopics": ["Energy and ATP", "Enzyme structure and action", "Factors affecting enzyme activity", "Enzyme inhibition"] },
+        { "code": "2.7", "title": "Photosynthesis", "subtopics": ["Photosynthetic pigments", "Light-dependent reactions", "Calvin cycle", "C3, C4 and CAM plants", "Limiting factors"] },
+        { "code": "2.8", "title": "Cellular respiration", "subtopics": ["Glycolysis", "Link reaction and Krebs cycle", "Electron transport chain", "Anaerobic respiration"] }
+      ]
+    },
+    {
+      "id": "u3", "number": 3, "title": "Evolution and Diversity of Organisms", "periods": 61, "icon": "tree",
+      "topics": [
+        { "code": "3.1", "title": "Origin of life", "subtopics": ["Theories of the origin of life"] },
+        { "code": "3.2", "title": "Evolution of biological diversity", "subtopics": ["Evidence for evolution", "Natural selection", "Speciation"] },
+        { "code": "3.3", "title": "Classification and nomenclature", "subtopics": ["Principles of classification", "Binomial nomenclature", "Dichotomous keys"] },
+        { "code": "3.4", "title": "Three domains of life", "subtopics": ["Bacteria", "Archaea", "Eukarya"] },
+        { "code": "3.5", "title": "Diversity of kingdoms", "subtopics": ["Protista", "Fungi", "Plantae - bryophytes, pteridophytes, gymnosperms, angiosperms", "Animalia - major phyla and chordates"] }
+      ]
+    },
+    {
+      "id": "u4", "number": 4, "title": "Plant Form and Function", "periods": 77, "icon": "leaf",
+      "topics": [
+        { "code": "4.1", "title": "Plant tissues", "subtopics": ["Meristematic tissues", "Permanent tissues", "Tissue systems"] },
+        { "code": "4.2", "title": "Plant growth and development", "subtopics": ["Primary growth", "Secondary growth"] },
+        { "code": "4.3", "title": "Resource acquisition and transport", "subtopics": ["Water and mineral uptake", "Transport in xylem", "Transpiration", "Translocation in phloem"] },
+        { "code": "4.4", "title": "Gaseous exchange in plants", "subtopics": ["Stomata and lenticels", "Gas exchange in leaves, stems and roots"] },
+        { "code": "4.5", "title": "Plant nutrition", "subtopics": ["Essential mineral nutrients", "Deficiency symptoms", "Special modes of nutrition"] },
+        { "code": "4.6", "title": "Plant reproduction", "subtopics": ["Alternation of generations", "Flower structure", "Pollination and fertilisation", "Seed and fruit development", "Asexual reproduction"] },
+        { "code": "4.7", "title": "Plant responses", "subtopics": ["Plant movements - tropisms and nastic movements", "Plant hormones", "Photoperiodism", "Responses to stress"] }
+      ]
+    },
+    {
+      "id": "u5", "number": 5, "title": "Animal Form and Function", "periods": 193, "icon": "heart",
+      "topics": [
+        { "code": "5.1", "title": "Animal tissues", "subtopics": ["Epithelial", "Connective", "Muscle", "Nervous"] },
+        { "code": "5.2", "title": "Nutrition and the human digestive system", "subtopics": ["Heterotrophic nutrition", "Human digestive system", "Digestion and absorption", "Balanced diet"] },
+        { "code": "5.3", "title": "Circulation", "subtopics": ["Circulatory systems in animals", "Human heart and cardiac cycle", "Blood vessels", "Blood and lymph"] },
+        { "code": "5.4", "title": "Gas exchange and the human respiratory system", "subtopics": ["Respiratory surfaces", "Human respiratory system", "Breathing mechanism", "Transport of gases"] },
+        { "code": "5.5", "title": "Immunity", "subtopics": ["Innate immunity", "Adaptive immunity", "Vaccination", "Immune disorders"] },
+        { "code": "5.6", "title": "Osmoregulation and excretion", "subtopics": ["Osmoregulation in animals", "Human urinary system", "Nephron and urine formation", "Kidney disorders"] },
+        { "code": "5.7", "title": "Nervous coordination", "subtopics": ["Neurons", "Nerve impulse conduction", "Synapse", "Central and peripheral nervous system"] },
+        { "code": "5.8", "title": "Sensory structures", "subtopics": ["Eye", "Ear", "Human skin"] },
+        { "code": "5.9", "title": "Endocrine system and homeostasis", "subtopics": ["Endocrine glands and hormones", "Homeostasis", "Thermoregulation", "Blood glucose regulation"] },
+        { "code": "5.10", "title": "Reproduction", "subtopics": ["Male reproductive system", "Female reproductive system", "Menstrual cycle", "Fertilisation and pregnancy", "Birth control"] },
+        { "code": "5.11", "title": "Skeletal system and movement", "subtopics": ["Human skeleton", "Joints", "Muscle contraction"] }
+      ]
+    },
+    {
+      "id": "u6", "number": 6, "title": "Genetics", "periods": 22, "icon": "dna",
+      "topics": [
+        { "code": "6.1", "title": "Mendelian inheritance", "subtopics": ["Law of segregation", "Law of independent assortment", "Monohybrid cross", "Dihybrid cross", "Test cross"] },
+        { "code": "6.2", "title": "Human Mendelian characteristics", "subtopics": ["Mendelian traits in humans", "Pedigree analysis"] },
+        { "code": "6.3", "title": "Non-Mendelian inheritance", "subtopics": ["Incomplete dominance", "Codominance", "Multiple alleles - ABO blood groups", "Polygenic inheritance", "Sex linkage", "Gene linkage"] },
+        { "code": "6.4", "title": "Population genetics", "subtopics": ["Gene pool and allele frequency", "Hardy-Weinberg principle"] },
+        { "code": "6.5", "title": "Plant and animal breeding", "subtopics": ["Selective breeding", "Inbreeding and outbreeding", "Hybrid vigour"] }
+      ]
+    },
+    {
+      "id": "u7", "number": 7, "title": "Molecular Biology and Recombinant DNA Technology", "periods": 42, "icon": "helix",
+      "topics": [
+        { "code": "7.1", "title": "Structure and function of DNA and RNA", "subtopics": ["DNA structure", "RNA types", "DNA replication"] },
+        { "code": "7.2", "title": "Gene expression", "subtopics": ["Transcription", "Translation", "Regulation of gene expression"] },
+        { "code": "7.3", "title": "Mutations", "subtopics": ["Gene mutations", "Chromosomal mutations", "Causes and effects"] },
+        { "code": "7.4", "title": "Recombinant DNA technology", "subtopics": ["Restriction enzymes", "Vectors", "Gene cloning", "PCR"] },
+        { "code": "7.5", "title": "DNA analysis", "subtopics": ["Gel electrophoresis", "DNA fingerprinting", "DNA sequencing"] },
+        { "code": "7.6", "title": "Applications and GMOs", "subtopics": ["Medical applications", "Agricultural applications", "Ethics and biosafety"] }
+      ]
+    },
+    {
+      "id": "u8", "number": 8, "title": "Environmental Biology", "periods": 41, "icon": "globe",
+      "topics": [
+        { "code": "8.1", "title": "Ecosystem structure and function", "subtopics": ["Components of an ecosystem", "Energy flow and food webs", "Ecological pyramids", "Nutrient cycles"] },
+        { "code": "8.2", "title": "Biomes", "subtopics": ["Terrestrial biomes", "Aquatic biomes"] },
+        { "code": "8.3", "title": "Ecosystems of Sri Lanka", "subtopics": ["Forest types", "Wetlands and mangroves", "Marine and coastal ecosystems"] },
+        { "code": "8.4", "title": "Biodiversity", "subtopics": ["Levels of biodiversity", "Value of biodiversity", "Endemism in Sri Lanka"] },
+        { "code": "8.5", "title": "Threats to biodiversity", "subtopics": ["Habitat loss", "Invasive species", "Over-exploitation", "Pollution"] },
+        { "code": "8.6", "title": "Global environmental problems", "subtopics": ["Climate change", "Ozone depletion", "Acid rain"] },
+        { "code": "8.7", "title": "Conservation", "subtopics": ["In-situ conservation", "Ex-situ conservation", "Laws and conventions"] }
+      ]
+    },
+    {
+      "id": "u9", "number": 9, "title": "Microbiology", "periods": 50, "icon": "bacteria",
+      "topics": [
+        { "code": "9.1", "title": "Diversity of microorganisms", "subtopics": ["Bacteria", "Fungi", "Viruses", "Microalgae and protozoa"] },
+        { "code": "9.2", "title": "Handling microorganisms", "subtopics": ["Aseptic techniques", "Culture media", "Sterilisation"] },
+        { "code": "9.3", "title": "Microbial growth and control", "subtopics": ["Growth curve", "Physical control methods", "Chemical control methods", "Antibiotics"] },
+        { "code": "9.4", "title": "Microbial human pathogens", "subtopics": ["Bacterial diseases", "Viral diseases", "Fungal and protozoan diseases"] },
+        { "code": "9.5", "title": "Microbes in industry", "subtopics": ["Food and beverage production", "Pharmaceutical products"] },
+        { "code": "9.6", "title": "Microbes in agriculture and the environment", "subtopics": ["Soil microorganisms", "Nitrogen fixation", "Biofertilisers and biopesticides", "Waste treatment"] }
+      ]
+    },
+    {
+      "id": "u10", "number": 10, "title": "Applied Biology", "periods": 24, "icon": "sprout",
+      "topics": [
+        { "code": "10.1", "title": "Ornamental fish culture", "subtopics": ["Common ornamental fish", "Aquarium management"] },
+        { "code": "10.2", "title": "Nursery management and horticulture", "subtopics": ["Plant propagation", "Nursery practices", "Horticultural practices"] },
+        { "code": "10.3", "title": "Vector-borne diseases", "subtopics": ["Dengue", "Filaria", "Vector control"] },
+        { "code": "10.4", "title": "Food preservation and postharvest loss", "subtopics": ["Food preservation methods", "Reducing postharvest loss"] },
+        { "code": "10.5", "title": "Emerging technologies", "subtopics": ["Nanobiology", "Stem cell therapy", "Human Genome Project"] }
+      ]
+    }
+  ]
+}
