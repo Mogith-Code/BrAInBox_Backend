@@ -3,12 +3,30 @@
 | | |
 |---|---|
 | **Owner** | Keshomigha |
-| **Purpose** | Read-only syllabus tree for students: units -> topics -> concepts. |
-| **Tables** | `units`, `topics`, `concepts` |
+| **Purpose** | Read-only syllabus tree for students: subjects -> units -> topics -> concepts (sub-topics). |
+| **Tables** | `subjects`, `units`, `topics`, `concepts` (+ reads `user_topic_progress`) |
 | **Jira epic** | BRN-E03 Syllabus *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/syllabus` (tasks: `feature/syllabus/BRN-xx-short-name`) |
 
+<<<<<<< Updated upstream
 ## Endpoints
+=======
+## Implemented endpoints (Learn navigation)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/subjects/{subject_id}/units` | Units of a subject + my progress |
+| GET | `/api/v1/units/{unit_id}/topics` | Topics of a unit + sub-topics + my progress |
+| GET | `/api/v1/topics/{topic_id}` | One topic with its sub-topics |
+
+Ids can be the public code (`biology`, `u6`, `bio-6.1`) or the UUID. Responses are camelCase.
+Request/response examples: [docs/api-endpoints.md](../../../docs/api-endpoints.md#learn-navigation-subject--units--topics--sub-topics).
+
+Data: `data/syllabus/al_biology_syllabus.json` (10 units, 64 topics, 216 sub-topics), loaded with
+`python scripts/seed_syllabus.py` (idempotent).
+
+## Planned endpoints
+>>>>>>> Stashed changes
 
 All need a logged-in user.
 
@@ -34,6 +52,7 @@ the fields to change); required fields (`number`, `title`, `name`) can't be clea
 
 | Method | Path | Notes |
 |---|---|---|
+<<<<<<< Updated upstream
 | GET | `/admin/syllabus/units` | All units with `topic_count` |
 | POST | `/admin/syllabus/units` | 201. Number taken → 409 `UNIT_NUMBER_TAKEN` |
 | PATCH | `/admin/syllabus/units/{id}` | Edit, or `is_outdated: true` |
@@ -45,6 +64,9 @@ the fields to change); required fields (`number`, `title`, `name`) can't be clea
 | POST | `/admin/syllabus/topics/{id}/concepts` | 201. Code taken → 409 `CONCEPT_CODE_TAKEN` |
 | PATCH | `/admin/syllabus/concepts/{id}` | Edit, or `is_outdated: true` |
 | DELETE | `/admin/syllabus/concepts/{id}` | 204 |
+=======
+| GET | `/api/v1/units` | All 10 units |
+>>>>>>> Stashed changes
 
 **Delete rules.** Anything students have used should be **marked outdated**, not deleted:
 - **Units are never deleted.** Deleting one would also delete students' unit-mastery history.

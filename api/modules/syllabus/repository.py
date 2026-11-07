@@ -1,15 +1,35 @@
 """All SQL queries for the syllabus module. Owner: Keshomigha.
 
-Tables: units, topics, concepts
+Tables: subjects, units, topics, concepts (+ user_topic_progress, read for the Learn screens)
 Only this module's `service.py` may import this file.
+
+Functions that take a `ref` accept the UUID id or the public code ("biology", "u6", "bio-6.1").
 """
 
 import uuid
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+<<<<<<< Updated upstream
 from shared.db.models import Concept, Topic, Unit
+=======
+from shared.db.models import Concept, Subject, Topic, Unit, UserTopicProgress
+
+Ref = uuid.UUID | str
+
+
+def _match(id_column: Any, code_column: Any, ref: Ref) -> ColumnElement[bool]:
+    """WHERE clause for a UUID id or a public code."""
+    return id_column == ref if isinstance(ref, uuid.UUID) else code_column == ref
+
+
+async def count_units(session: AsyncSession) -> int:
+    """Example query showing the pattern (replace with real queries)."""
+    result = await session.execute(select(func.count()).select_from(Unit))
+    return result.scalar_one()
+>>>>>>> Stashed changes
 
 
 async def get_topics_with_units(
@@ -22,6 +42,7 @@ async def get_topics_with_units(
     return [(topic, unit) for topic, unit in result.all()]
 
 
+<<<<<<< Updated upstream
 async def list_units(session: AsyncSession) -> list[Unit]:
     result = await session.execute(select(Unit).order_by(Unit.number))
     return list(result.scalars())
@@ -139,10 +160,81 @@ async def get_topic_by_number(
 ) -> Topic | None:
     result = await session.execute(
         select(Topic).where(Topic.unit_id == unit_id, Topic.number == number)
+=======
+async def get_subject(session: AsyncSession, ref: Ref) -> Subject | None:
+    result = await session.execute(select(Subject).where(_match(Subject.id, Subject.code, ref)))
+    return result.scalar_one_or_none()
+
+
+async def get_unit(session: AsyncSession, ref: Ref) -> Unit | None:
+    result = await session.execute(select(Unit).where(_match(Unit.id, Unit.code, ref)))
+    return result.scalar_one_or_none()
+
+
+async def get_topic_with_unit(session: AsyncSession, ref: Ref) -> tuple[Topic, Unit] | None:
+    result = await session.execute(
+        select(Topic, Unit)
+        .join(Unit, Unit.id == Topic.unit_id)
+        .where(_match(Topic.id, Topic.code, ref))
+    )
+    row = result.one_or_none()
+    return (row[0], row[1]) if row else None
+
+
+async def list_units_with_scores(
+    session: AsyncSession, subject_id: uuid.UUID, user_id: uuid.UUID
+) -> list[tuple[Unit, int, float]]:
+    """(unit, number of topics, average topic score of the user) per unit, by unit number.
+
+    A topic the user has no progress row for counts as score 0.
+    """
+    result = await session.execute(
+        select(
+            Unit,
+            func.count(Topic.id),
+            func.coalesce(func.avg(func.coalesce(UserTopicProgress.score, 0)), 0),
+        )
+        .outerjoin(Topic, Topic.unit_id == Unit.id)
+        .outerjoin(
+            UserTopicProgress,
+            (UserTopicProgress.topic_id == Topic.id) & (UserTopicProgress.user_id == user_id),
+        )
+        .where(Unit.subject_id == subject_id)
+        .group_by(Unit.id)
+        .order_by(Unit.number)
+    )
+    return [(unit, count, float(avg)) for unit, count, avg in result.all()]
+
+
+async def list_topics_with_progress(
+    session: AsyncSession, unit_id: uuid.UUID, user_id: uuid.UUID
+) -> list[tuple[Topic, UserTopicProgress | None]]:
+    """Topics of a unit in display order, each with the user's progress row (or None)."""
+    result = await session.execute(
+        select(Topic, UserTopicProgress)
+        .outerjoin(
+            UserTopicProgress,
+            (UserTopicProgress.topic_id == Topic.id) & (UserTopicProgress.user_id == user_id),
+        )
+        .where(Topic.unit_id == unit_id)
+        .order_by(Topic.order_index, Topic.number)
+    )
+    return [(topic, progress) for topic, progress in result.all()]
+
+
+async def get_progress(
+    session: AsyncSession, topic_id: uuid.UUID, user_id: uuid.UUID
+) -> UserTopicProgress | None:
+    result = await session.execute(
+        select(UserTopicProgress).where(
+            UserTopicProgress.topic_id == topic_id, UserTopicProgress.user_id == user_id
+        )
+>>>>>>> Stashed changes
     )
     return result.scalar_one_or_none()
 
 
+<<<<<<< Updated upstream
 async def count_concepts(session: AsyncSession, topic_id: uuid.UUID) -> int:
     result = await session.execute(
         select(func.count(Concept.id)).where(Concept.topic_id == topic_id)
@@ -178,3 +270,15 @@ async def delete(session: AsyncSession, row: Topic | Concept) -> None:
     """Raises IntegrityError when other content still points at the row (ON DELETE RESTRICT)."""
     await session.delete(row)
     await session.flush()
+=======
+async def list_concepts(session: AsyncSession, topic_ids: list[uuid.UUID]) -> list[Concept]:
+    """Concepts (sub-topics) of the given topics, in display order."""
+    if not topic_ids:
+        return []
+    result = await session.execute(
+        select(Concept)
+        .where(Concept.topic_id.in_(topic_ids))
+        .order_by(Concept.topic_id, Concept.order_index, Concept.name)
+    )
+    return list(result.scalars())
+>>>>>>> Stashed changes

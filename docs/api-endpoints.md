@@ -47,9 +47,125 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
+<<<<<<< Updated upstream
 | GET | `/api/v1/units` | ✅ Current units, Unit 1 first, with `topic_count` |
 | GET | `/api/v1/units/{id}/topics` | ✅ The unit and its current topics, with `concept_count` |
 | GET | `/api/v1/topics/{id}` | ✅ One topic with its unit and current concepts (`is_outdated` flag) |
+=======
+| GET | `/api/v1/subjects/{subject_id}/units` | ✅ Units of a subject + my progress (Learn) |
+| GET | `/api/v1/units/{unit_id}/topics` | ✅ Topics of a unit + sub-topics + my progress (Learn) |
+| GET | `/api/v1/topics/{topic_id}` | ✅ One topic with its sub-topics + my progress (Learn) |
+| GET | `/api/v1/units` | All 10 units |
+
+### Learn navigation (subject → units → topics → sub-topics)
+
+Data comes from `data/syllabus/al_biology_syllabus.json` (`python scripts/seed_syllabus.py`).
+Responses are **camelCase**. Ids in the path can be the public code or the UUID:
+
+| Level | `id` (public code) | Stored in |
+|---|---|---|
+| subject | `biology` | `subjects.code` |
+| unit | `u6` | `units.code` |
+| topic | `bio-6.1` | `topics.code` |
+| sub-topic | `bio-6.1.1` | `concepts.code` |
+
+`uuid` is the database id. Use it wherever another endpoint asks for a `topic_id`, e.g.
+`POST /uploads/text` or `POST /papers/generate`.
+
+Progress comes from `user_topic_progress` for the logged-in student. A topic with no row is
+`not_started`, `progressPct` 0, `isWeak` false.
+
+- Topic `status`: `not_started` | `in_progress` | `mastered`. `progressPct` = the topic score (0–100).
+- Unit `progressPct` = average topic score in the unit (not-started topics count as 0).
+  Unit `status`: `strong` (≥ 75) | `improving` (40–74) | `weak` (< 40).
+
+**`GET /api/v1/subjects/biology/units`** → 200
+
+```json
+[
+  {
+    "id": "u6",
+    "uuid": "08bd699e-c905-46b8-817e-44e73bde406a",
+    "number": 6,
+    "title": "Genetics",
+    "periods": 22,
+    "icon": "dna",
+    "topicCount": 5,
+    "progressPct": 48,
+    "status": "improving"
+  }
+]
+```
+
+**`GET /api/v1/units/u6/topics`** → 200 (`topics` shortened to one item)
+
+```json
+{
+  "unit": {
+    "id": "u6",
+    "uuid": "08bd699e-c905-46b8-817e-44e73bde406a",
+    "number": 6,
+    "title": "Genetics",
+    "periods": 22,
+    "icon": "dna",
+    "topicCount": 5,
+    "progressPct": 48,
+    "status": "improving"
+  },
+  "summary": {"mastered": 1, "weak": 2},
+  "topics": [
+    {
+      "id": "bio-6.1",
+      "uuid": "d1cf1dbb-eea9-4242-975d-b56e15e8a5c2",
+      "code": "6.1",
+      "title": "Mendelian inheritance",
+      "order": 1,
+      "status": "mastered",
+      "progressPct": 90,
+      "isWeak": false,
+      "subtopics": [
+        {"id": "bio-6.1.1", "title": "Law of segregation"},
+        {"id": "bio-6.1.2", "title": "Law of independent assortment"},
+        {"id": "bio-6.1.3", "title": "Monohybrid cross"},
+        {"id": "bio-6.1.4", "title": "Dihybrid cross"},
+        {"id": "bio-6.1.5", "title": "Test cross"}
+      ]
+    }
+  ]
+}
+```
+
+**`GET /api/v1/topics/bio-6.1`** → 200
+
+```json
+{
+  "id": "bio-6.1",
+  "uuid": "d1cf1dbb-eea9-4242-975d-b56e15e8a5c2",
+  "code": "6.1",
+  "title": "Mendelian inheritance",
+  "order": 1,
+  "status": "mastered",
+  "progressPct": 90,
+  "isWeak": false,
+  "subtopics": [
+    {"id": "bio-6.1.1", "title": "Law of segregation"},
+    {"id": "bio-6.1.2", "title": "Law of independent assortment"},
+    {"id": "bio-6.1.3", "title": "Monohybrid cross"},
+    {"id": "bio-6.1.4", "title": "Dihybrid cross"},
+    {"id": "bio-6.1.5", "title": "Test cross"}
+  ],
+  "unitId": "u6",
+  "unitNumber": 6,
+  "unitTitle": "Genetics"
+}
+```
+
+Errors: 401 `UNAUTHORIZED` · 404 `SUBJECT_NOT_FOUND` / `UNIT_NOT_FOUND` / `TOPIC_NOT_FOUND`, e.g.
+
+```json
+{"error": {"code": "UNIT_NOT_FOUND", "message": "Unit 'u99' not found"}}
+```
+>>>>>>> Stashed changes
 
 ## content — Samni
 

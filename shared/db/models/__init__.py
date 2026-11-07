@@ -18,6 +18,7 @@ from shared.db.models.content import LibraryItem, Note, Summary, Upload
 from shared.db.models.evaluation import Evaluation
 from shared.db.models.exam import Attempt, Paper, PaperQuestion, Response
 from shared.db.models.knowledge import AnswerPoint, Keyword, ModelAnswer
+<<<<<<< Updated upstream
 from shared.db.models.performance import (
     ConceptMastery,
     MasterySnapshot,
@@ -38,6 +39,16 @@ from shared.db.models.recommendation import (
 from shared.db.models.syllabus import EMBEDDING_DIM, Concept, Topic, Unit
 from shared.db.models.system import AIJob, AIUsageLog, AppConfig, AuditLog
 from shared.db.models.user import DeviceToken, Notification, StudentProfile, User, UserSettings
+=======
+from shared.db.models.performance import ConceptMastery, Mistake, UserTopicProgress
+from shared.db.models.quality import QuestionReport, QuestionReview, QuestionStats
+from shared.db.models.question import MCQOption, Misconception, Question, QuestionConcept
+from shared.db.models.rag import DocumentChunk, SourceDocument
+from shared.db.models.recommendation import PlanItem, Recommendation, Resource, StudyPlan
+from shared.db.models.syllabus import EMBEDDING_DIM, Concept, Subject, Topic, Unit
+from shared.db.models.system import AIJob, AIUsageLog, AuditLog
+from shared.db.models.user import StudentProfile, User
+>>>>>>> Stashed changes
 from shared.db.models.visual import Visual, VisualReport
 
 __all__ = [
@@ -86,13 +97,18 @@ __all__ = [
     "StudentProfile",
     "StudyActivity",
     "StudyPlan",
+    "Subject",
     "Summary",
     "Topic",
     "Unit",
     "UnitMastery",
     "Upload",
     "User",
+<<<<<<< Updated upstream
     "UserSettings",
+=======
+    "UserTopicProgress",
+>>>>>>> Stashed changes
     "Visual",
     "VisualReport",
     "Vote",
