@@ -8,8 +8,8 @@ from sqlalchemy import delete, func, select
 from api.core.errors import AppError, ServiceUnavailableError
 from api.modules.quizzes.service import allocate_questions, unit_mastery, unit_status
 from api.modules.syllabus.service import UnitInfo
-from shared.db.models import MCQOption, Question, Topic, Unit, UnitMastery
-from shared.enums import ContentStatus, QuestionType
+from shared.db.models import MCQOption, Question, Topic, Unit, UnitMastery, UserTopicProgress
+from shared.enums import ContentStatus, QuestionType, TopicProgressStatus
 from tests.conftest import STUDENT, make_api_client, student_claims
 
 # --------------------------------------------------------------------------- pure logic
@@ -235,6 +235,14 @@ async def test_submit_computes_mastery_and_summary(question_bank, db_session):
     assert me.json()["onboarding"]["diagnostic_completed"] is True
     saved = (await db_session.execute(select(func.count()).select_from(UnitMastery))).scalar_one()
     assert saved == 10
+
+    # Topic progress: every topic with an answer (units 1-9), never unit 10's unanswered topic.
+    progress = list((await db_session.execute(select(UserTopicProgress))).scalars())
+    assert len(progress) == 9
+    # At most 3 questions per topic: too few for "mastered" or "weak", even at 100 %.
+    assert {p.status for p in progress} == {TopicProgressStatus.IN_PROGRESS}
+    assert not any(p.is_weak for p in progress)
+    assert sorted({p.score for p in progress}) == [0, 100]
 
 
 @pytest.mark.db
