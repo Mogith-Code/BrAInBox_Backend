@@ -28,18 +28,7 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 | JSON / arrays | `JSONB` with `'{}'` / `'[]'` defaults; arrays `ARRAY(TEXT)` / `ARRAY(UUID)` with `'{}'`. |
 | Indexes | Every foreign-key column has an index (Postgres does not add them by itself). |
 
-<<<<<<< Updated upstream
 ### Delete rules
-=======
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `subjects` | A subject, e.g. Biology at G.C.E. A/L. | code ("biology"), name, level | - |
-| `units` | One of the 10 A/L Biology units. | code ("u6"), number, title, description, periods, icon | `subject_id` → subjects |
-| `topics` | A topic inside a unit, e.g. "2.3 Cell membrane". | code ("bio-6.1"), number, title, description, order_index | `unit_id` → units |
-| `concepts` | A single idea students must master, e.g. "active transport". The syllabus sub-topics live here. | code ("bio-6.1.1"), name, description, order_index, embedding | `topic_id` → topics |
-
-`code` is the public id the app navigates with (set by `scripts/seed_syllabus.py`, unique, nullable for rows created before migration 0002).
->>>>>>> Stashed changes
 
 | When you delete... | ...this happens |
 |---|---|
@@ -70,9 +59,12 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 ### `syllabus.py` - Keshomigha
 | Table | Purpose |
 |---|---|
-| `units` | The 10 units. `number` (1-10) is the code and the display order; `exam_weight` = past-paper weight. |
-| `topics` | Topics in a unit, `number` like `"6.2"`. |
-| `concepts` | Ideas inside a topic, `code` like `"6.2.1"`, with an embedding. |
+| `subjects` | A subject, e.g. Biology at G.C.E. A/L. `code` like `"biology"`. |
+| `units` | The 10 units. `number` (1-10) is the display order; `code` like `"u6"`; `exam_weight` = past-paper weight; `periods` and `icon` for the Learn screens. |
+| `topics` | Topics in a unit, `number` like `"6.2"`, `code` like `"bio-6.1"`. |
+| `concepts` | Ideas (sub-topics) inside a topic, `code` like `"bio-6.1.1"`, with an embedding. |
+
+`code` is the public id the app navigates with (set by `scripts/seed_syllabus.py`, unique, nullable for rows created before migration 0005).
 
 ### `content.py` - Samni
 | Table | Purpose |
@@ -127,6 +119,7 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 | `unit_mastery` | **History** of unit mastery (0-100): every diagnostic/quiz adds rows. Current = newest row per unit. |
 | `mastery_snapshots` | Overall mastery (0-100) per student per day, for weekly progress. |
 | `study_activity` | One row per student per study day (streak), with minutes and actions. |
+| `user_topic_progress` | One student's progress with one topic (Learn screens): status, score (0-100), is_weak. Unique per (user, topic). |
 
 ### `recommendation.py` - Udith (daily plan: Mogith)
 | Table | Purpose |
@@ -147,19 +140,11 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 | `votes` | +1 / -1 on exactly one post **or** reply (CHECKs). |
 | `content_reports` | Reports on posts / replies - polymorphic `target_type` + `target_id`. |
 
-<<<<<<< Updated upstream
 ### `rag.py` - Keshomigha (schema), Samni (RAG)
 | Table | Purpose |
 |---|---|
 | `source_documents` | Admin-approved documents ingested for RAG. |
 | `document_chunks` | Searchable chunks: `embedding` (HNSW) for meaning search + `tsv` (generated `tsvector`, GIN) for keyword search. |
-=======
-| Table | Purpose | Main columns | References |
-|---|---|---|---|
-| `mistakes` |  | mistake_type, note | `concept_id` → concepts<br>`misconception_id` → misconceptions<br>`question_id` → questions<br>`response_id` → responses<br>`user_id` → users |
-| `concept_mastery` | How well one student knows one concept (0.0 - 1.0). | mastery_score, attempts_count, last_practiced_at | `concept_id` → concepts<br>`user_id` → users |
-| `user_topic_progress` | One student's progress with one topic (Learn screens). Unique per (user, topic). | status (not_started / in_progress / mastered), score (0-100), is_weak, updated_at | `topic_id` → topics<br>`user_id` → users |
->>>>>>> Stashed changes
 
 ### `system.py` - shared
 | Table | Purpose |

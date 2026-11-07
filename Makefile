@@ -1,5 +1,5 @@
 # Shortcuts for common tasks. Windows: use Git Bash, or copy the command after the tab.
-.PHONY: up down logs migrate seed ingest test lint fmt typecheck
+.PHONY: up down logs migrate seed seed-syllabus ingest test lint fmt typecheck
 
 up:        ## start db + api + ai_service
 	docker compose up -d --build
@@ -13,13 +13,10 @@ logs:
 migrate:   ## apply database migrations
 	docker compose exec api alembic upgrade head
 
-<<<<<<< Updated upstream
 seed:      ## dev seed: syllabus, community groups, app_config, 15 sample MCQs (idempotent)
 	docker compose exec api python -m scripts.seed_dev --with-samples
-=======
-seed:      ## load the Biology syllabus (10 units, 64 topics, 216 sub-topics); safe to re-run
+seed-syllabus: ## load the Biology syllabus (10 units, 64 topics, 216 sub-topics); safe to re-run
 	docker compose exec api python scripts/seed_syllabus.py
->>>>>>> Stashed changes
 
 ingest:    ## RAG: ingest data/rag_sources
 	docker compose exec ai_service python scripts/ingest_documents.py

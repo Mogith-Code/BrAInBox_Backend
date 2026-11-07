@@ -47,15 +47,10 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 
 | Method | Path | Description |
 |---|---|---|
-<<<<<<< Updated upstream
 | GET | `/api/v1/units` | ✅ Current units, Unit 1 first, with `topic_count` |
-| GET | `/api/v1/units/{id}/topics` | ✅ The unit and its current topics, with `concept_count` |
-| GET | `/api/v1/topics/{id}` | ✅ One topic with its unit and current concepts (`is_outdated` flag) |
-=======
 | GET | `/api/v1/subjects/{subject_id}/units` | ✅ Units of a subject + my progress (Learn) |
 | GET | `/api/v1/units/{unit_id}/topics` | ✅ Topics of a unit + sub-topics + my progress (Learn) |
 | GET | `/api/v1/topics/{topic_id}` | ✅ One topic with its sub-topics + my progress (Learn) |
-| GET | `/api/v1/units` | All 10 units |
 
 ### Learn navigation (subject → units → topics → sub-topics)
 
@@ -156,16 +151,19 @@ Progress comes from `user_topic_progress` for the logged-in student. A topic wit
   ],
   "unitId": "u6",
   "unitNumber": 6,
-  "unitTitle": "Genetics"
+  "unitTitle": "Genetics",
+  "isOutdated": false
 }
 ```
+
+Lists show the current syllabus only (`is_outdated` rows are hidden, and an outdated unit is a
+404). `GET /topics/{id}` still opens an outdated topic, with `isOutdated: true`.
 
 Errors: 401 `UNAUTHORIZED` · 404 `SUBJECT_NOT_FOUND` / `UNIT_NOT_FOUND` / `TOPIC_NOT_FOUND`, e.g.
 
 ```json
 {"error": {"code": "UNIT_NOT_FOUND", "message": "Unit 'u99' not found"}}
 ```
->>>>>>> Stashed changes
 
 ## content — Samni
 

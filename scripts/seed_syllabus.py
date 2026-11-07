@@ -26,29 +26,11 @@ from shared.db.session import SessionLocal
 DEFAULT_FILE = _bootstrap.REPO_ROOT / "data" / "syllabus" / "al_biology_syllabus.json"
 
 
-<<<<<<< Updated upstream
-async def seed(path: Path) -> None:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    async with SessionLocal() as session:
-        for unit_data in data["units"]:
-            unit = (
-                await session.execute(select(Unit).where(Unit.number == unit_data["number"]))
-            ).scalar_one_or_none()
-            if unit is None:
-                unit = Unit(number=unit_data["number"], title=unit_data["title"])
-                session.add(unit)
-                await session.flush()  # gives the unit its id
-            unit.title = unit_data["title"]
-            unit.description = unit_data.get("description")
-            # past-paper weight for spreading diagnostic questions (1.0 until real values: TBD)
-            unit.exam_weight = float(unit_data.get("exam_weight", 1.0))
-=======
 @dataclass
 class SeedCounts:
     units: int
     topics: int
     subtopics: int
->>>>>>> Stashed changes
 
 
 def load_syllabus(path: Path) -> dict[str, Any]:

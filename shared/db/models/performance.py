@@ -1,9 +1,5 @@
-<<<<<<< Updated upstream
-"""Student performance: mistakes, mastery per concept / unit, study activity. Owner: Keshomigha."""
-=======
-"""Student performance: recorded mistakes, mastery per concept and progress per topic.
-Owner: Keshomigha."""
->>>>>>> Stashed changes
+"""Student performance: mistakes, mastery per concept / unit, study activity and
+progress per topic. Owner: Keshomigha."""
 
 import uuid
 from datetime import date, datetime
@@ -11,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-<<<<<<< Updated upstream
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -26,17 +22,6 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-=======
-    Boolean,
-    CheckConstraint,
-    DateTime,
-    Float,
-    ForeignKey,
-    Integer,
-    Text,
-    UniqueConstraint,
-)
->>>>>>> Stashed changes
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
@@ -93,7 +78,6 @@ class ConceptMastery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_practiced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-<<<<<<< Updated upstream
 class UnitMastery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Mastery (0-100) of one unit for one student, as a HISTORY of snapshots.
 
@@ -107,24 +91,11 @@ class UnitMastery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_unit_mastery_user_unit_created", "user_id", "unit_id", "created_at"),
         CheckConstraint("mastery BETWEEN 0 AND 100", name="mastery_range"),
         CheckConstraint("source IN ('diagnostic', 'practice', 'exam', 'quiz')", name="source"),
-=======
-class UserTopicProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """How far one student is with one topic. Shown on the Learn screens (syllabus module).
-
-    No row yet = not started, score 0. `updated_at` is the last change.
-    """
-
-    __tablename__ = "user_topic_progress"
-    __table_args__ = (
-        UniqueConstraint("user_id", "topic_id", name="uq_user_topic_progress_user_topic"),
-        CheckConstraint("score BETWEEN 0 AND 100", name="score_range"),
->>>>>>> Stashed changes
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-<<<<<<< Updated upstream
     unit_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("units.id", ondelete="CASCADE"), index=True
     )
@@ -171,7 +142,23 @@ class StudyActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     activity_date: Mapped[date] = mapped_column(Date)
     minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     actions_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-=======
+
+
+class UserTopicProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """How far one student is with one topic. Shown on the Learn screens (syllabus module).
+
+    No row yet = not started, score 0. `updated_at` is the last change.
+    """
+
+    __tablename__ = "user_topic_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "topic_id", name="uq_user_topic_progress_user_topic"),
+        CheckConstraint("score BETWEEN 0 AND 100", name="score_range"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     topic_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("topics.id", ondelete="CASCADE"), index=True
     )
@@ -180,4 +167,3 @@ class StudyActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     score: Mapped[int] = mapped_column(Integer, default=0)  # 0..100
     is_weak: Mapped[bool] = mapped_column(Boolean, default=False)
->>>>>>> Stashed changes

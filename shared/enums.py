@@ -261,6 +261,14 @@ class MasterySource(StrEnum):
     QUIZ = "quiz"  # kept: allowed by unit_mastery.source
 
 
+class TopicProgressStatus(StrEnum):
+    """A student's progress with one topic (user_topic_progress.status)."""
+
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    MASTERED = "mastered"
+
+
 # ============================================================================ recommendations
 
 
@@ -388,69 +396,5 @@ class JobType(StrEnum):
     SUGGEST_ANSWER = "suggest_answer"
     RANK_RESOURCES = "rank_resources"
     RAG_INGEST = "rag_ingest"
-<<<<<<< Updated upstream
     # Every value needs a pipeline in ai_service/jobs (a test checks this), so add
     # tag_post / embed_concepts / next_action together with their pipeline.
-=======
-
-
-class QuestionType(StrEnum):
-    MCQ = "mcq"
-    STRUCTURED = "structured"
-    ESSAY = "essay"
-
-
-class Difficulty(StrEnum):
-    EASY = "easy"
-    MEDIUM = "medium"
-    HARD = "hard"
-
-
-class MistakeType(StrEnum):
-    CONCEPTUAL = "conceptual"
-    MISCONCEPTION = "misconception"
-    FACTUAL = "factual"
-    TERMINOLOGY = "terminology"
-    INCOMPLETE = "incomplete"
-    CARELESS = "careless"
-
-
-class TopicProgressStatus(StrEnum):
-    """A student's progress with one topic (user_topic_progress.status)."""
-
-    NOT_STARTED = "not_started"
-    IN_PROGRESS = "in_progress"
-    MASTERED = "mastered"
-
-
-class VisualKind(StrEnum):
-    DIAGRAM = "diagram"  # Mermaid diagram (rendered on the device)
-    FLOWCHART = "flowchart"
-    ILLUSTRATION = "illustration"  # AI-generated image
-    TABLE = "table"
-
-
-class ModerationStatus(StrEnum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    FLAGGED = "flagged"
-    REMOVED = "removed"
-
-
-class SourceType(StrEnum):
-    """Kinds of admin-approved documents that can be ingested into RAG."""
-
-    SYLLABUS = "syllabus"
-    TEACHER_GUIDE = "teacher_guide"
-    APPROVED_NOTE = "approved_note"
-    MARKING_SCHEME = "marking_scheme"
-
-
-class DocumentStatus(StrEnum):
-    """Ingestion state of a RAG source document."""
-
-    PENDING = "pending"
-    INGESTING = "ingesting"
-    READY = "ready"
-    FAILED = "failed"
->>>>>>> Stashed changes

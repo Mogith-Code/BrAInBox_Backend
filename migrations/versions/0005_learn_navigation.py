@@ -4,8 +4,8 @@ Owner: Samni. Generated with `alembic revision --autogenerate` and then reviewed
 Only adds tables and nullable (or defaulted) columns, so existing rows stay valid.
 Fill the new columns with `python scripts/seed_syllabus.py`.
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0005
+Revises: 0004
 Create Date: 2026-10-30 14:11:27.233486
 """
 
@@ -15,8 +15,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '0002'
-down_revision: str | None = '0001'
+revision: str = '0005'
+down_revision: str | None = '0004'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -50,9 +50,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_user_topic_progress_topic_id'), 'user_topic_progress', ['topic_id'], unique=False)
     op.create_index(op.f('ix_user_topic_progress_user_id'), 'user_topic_progress', ['user_id'], unique=False)
-    op.add_column('concepts', sa.Column('code', sa.String(length=40), nullable=True))
-    op.add_column('concepts', sa.Column('order_index', sa.Integer(), server_default='0', nullable=False))
-    op.create_unique_constraint(op.f('uq_concepts_code'), 'concepts', ['code'])
+    op.alter_column('concepts', 'code', existing_type=sa.String(length=20), type_=sa.String(length=40), existing_nullable=True)
     op.add_column('topics', sa.Column('code', sa.String(length=30), nullable=True))
     op.create_unique_constraint(op.f('uq_topics_code'), 'topics', ['code'])
     op.add_column('units', sa.Column('subject_id', sa.UUID(), nullable=True))
@@ -76,9 +74,7 @@ def downgrade() -> None:
     op.drop_column('units', 'subject_id')
     op.drop_constraint(op.f('uq_topics_code'), 'topics', type_='unique')
     op.drop_column('topics', 'code')
-    op.drop_constraint(op.f('uq_concepts_code'), 'concepts', type_='unique')
-    op.drop_column('concepts', 'order_index')
-    op.drop_column('concepts', 'code')
+    op.alter_column('concepts', 'code', existing_type=sa.String(length=40), type_=sa.String(length=20), existing_nullable=True)
     op.drop_index(op.f('ix_user_topic_progress_user_id'), table_name='user_topic_progress')
     op.drop_index(op.f('ix_user_topic_progress_topic_id'), table_name='user_topic_progress')
     op.drop_table('user_topic_progress')
