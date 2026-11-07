@@ -2,7 +2,7 @@
 
 All routes are under `/api/v1` and need `Authorization: Bearer <Firebase ID token>`, except `GET /api/v1/health`.
 Admin routes are under `/api/v1/admin` and need role `admin`.
-Every module currently has one placeholder: `GET /api/v1/<module>/status`. Admin areas have `GET /api/v1/admin/<area>/status`.
+Modules not built yet have a placeholder: `GET /api/v1/<module>/status`. Admin areas not built yet have `GET /api/v1/admin/<area>/status`.
 The live list is always at `http://localhost:8000/docs`.
 
 Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
@@ -51,6 +51,7 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | GET | `/api/v1/subjects/{subject_id}/units` | ✅ Units of a subject + my progress (Learn) |
 | GET | `/api/v1/units/{unit_id}/topics` | ✅ Topics of a unit + sub-topics + my progress (Learn) |
 | GET | `/api/v1/topics/{topic_id}` | ✅ One topic with its sub-topics + my progress (Learn) |
+| POST | `/api/v1/topics/{topic_id}/start` | ✅ Mark a topic as started (Learn, handled by the performance module) |
 
 ### Learn navigation (subject → units → topics → sub-topics)
 
@@ -72,7 +73,25 @@ Progress comes from `user_topic_progress` for the logged-in student. A topic wit
 
 - Topic `status`: `not_started` | `in_progress` | `mastered`. `progressPct` = the topic score (0–100).
 - Unit `progressPct` = average topic score in the unit (not-started topics count as 0).
-  Unit `status`: `strong` (≥ 75) | `improving` (40–74) | `weak` (< 40).
+- Unit `status`: **`not_started`** when no topic of the unit has any activity. Otherwise, from
+  `progressPct`: `strong` (≥ 75) | `improving` (40–74) | `weak` (< 40).
+
+How progress changes:
+
+| Event | Effect on the topic |
+|---|---|
+| `POST /topics/{topic_id}/start` | `not_started` → `in_progress`, score 0. Never changes an existing score or `mastered` |
+| `POST /papers/{id}/submit`, `POST /diagnostic/{attempt_id}/submit` | Recomputed from all my finished attempts, the same score as `GET /insights/topics` |
+
+| Topic result | `status` | `progressPct` | `isWeak` |
+|---|---|---|---|
+| No valid answers | unchanged | unchanged | unchanged |
+| Fewer than 5 valid answers | `in_progress` | percent correct | `false` |
+| 5+ valid answers, 75 % or more | `mastered` | percent correct | `false` |
+| 5+ valid answers, 55–74 % | `in_progress` | percent correct | `false` |
+| 5+ valid answers, below 55 % | `in_progress` | percent correct | `true` |
+
+Questions with no topic (papers from `POST /papers/generate-by-units`) don't change topic progress.
 
 **`GET /api/v1/subjects/biology/units`** → 200
 
@@ -88,8 +107,31 @@ Progress comes from `user_topic_progress` for the logged-in student. A topic wit
     "topicCount": 5,
     "progressPct": 48,
     "status": "improving"
+  },
+  {
+    "id": "u7",
+    "uuid": "2f6c1a50-7f0e-4a55-9a53-6f0b5c1d9e12",
+    "number": 7,
+    "title": "Evolution",
+    "periods": 10,
+    "icon": "tree",
+    "topicCount": 4,
+    "progressPct": 0,
+    "status": "not_started"
   }
 ]
+```
+
+**`POST /api/v1/topics/bio-6.1/start`** → 200 (no body). Safe to call every time the topic is opened.
+
+```json
+{
+  "id": "bio-6.1",
+  "uuid": "d1cf1dbb-eea9-4242-975d-b56e15e8a5c2",
+  "status": "in_progress",
+  "progressPct": 0,
+  "isWeak": false
+}
 ```
 
 **`GET /api/v1/units/u6/topics`** → 200 (`topics` shortened to one item)

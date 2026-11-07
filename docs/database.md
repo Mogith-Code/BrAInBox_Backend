@@ -10,8 +10,8 @@ python scripts/seed_dev.py --with-samples         # syllabus, groups, settings, 
 docker compose exec api python -m scripts.seed_dev --with-samples    # same, inside Docker
 ```
 
-Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation`.
-53 app tables (54 with Alembic's own `alembic_version`).
+Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation` -> `0005_learn_navigation`.
+55 app tables (56 with Alembic's own `alembic_version`).
 
 ---
 
@@ -119,7 +119,7 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 | `unit_mastery` | **History** of unit mastery (0-100): every diagnostic/quiz adds rows. Current = newest row per unit. |
 | `mastery_snapshots` | Overall mastery (0-100) per student per day, for weekly progress. |
 | `study_activity` | One row per student per study day (streak), with minutes and actions. |
-| `user_topic_progress` | One student's progress with one topic (Learn screens): status, score (0-100), is_weak. Unique per (user, topic). |
+| `user_topic_progress` | One student's progress with one topic (Learn screens): status, score (0-100), is_weak. Unique per (user, topic). Written only by `performance.service`: recomputed from the student's answers when a paper or diagnostic is submitted, or set to `in_progress` by `POST /topics/{id}/start`. No row = not started. |
 
 ### `recommendation.py` - Udith (daily plan: Mogith)
 | Table | Purpose |
