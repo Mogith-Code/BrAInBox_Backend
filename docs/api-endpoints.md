@@ -185,7 +185,7 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
 | `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
 | `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts: list (outdated included), add, edit, mark outdated; delete only empty + unused topics/concepts (units are never deleted) |
-| `analytics_admin.py` | Keshomigha | `/admin/analytics` | usage, performance, AI cost |
+| `analytics_admin.py` | Keshomigha | `/admin/analytics` | ✅ `GET /overview`, `/performance`, `/ai-usage` (all with `?days=`, default 30): student activity, average mastery per unit, most-missed topics, misconceptions, AI requests per feature and day |
 | `moderation_admin.py` | Mogith | `/admin/moderation` | ✅ `GET /reports` (visual reports with `visual_title` + `image_url`); planned: posts, replies, resolve |
 | `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
 

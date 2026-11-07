@@ -63,6 +63,29 @@ await performance_service.record_mistakes(session, user.id, attempt.id)
 - Calling it twice for an attempt adds nothing. Wrong answers in a **later** attempt are new mistakes,
   even for the same question.
 
+### Admin analytics (`/api/v1/admin/analytics`, role admin)
+
+Routes live in `admin/analytics_admin.py`; the logic is the `analytics_*` functions in this module's
+`service.py`. All three take `?days=` (1-365, default 30), a period ending today (Sri Lanka date).
+They return totals over **all students**, never one student's data, and admins' own activity is left out.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /overview` | Total and new students, active students and the change from the previous period, finished attempts, MCQ answers, and active students per day (0 on quiet days, so charts have no gaps) |
+| `GET /performance` | Average mastery per unit (each student's newest value; not limited to the period), the 10 most-missed topics, the 10 most chosen misconceptions |
+| `GET /ai-usage` | Requests per feature and per day, images, cost and tokens |
+
+- A topic needs at least 5 answers (`MIN_QUESTIONS_FOR_RELIABLE_RESULT`) to be listed as most-missed.
+- Most-missed topics and misconceptions come from the **stored answers**, so they don't depend on
+  `record_mistakes` being called.
+- A unit nobody has been measured in has `average_mastery: null`, never 0 %.
+- **Cost and tokens are `null`, not 0, until they are recorded.** `ai_service/daily_limits.py` only logs
+  that a call happened (provider, model, operation, prompt, images): nothing writes `cost_usd`,
+  `input_tokens`, `output_tokens`, `latency_ms` or `user_id` yet.
+- Calls are only logged when that provider has a daily cap set, because logging lives in `use_quota`.
+  With a cap of 0 (no limit) the requests are not counted.
+- The Figma "Evaluation accuracy" panel is not here: it needs written-answer evaluation (later).
+
 ### How the summary is calculated (`GET /insights/summary`)
 
 One number per Insights card, built from the **same functions** as the detail endpoints, so the
@@ -122,4 +145,4 @@ its per-paper `weak_topics` through `service.is_weak_topic_percent`.
 | `repository.py` | All SQL queries for this module |
 
 Models live in `shared/db/models/`. Call other modules through their `service.py`, never their `repository.py`.
-Tests: `tests/api/test_performance.py`, `tests/api/test_mistakes.py`.
+Tests: `tests/api/test_performance.py`, `tests/api/test_mistakes.py`, `tests/api/test_analytics_admin.py`.
