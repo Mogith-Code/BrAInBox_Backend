@@ -15,7 +15,7 @@ Rules:
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,9 +32,16 @@ from api.modules.performance.grading import (
 )
 from api.modules.performance.repository import AnswerRow, MistakeRow
 from api.modules.performance.schemas import (
+    AIFeatureUsage,
+    AnalyticsAIUsage,
+    AnalyticsOverview,
+    AnalyticsPerformance,
+    CommonMisconception,
+    DailyCount,
     GradeBandOut,
     InsightsSummaryResponse,
     MisconceptionOut,
+    MissedTopic,
     MistakeOut,
     MistakeUpdate,
     ModuleStatus,
@@ -45,6 +52,7 @@ from api.modules.performance.schemas import (
     TopicInsightsResponse,
     TopicPerformance,
     TopicStatusCounts,
+    UnitAverage,
     UnitInsightsResponse,
     UnitMasteryOut,
     UnitRank,
@@ -674,3 +682,144 @@ async def update_mistake(
     await session.commit()
     question_ids = [mistake.question_id] if mistake.question_id else []
     return _mistake_out(row, await repository.get_correct_answers(session, question_ids))
+
+
+# =========================================================================== admin analytics
+# Used by admin/analytics_admin.py. Totals over all students, never one student's data.
+# A period of `days` days ends today (Sri Lanka date) and includes today.
+
+MOST_MISSED_LIMIT = 10
+MISCONCEPTIONS_LIMIT = 10
+
+
+def period_start(today: date, days: int) -> date:
+    return today - timedelta(days=days - 1)
+
+
+def _start_of_day(day: date) -> datetime:
+    return datetime.combine(day, time.min, tzinfo=clock.SRI_LANKA)
+
+
+def fill_days(counts: dict[date, int], first_day: date, last_day: date) -> list[DailyCount]:
+    """Pure: one entry per day, oldest first. Days without data are 0, so a chart has no gaps."""
+    total_days = (last_day - first_day).days + 1
+    days = [first_day + timedelta(days=n) for n in range(total_days)]
+    return [DailyCount(day=d, count=counts.get(d, 0)) for d in days]
+
+
+def change_percent(current: int, previous: int) -> float | None:
+    """Pure: the change against the previous period; None when it had nothing to compare with."""
+    return round(100 * (current - previous) / previous, 1) if previous else None
+
+
+def feature_usage(by_feature: dict[str, int]) -> list[AIFeatureUsage]:
+    """Pure: most used first, with each feature's share of all requests."""
+    total = sum(by_feature.values())
+    ranked = sorted(by_feature.items(), key=lambda item: (-item[1], item[0]))
+    return [
+        AIFeatureUsage(feature=name, requests=count, percent=round(100 * count / total, 1))
+        for name, count in ranked
+    ]
+
+
+def build_unit_averages(
+    units: list[UnitOut], averages: dict[uuid.UUID, tuple[float, int]]
+) -> list[UnitAverage]:
+    """Pure: one row per current unit. A unit nobody has been measured in is None, never 0 %."""
+    rows = []
+    for unit in units:
+        average, students = averages.get(unit.id, (None, 0))
+        rows.append(
+            UnitAverage(
+                unit_id=unit.id,
+                number=unit.number,
+                title=unit.title,
+                average_mastery=round(average, 1) if average is not None else None,
+                students_assessed=students,
+            )
+        )
+    return rows
+
+
+async def analytics_overview(session: AsyncSession, days: int) -> AnalyticsOverview:
+    """GET /admin/analytics/overview"""
+    today = clock.today()
+    first_day = period_start(today, days)
+    since = _start_of_day(first_day)
+    active = await repository.count_active_students(session, first_day, today)
+    previous = await repository.count_active_students(
+        session, first_day - timedelta(days=days), first_day - timedelta(days=1)
+    )
+    daily = await repository.daily_active_students(session, first_day)
+    return AnalyticsOverview(
+        days=days,
+        since=first_day,
+        total_students=await repository.count_students(session),
+        new_students=await repository.count_students(session, joined_since=since),
+        active_students=active,
+        active_students_previous=previous,
+        active_change_percent=change_percent(active, previous),
+        attempts_completed=await repository.count_finished_attempts(session, since),
+        mcq_answers=await repository.count_mcq_answers(session, since),
+        daily_active_students=fill_days(daily, first_day, today),
+    )
+
+
+async def analytics_performance(session: AsyncSession, days: int) -> AnalyticsPerformance:
+    """GET /admin/analytics/performance. Read from the stored answers, so it doesn't depend on
+    mistakes having been recorded."""
+    first_day = period_start(clock.today(), days)
+    since = _start_of_day(first_day)
+    units = await syllabus_service.get_units(session)
+    missed = await repository.most_missed_topics(
+        session, since, MIN_QUESTIONS_FOR_RELIABLE_RESULT, MOST_MISSED_LIMIT
+    )
+    misconceptions = await repository.common_misconceptions(session, since, MISCONCEPTIONS_LIMIT)
+    return AnalyticsPerformance(
+        days=days,
+        since=first_day,
+        units=build_unit_averages(units, await repository.unit_mastery_averages(session)),
+        min_answers_per_topic=MIN_QUESTIONS_FOR_RELIABLE_RESULT,
+        most_missed_topics=[
+            MissedTopic(
+                topic_id=row.topic_id,
+                topic=row.topic,
+                topic_number=row.topic_number,
+                unit_number=row.unit_number,
+                unit=row.unit,
+                answers=row.answers,
+                wrong=row.wrong,
+                wrong_percent=round(100 * row.wrong / row.answers, 1),
+            )
+            for row in missed
+        ],
+        misconceptions=[
+            CommonMisconception(
+                misconception_id=row.misconception_id,
+                title=row.title,
+                times_chosen=row.times_chosen,
+                students=row.students,
+            )
+            for row in misconceptions
+        ],
+    )
+
+
+async def analytics_ai_usage(session: AsyncSession, days: int) -> AnalyticsAIUsage:
+    """GET /admin/analytics/ai-usage. Cost and tokens stay None until they are recorded."""
+    today = clock.today()
+    first_day = period_start(today, days)
+    since = _start_of_day(first_day)
+    totals = await repository.ai_usage_totals(session, since)
+    daily = await repository.daily_ai_requests(session, since)
+    return AnalyticsAIUsage(
+        days=days,
+        since=first_day,
+        total_requests=totals.requests,
+        images=totals.images,
+        total_cost_usd=float(totals.cost_usd) if totals.cost_usd is not None else None,
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        by_feature=feature_usage(await repository.ai_usage_by_feature(session, since)),
+        daily_requests=fill_days(daily, first_day, today),
+    )
