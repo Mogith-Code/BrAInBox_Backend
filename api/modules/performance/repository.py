@@ -2,7 +2,7 @@
 
 Tables: mistakes, concept_mastery, unit_mastery, study_activity
 Read-only for topic insights: attempts, responses, questions, mcq_options, topics, units,
-misconceptions, model_answers, resources.
+misconceptions, model_answers, resources. Read-only for admin analytics: users, ai_usage_log.
 Only this module's `service.py` may import this file.
 """
 
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from shared.db.models import (
+    AIUsageLog,
     Attempt,
     MCQOption,
     Misconception,
@@ -30,8 +31,9 @@ from shared.db.models import (
     Topic,
     Unit,
     UnitMastery,
+    User,
 )
-from shared.enums import ContentStatus, MistakeType, QuestionType
+from shared.enums import ContentStatus, MistakeType, QuestionType, UserRole
 
 # Attempts in these states have been marked, so their responses can be analysed.
 FINISHED_ATTEMPT_STATUSES = ("submitted", "graded")
@@ -357,3 +359,190 @@ async def get_correct_answers(
         )
     )
     return {question_id: text for question_id, text in result.all()}
+
+
+# ---------------------------------------------------------------- admin analytics
+# Totals over all students. Every query joins `users` on the student role, so admins' own
+# testing doesn't count.
+_IS_STUDENT = User.role == UserRole.STUDENT
+
+
+async def count_students(session: AsyncSession, joined_since: datetime | None = None) -> int:
+    """Active student accounts, optionally only those created since a time."""
+    stmt = select(func.count(User.id)).where(_IS_STUDENT, User.is_active.is_(True))
+    if joined_since is not None:
+        stmt = stmt.where(User.created_at >= joined_since)
+    return (await session.scalar(stmt)) or 0
+
+
+async def count_active_students(session: AsyncSession, first_day: date, last_day: date) -> int:
+    """Different students with study activity from first_day to last_day (both included)."""
+    result = await session.scalar(
+        select(func.count(func.distinct(StudyActivity.user_id)))
+        .join(User, User.id == StudyActivity.user_id)
+        .where(
+            _IS_STUDENT,
+            StudyActivity.activity_date >= first_day,
+            StudyActivity.activity_date <= last_day,
+        )
+    )
+    return result or 0
+
+
+async def daily_active_students(session: AsyncSession, first_day: date) -> dict[date, int]:
+    """{day: students with study activity}. Days without any activity are left out."""
+    result = await session.execute(
+        select(StudyActivity.activity_date, func.count(func.distinct(StudyActivity.user_id)))
+        .join(User, User.id == StudyActivity.user_id)
+        .where(_IS_STUDENT, StudyActivity.activity_date >= first_day)
+        .group_by(StudyActivity.activity_date)
+    )
+    return {day: count for day, count in result.all()}
+
+
+async def count_finished_attempts(session: AsyncSession, since: datetime) -> int:
+    result = await session.scalar(
+        select(func.count(Attempt.id))
+        .join(User, User.id == Attempt.user_id)
+        .where(
+            _IS_STUDENT,
+            Attempt.status.in_(FINISHED_ATTEMPT_STATUSES),
+            Attempt.submitted_at >= since,
+        )
+    )
+    return result or 0
+
+
+def _valid_answers(since: datetime, *columns: Any) -> Select[Any]:
+    """Marked MCQ answers from students' finished attempts. The selected option must belong to
+    the question: the same rule as a student's own topic scores."""
+    return (
+        select(*columns)
+        .select_from(Response)
+        .join(Attempt, Attempt.id == Response.attempt_id)
+        .join(User, User.id == Attempt.user_id)
+        .join(Question, Question.id == Response.question_id)
+        .join(
+            MCQOption,
+            (MCQOption.id == Response.selected_option_id)
+            & (MCQOption.question_id == Response.question_id),
+        )
+        .where(
+            _IS_STUDENT,
+            Attempt.status.in_(FINISHED_ATTEMPT_STATUSES),
+            Attempt.submitted_at >= since,
+            Question.question_type == QuestionType.MCQ,
+            Response.is_correct.is_not(None),
+        )
+    )
+
+
+async def count_mcq_answers(session: AsyncSession, since: datetime) -> int:
+    return (await session.scalar(_valid_answers(since, func.count(Response.id)))) or 0
+
+
+async def most_missed_topics(
+    session: AsyncSession, since: datetime, min_answers: int, limit: int
+) -> list[Any]:
+    """Rows of (topic_id, topic, topic_number, unit_number, unit, answers, wrong), most missed
+    first. Topics with fewer than `min_answers` are left out: too few to mean anything."""
+    answers = func.count(Response.id)
+    wrong = func.count(Response.id).filter(Response.is_correct.is_(False))
+    stmt = (
+        _valid_answers(
+            since,
+            Topic.id.label("topic_id"),
+            Topic.title.label("topic"),
+            Topic.number.label("topic_number"),
+            Unit.number.label("unit_number"),
+            Unit.title.label("unit"),
+            answers.label("answers"),
+            wrong.label("wrong"),
+        )
+        .join(Topic, Topic.id == Question.topic_id)
+        .join(Unit, Unit.id == Topic.unit_id)
+        .group_by(Topic.id, Unit.id)
+        .having(answers >= min_answers)
+        # Ties: more answers first, then syllabus order, so the list doesn't change between calls.
+        .order_by((wrong * 1.0 / answers).desc(), answers.desc(), Unit.number, Topic.number)
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).all())
+
+
+async def common_misconceptions(session: AsyncSession, since: datetime, limit: int) -> list[Any]:
+    """Rows of (misconception_id, title, times_chosen, students), most chosen first."""
+    times_chosen = func.count(Response.id)
+    stmt = (
+        _valid_answers(
+            since,
+            Misconception.id.label("misconception_id"),
+            Misconception.title.label("title"),
+            times_chosen.label("times_chosen"),
+            func.count(func.distinct(Attempt.user_id)).label("students"),
+        )
+        .join(Misconception, Misconception.id == MCQOption.misconception_id)
+        .where(Response.is_correct.is_(False))
+        .group_by(Misconception.id)
+        .order_by(times_chosen.desc(), Misconception.title)
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).all())
+
+
+async def unit_mastery_averages(session: AsyncSession) -> dict[uuid.UUID, tuple[float, int]]:
+    """{unit_id: (average mastery, students)} using each student's NEWEST snapshot per unit."""
+    newest = (
+        select(UnitMastery.unit_id, UnitMastery.mastery)
+        .join(User, User.id == UnitMastery.user_id)
+        .where(_IS_STUDENT)
+        .ext(distinct_on(UnitMastery.user_id, UnitMastery.unit_id))
+        .order_by(UnitMastery.user_id, UnitMastery.unit_id, UnitMastery.created_at.desc())
+        .subquery()
+    )
+    result = await session.execute(
+        select(newest.c.unit_id, func.avg(newest.c.mastery), func.count()).group_by(
+            newest.c.unit_id
+        )
+    )
+    return {unit_id: (float(average), count) for unit_id, average, count in result.all()}
+
+
+def _ai_usage_day() -> Any:
+    """The Sri Lanka date of a usage row, so days match the rest of the analytics."""
+    return func.date(func.timezone("Asia/Colombo", AIUsageLog.created_at))
+
+
+async def ai_usage_totals(session: AsyncSession, since: datetime) -> Any:
+    """One row: requests, images, cost_usd, input_tokens, output_tokens. The last three are
+    None (not 0) when no row in the period recorded them."""
+    result = await session.execute(
+        select(
+            func.count(AIUsageLog.id).label("requests"),
+            func.coalesce(func.sum(AIUsageLog.images), 0).label("images"),
+            func.sum(AIUsageLog.cost_usd).label("cost_usd"),
+            func.sum(AIUsageLog.input_tokens).label("input_tokens"),
+            func.sum(AIUsageLog.output_tokens).label("output_tokens"),
+        ).where(AIUsageLog.created_at >= since)
+    )
+    return result.one()
+
+
+async def ai_usage_by_feature(session: AsyncSession, since: datetime) -> dict[str, int]:
+    """{feature: requests}. The feature is the prompt's folder ("notes/generate_notes.v1" ->
+    "notes"); calls without a prompt (embeddings, OCR, images) use their operation."""
+    feature = func.split_part(func.coalesce(AIUsageLog.prompt_name, AIUsageLog.operation), "/", 1)
+    result = await session.execute(
+        select(feature, func.count(AIUsageLog.id))
+        .where(AIUsageLog.created_at >= since)
+        .group_by(feature)
+    )
+    return {name: count for name, count in result.all()}
+
+
+async def daily_ai_requests(session: AsyncSession, since: datetime) -> dict[date, int]:
+    day = _ai_usage_day()
+    result = await session.execute(
+        select(day, func.count(AIUsageLog.id)).where(AIUsageLog.created_at >= since).group_by(day)
+    )
+    return {row_day: count for row_day, count in result.all()}
