@@ -28,8 +28,10 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 | GET | `/api/v1/insights/summary` | ✅ done | My overview: overall mastery + weekly change, MCQ score, topic levels, streak and study days |
 | GET | `/api/v1/insights/units` | ✅ done | My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
 | GET | `/api/v1/insights/concepts` | planned | Weakest concepts |
-| GET | `/api/v1/mistakes` | planned | My mistakes (filter by type/unit) |
-| - | (service) | planned | record_mistake() and update_mastery() called by quizzes/exams/evaluation |
+| GET | `/api/v1/mistakes` | ✅ done | My wrong MCQ answers, newest first, paged. Filters: `type`, `unit_id`, `status` (`open` / `resolved`) |
+| PATCH | `/api/v1/mistakes/{id}` | ✅ done | `{"resolved": true}` = fixed, `false` = open again. Not yours → 404 `MISTAKE_NOT_FOUND` |
+| - | (service) `record_mistakes()` | ✅ built, ⚠️ **not called yet** | Exams and quizzes must call it after marking, or the journal stays empty |
+| - | (service) `update_mastery()` | planned | Called by quizzes/exams/evaluation |
 
 Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "status": "todo"}` (needs login).
 
@@ -44,6 +46,22 @@ Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "st
    A unit first measured this week has `change_week: null` (nothing to compare with).
 5. `average_mastery`, `strongest` and `weakest` use assessed units only (ties: the lower unit number).
    Snapshots of units no longer in the syllabus are ignored.
+
+### How mistakes are recorded (`record_mistakes(session, user_id, attempt_id)`)
+
+Call it **after the attempt is marked**, in the same transaction; the caller commits:
+
+```python
+await performance_service.record_mistakes(session, user.id, attempt.id)
+```
+
+- One `mistakes` row per **wrong** MCQ answer. Unanswered and unreliable answers are not mistakes
+  (the same rule as the topic scores).
+- `mistake_type` is `misconception` when the chosen wrong option is linked to a misconception, otherwise
+  `knowledge_gap`. Other types (such as `careless`) can't be told apart automatically.
+- `concept_id` is the misconception's concept, otherwise the concept the question tests most, otherwise empty.
+- Calling it twice for an attempt adds nothing. Wrong answers in a **later** attempt are new mistakes,
+  even for the same question.
 
 ### How the summary is calculated (`GET /insights/summary`)
 
@@ -104,4 +122,4 @@ its per-paper `weak_topics` through `service.is_weak_topic_percent`.
 | `repository.py` | All SQL queries for this module |
 
 Models live in `shared/db/models/`. Call other modules through their `service.py`, never their `repository.py`.
-Tests: `tests/api/test_performance.py`.
+Tests: `tests/api/test_performance.py`, `tests/api/test_mistakes.py`.
