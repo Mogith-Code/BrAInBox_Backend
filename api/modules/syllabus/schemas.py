@@ -17,15 +17,9 @@ from pydantic.alias_generators import to_camel
 
 from shared.enums import TopicProgressStatus
 
-# Unit status from the average topic score: >= 75 strong, 40..74 improving, < 40 weak.
-UnitStatus = Literal["strong", "improving", "weak"]
-
-
-class ModuleStatus(BaseModel):
-    """Response of the placeholder status route."""
-
-    module: str
-    status: str
+# Unit status: not_started = no activity in any of its topics. Otherwise from the average topic
+# score: >= 75 strong, 40..74 improving, < 40 weak.
+UnitStatus = Literal["not_started", "strong", "improving", "weak"]
 
 
 # ---------------------------------------------------------------- GET /units

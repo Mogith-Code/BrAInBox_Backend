@@ -8,7 +8,11 @@ Learn navigation (Samni): subject -> units -> topics -> sub-topics, with the cur
 progress from `user_topic_progress`:
     * topic: status / score / is_weak from the student's row (no row = not started, 0, False)
     * unit:  progressPct = average topic score (topics without a row count as 0),
-             status = strong (>= 75) | improving (40..74) | weak (< 40)
+             status = not_started (no activity in any topic), otherwise
+             strong (>= 75) | improving (40..74) | weak (< 40)
+
+Progress is only READ here. performance.service writes it (performance imports this module, so
+this module must not import performance).
 
 Rules:
   * SQL lives in `repository.py`, not here.
@@ -35,7 +39,6 @@ from api.modules.syllabus.schemas import (
     ConceptCreate,
     ConceptUpdate,
     LearnUnitOut,
-    ModuleStatus,
     SubtopicOut,
     TopicCreate,
     TopicDetailOut,
@@ -51,15 +54,8 @@ from api.modules.syllabus.schemas import (
 from shared.db.models import Concept, Topic, Unit, UserTopicProgress
 from shared.enums import TopicProgressStatus
 
-MODULE_NAME = "syllabus"
-
 STRONG_FROM = 75  # unit average >= 75 -> "strong"
 IMPROVING_FROM = 40  # unit average 40..74 -> "improving", below -> "weak"
-
-
-async def get_status() -> ModuleStatus:
-    """Placeholder used by the status route."""
-    return ModuleStatus(module=MODULE_NAME, status="todo")
 
 
 @dataclass
@@ -71,6 +67,16 @@ class TopicInfo:
     unit_id: uuid.UUID
     unit_title: str
     unit_number: int = 0  # e.g. 6 for Unit 6 (added for visuals: "unit_code")
+    code: str | None = None  # public code, e.g. "bio-6.1" (set by resolve_topic)
+
+
+async def resolve_topic(session: AsyncSession, topic_ref: str) -> TopicInfo:
+    """A topic by its public code or UUID, outdated ones included. 404 TOPIC_NOT_FOUND."""
+    row = await repository.get_topic_with_unit(session, parse_ref(topic_ref))
+    if row is None:
+        raise NotFoundError(f"Topic '{topic_ref}' not found", code="TOPIC_NOT_FOUND")
+    topic, unit = row
+    return TopicInfo(topic.id, topic.title, unit.id, unit.title, unit.number, topic.code)
 
 
 async def get_topics(session: AsyncSession, topic_ids: list[uuid.UUID]) -> list[TopicInfo]:
@@ -155,7 +161,10 @@ def parse_ref(value: str) -> repository.Ref:
         return value
 
 
-def unit_status(progress_pct: int) -> UnitStatus:
+def unit_status(progress_pct: int, started: bool) -> UnitStatus:
+    """`started` = the student has activity in at least one topic of the unit."""
+    if not started:
+        return "not_started"
     if progress_pct >= STRONG_FROM:
         return "strong"
     if progress_pct >= IMPROVING_FROM:
@@ -163,7 +172,7 @@ def unit_status(progress_pct: int) -> UnitStatus:
     return "weak"
 
 
-def unit_out(unit: Unit, topic_count: int, average_score: float) -> LearnUnitOut:
+def unit_out(unit: Unit, topic_count: int, average_score: float, started: bool) -> LearnUnitOut:
     progress_pct = round(average_score)
     return LearnUnitOut(
         id=unit.code or str(unit.id),
@@ -174,7 +183,7 @@ def unit_out(unit: Unit, topic_count: int, average_score: float) -> LearnUnitOut
         icon=unit.icon,
         topic_count=topic_count,
         progress_pct=progress_pct,
-        status=unit_status(progress_pct),
+        status=unit_status(progress_pct, started),
     )
 
 
@@ -219,7 +228,10 @@ async def list_subject_units(
     if subject is None:
         raise NotFoundError(f"Subject '{subject_ref}' not found", code="SUBJECT_NOT_FOUND")
     rows = await repository.list_units_with_scores(session, subject.id, user.id)
-    return [unit_out(unit, count, average) for unit, count, average in rows]
+    return [
+        unit_out(unit, count, average, started_count > 0)
+        for unit, count, average, started_count in rows
+    ]
 
 
 async def list_unit_topics(
@@ -234,8 +246,9 @@ async def list_unit_topics(
     topics = [topic_out(topic, progress, concepts.get(topic.id, [])) for topic, progress in rows]
 
     average = sum(t.progress_pct for t in topics) / len(topics) if topics else 0.0
+    started = any(t.status != TopicProgressStatus.NOT_STARTED for t in topics)
     return UnitTopicsOut(
-        unit=unit_out(unit, len(topics), average),
+        unit=unit_out(unit, len(topics), average, started),
         summary=summarise_topics(topics),
         topics=topics,
     )

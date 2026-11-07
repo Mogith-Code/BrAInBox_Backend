@@ -18,20 +18,12 @@ from api.core.security import CurrentUserDep
 from api.modules.syllabus import service
 from api.modules.syllabus.schemas import (
     LearnUnitOut,
-    ModuleStatus,
     TopicDetailOut,
     UnitOut,
     UnitTopicsOut,
 )
 
 router = APIRouter(tags=["Syllabus"])
-
-
-@router.get("/syllabus/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    # TODO(Keshomigha): remove this placeholder once the app no longer calls it.
-    return await service.get_status()
 
 
 @router.get("/units", response_model=list[UnitOut], summary="All units of the current syllabus")
@@ -51,7 +43,8 @@ async def list_subject_units(
     """`subject_id`: e.g. `biology`. Units in syllabus order.
 
     `progressPct` is the average of my topic scores in the unit (topics I have not started
-    count as 0). `status`: `strong` (≥ 75), `improving` (40–74), `weak` (< 40).
+    count as 0). `status`: `not_started` (no activity in any topic of the unit), otherwise
+    `strong` (≥ 75), `improving` (40–74), `weak` (< 40).
 
     Errors: 401 not logged in · 404 `SUBJECT_NOT_FOUND`."""
     return await service.list_subject_units(session, user, subject_id)

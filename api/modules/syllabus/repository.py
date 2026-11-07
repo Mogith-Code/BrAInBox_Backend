@@ -13,6 +13,7 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import Concept, Subject, Topic, Unit, UserTopicProgress
+from shared.enums import TopicProgressStatus
 
 Ref = uuid.UUID | str
 
@@ -133,16 +134,19 @@ async def get_topic_with_unit(session: AsyncSession, ref: Ref) -> tuple[Topic, U
 
 async def list_units_with_scores(
     session: AsyncSession, subject_id: uuid.UUID, user_id: uuid.UUID
-) -> list[tuple[Unit, int, float]]:
-    """(unit, number of topics, average topic score of the user) per unit, by unit number.
+) -> list[tuple[Unit, int, float, int]]:
+    """(unit, number of topics, average topic score, topics started) per unit, by unit number.
 
-    A topic the user has no progress row for counts as score 0.
+    A topic the user has no progress row for counts as score 0 and as not started.
     """
     result = await session.execute(
         select(
             Unit,
             func.count(Topic.id),
             func.coalesce(func.avg(func.coalesce(UserTopicProgress.score, 0)), 0),
+            func.count(UserTopicProgress.id).filter(
+                UserTopicProgress.status != TopicProgressStatus.NOT_STARTED
+            ),
         )
         .outerjoin(Topic, (Topic.unit_id == Unit.id) & Topic.is_outdated.is_(False))
         .outerjoin(
@@ -153,7 +157,7 @@ async def list_units_with_scores(
         .group_by(Unit.id)
         .order_by(Unit.number)
     )
-    return [(unit, count, float(avg)) for unit, count, avg in result.all()]
+    return [(unit, count, float(avg), started) for unit, count, avg, started in result.all()]
 
 
 async def list_topics_with_progress(

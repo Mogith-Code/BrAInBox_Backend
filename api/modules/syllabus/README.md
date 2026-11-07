@@ -25,7 +25,11 @@ All need a logged-in user.
 | GET | `/api/v1/units/{unit_id}/topics` | ✅ done | Topics of a unit + sub-topics + my progress (Learn). Unknown or outdated unit → 404 `UNIT_NOT_FOUND` |
 | GET | `/api/v1/topics/{topic_id}` | ✅ done | One topic with its sub-topics + my progress (Learn). Unknown → 404 `TOPIC_NOT_FOUND` |
 
-Placeholder: `GET /api/v1/syllabus/status` → `{"module": "syllabus", "status": "todo"}` (needs login).
+Unit `status`: `not_started` when no topic of the unit has activity, otherwise `strong` (≥ 75),
+`improving` (40–74) or `weak` (< 40) from `progressPct`.
+
+This module only **reads** `user_topic_progress`. The `performance` module writes it, including
+`POST /api/v1/topics/{topic_id}/start` (performance imports this module, so not the other way round).
 
 ### Current vs outdated
 
@@ -69,6 +73,7 @@ embedding (it no longer matches the text); the next embedding run recomputes it.
 
 | Function | Used by |
 |---|---|
+| `resolve_topic(ref)` | performance: find a topic by public code or UUID (404 `TOPIC_NOT_FOUND`) |
 | `get_topics(topic_ids)` | exams, content: check topic ids, get titles + unit |
 | `list_units()` | quizzes, home: units with `exam_weight` |
 | `list_topics_by_unit(unit_ids)` | home: current topics per unit |

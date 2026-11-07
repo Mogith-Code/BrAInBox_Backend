@@ -25,19 +25,11 @@ def seed_script() -> ModuleType:
     return importlib.import_module("seed_syllabus")
 
 
-# --------------------------------------------------------------------------- placeholder
+# --------------------------------------------------------------------------- removed placeholder
 
 
-async def test_syllabus_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/syllabus/status")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "UNAUTHORIZED"
-
-
-async def test_syllabus_status_placeholder(client):
-    response = await client.get("/api/v1/syllabus/status")
-    assert response.status_code == 200
-    assert response.json() == {"module": "syllabus", "status": "todo"}
+async def test_syllabus_status_placeholder_is_gone(client):
+    assert (await client.get("/api/v1/syllabus/status")).status_code == 404
 
 
 # --------------------------------------------------------------------------- GET /units (repository faked)
@@ -119,7 +111,11 @@ async def test_seed_syllabus_is_idempotent():
     ],
 )
 def test_unit_status_thresholds(progress, expected):
-    assert service.unit_status(progress) == expected
+    assert service.unit_status(progress, started=True) == expected
+
+
+def test_unit_without_activity_is_not_started():
+    assert service.unit_status(0, started=False) == "not_started"
 
 
 def test_parse_ref_accepts_uuid_or_code():
@@ -243,6 +239,47 @@ async def test_list_units_with_progress(client, learn_data):
             "status": "improving",
         }
     ]
+
+
+@pytest.mark.db
+async def test_unit_with_no_activity_is_not_started_in_both_lists(client, db_session, learn_data):
+    await db_session.execute(
+        delete(UserTopicProgress).where(UserTopicProgress.user_id == STUDENT.id)
+    )
+    await db_session.commit()
+
+    units = (await client.get(f"/api/v1/subjects/{learn_data['subject'].code}/units")).json()
+    assert (units[0]["status"], units[0]["progressPct"]) == ("not_started", 0)
+
+    body = (await client.get(f"/api/v1/units/{learn_data['unit'].code}/topics")).json()
+    assert (body["unit"]["status"], body["unit"]["progressPct"]) == ("not_started", 0)
+    assert {t["status"] for t in body["topics"]} == {"not_started"}
+
+
+@pytest.mark.db
+async def test_another_students_progress_does_not_start_my_unit(client, db_session, learn_data):
+    """Progress of other students must never leak into my unit status."""
+    other_id = uuid.uuid4()
+    db_session.add(User(id=other_id, firebase_uid=f"other-{other_id}", role=UserRole.STUDENT))
+    await db_session.execute(
+        delete(UserTopicProgress).where(UserTopicProgress.user_id == STUDENT.id)
+    )
+    await db_session.flush()
+    db_session.add(
+        UserTopicProgress(
+            user_id=other_id,
+            topic_id=learn_data["first"].id,
+            status=TopicProgressStatus.MASTERED,
+            score=100,
+        )
+    )
+    await db_session.commit()
+    try:
+        units = (await client.get(f"/api/v1/subjects/{learn_data['subject'].code}/units")).json()
+        assert (units[0]["status"], units[0]["progressPct"]) == ("not_started", 0)
+    finally:
+        await db_session.execute(delete(User).where(User.id == other_id))
+        await db_session.commit()
 
 
 @pytest.mark.db
