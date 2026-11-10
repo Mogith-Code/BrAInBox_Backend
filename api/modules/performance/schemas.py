@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from api.modules.performance.grading import TopicStatus
 from api.modules.syllabus.schemas import CamelModel
-from shared.enums import TopicProgressStatus
+from shared.enums import MistakeType, TopicProgressStatus
 
 
 class ModuleStatus(BaseModel):
@@ -192,3 +192,106 @@ class TopicProgressOut(CamelModel):
     status: TopicProgressStatus
     progress_pct: int  # 0..100
     is_weak: bool
+
+
+# ---------------------------------------------------------------- mistake journal
+class MistakeOut(BaseModel):
+    """One wrong MCQ answer. The question may be gone (deleted later): then its fields are null."""
+
+    id: uuid.UUID
+    question_id: uuid.UUID | None
+    question: str | None
+    your_answer: str | None
+    correct_answer: str | None
+    explanation: str | None  # the question's stored explanation
+    mistake_type: MistakeType
+    misconception: MisconceptionOut | None
+    correction: str | None  # how to fix the misconception, if one is linked
+    topic_id: uuid.UUID | None
+    topic: str | None
+    topic_number: str | None
+    unit_id: uuid.UUID | None
+    unit_number: int | None
+    unit: str | None
+    source: str | None  # where it happened: diagnostic | quiz | exam | practice
+    is_resolved: bool
+    resolved_at: datetime | None
+    created_at: datetime
+
+
+class MistakeUpdate(BaseModel):
+    resolved: bool  # true = the student fixed it ("Fixed" toggle), false = open again
+
+
+# =========================================================================== admin analytics
+# Totals over all students (never one student's data). Admins' own activity is left out.
+class DailyCount(BaseModel):
+    day: date  # Sri Lanka date
+    count: int
+
+
+class AnalyticsOverview(BaseModel):
+    days: int
+    since: date
+    total_students: int
+    new_students: int
+    active_students: int  # students with study activity in the period
+    active_students_previous: int  # the same number for the period before it
+    active_change_percent: float | None  # None when the previous period had no active students
+    attempts_completed: int
+    mcq_answers: int
+    daily_active_students: list[DailyCount]  # one entry per day, oldest first, 0 when none
+
+
+class UnitAverage(BaseModel):
+    unit_id: uuid.UUID
+    number: int
+    title: str
+    average_mastery: float | None  # None = no student has a measurement yet (never 0 %)
+    students_assessed: int
+
+
+class MissedTopic(BaseModel):
+    topic_id: uuid.UUID
+    topic: str
+    topic_number: str
+    unit_number: int
+    unit: str
+    answers: int
+    wrong: int
+    wrong_percent: float
+
+
+class CommonMisconception(BaseModel):
+    misconception_id: uuid.UUID
+    title: str
+    times_chosen: int
+    students: int
+
+
+class AnalyticsPerformance(BaseModel):
+    days: int
+    since: date
+    units: list[UnitAverage]  # current level per unit, not limited to the period
+    min_answers_per_topic: int  # topics with fewer answers are left out of most_missed_topics
+    most_missed_topics: list[MissedTopic]  # highest wrong_percent first
+    misconceptions: list[CommonMisconception]  # most chosen first
+
+
+class AIFeatureUsage(BaseModel):
+    feature: str  # the prompt's folder ("notes", "visuals"), else the operation ("embed", "ocr")
+    requests: int
+    percent: float
+
+
+class AnalyticsAIUsage(BaseModel):
+    days: int
+    since: date
+    total_requests: int
+    images: int
+    # None = not recorded. The AI service doesn't log cost or tokens yet, so these aren't 0.
+    total_cost_usd: float | None
+    input_tokens: int | None
+    output_tokens: int | None
+    by_feature: list[AIFeatureUsage]  # most used first
+    daily_requests: list[DailyCount]  # one entry per day, oldest first, 0 when none
