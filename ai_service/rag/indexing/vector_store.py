@@ -8,6 +8,7 @@ Two implementations with the same methods:
 Only the RAG layer uses this file. Pipelines call `rag.retrieval.retriever` instead.
 """
 
+import logging
 import math
 import re
 import uuid
@@ -15,11 +16,22 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from sqlalchemy import Select, delete, func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.rag.schemas import Chunk, RetrievedChunk
 from shared.db.models import DocumentChunk, SourceDocument
 from shared.enums import DocumentStatus, SourceType
+
+logger = logging.getLogger(__name__)
+
+# Set once the database turns out to have no pgvector (see PgVectorStore.vector_search).
+_PGVECTOR_MISSING = False
+PGVECTOR_MISSING_MESSAGE = (
+    "pgvector is not installed in this database, so RAG search uses keywords only. "
+    "Fix: use a Postgres with pgvector (docker compose up -d db, the pgserver database, or "
+    "Neon), then run `alembic upgrade head`. Never create a fake `vector` type."
+)
 
 
 @dataclass
@@ -111,12 +123,31 @@ class PgVectorStore:
     async def vector_search(
         self, embedding: list[float], filters: SearchFilters, limit: int
     ) -> list[RetrievedChunk]:
+        """Nearest chunks by cosine distance.
+
+        A database WITHOUT the real pgvector extension (e.g. a plain Postgres, or a fake
+        `vector` type) has no `<=>` operator. Then we log one clear warning and return no
+        vector results, so search still works with keywords only. Any other database error
+        is raised as usual: we never hide real problems.
+        """
+        global _PGVECTOR_MISSING
+        if _PGVECTOR_MISSING:
+            return []
         distance = DocumentChunk.embedding.cosine_distance(embedding)
         stmt = self._base_query(distance.label("distance")).where(
             DocumentChunk.embedding.is_not(None)
         )
         stmt = self._apply_filters(stmt, filters).order_by(distance).limit(limit)
-        rows = (await self.session.execute(stmt)).all()
+        try:
+            rows = (await self.session.execute(stmt)).all()
+        except DBAPIError as exc:
+            if not is_missing_pgvector(exc):
+                raise
+            _PGVECTOR_MISSING = True
+            # The failed statement aborted the transaction; roll back so keyword search can run.
+            await self.session.rollback()
+            logger.warning(PGVECTOR_MISSING_MESSAGE)
+            return []
         # cosine similarity = 1 - cosine distance
         return [
             _to_retrieved(row[0], row[1], row[2], vector_score=1.0 - float(row[3])) for row in rows
@@ -132,6 +163,14 @@ class PgVectorStore:
         stmt = self._apply_filters(stmt, filters).order_by(rank.desc()).limit(limit)
         rows = (await self.session.execute(stmt)).all()
         return [_to_retrieved(row[0], row[1], row[2], keyword_score=float(row[3])) for row in rows]
+
+
+def is_missing_pgvector(exc: Exception) -> bool:
+    """True only for "pgvector is not installed" errors (no `<=>` operator / `vector` type)."""
+    text = str(exc).lower()
+    return ("operator does not exist" in text and "<=>" in text) or (
+        'type "vector" does not exist' in text
+    )
 
 
 def _to_retrieved(

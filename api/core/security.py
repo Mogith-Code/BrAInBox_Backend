@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -83,10 +83,35 @@ def _get_firebase_app() -> Any:
     return _firebase_app
 
 
+# --- Dev login (for testing in /docs without Firebase). OFF unless ALL of these are true:
+#   1. DEV_LOGIN_ENABLED=true in .env     2. ENVIRONMENT=dev     3. the request comes from
+#   this computer (127.0.0.1 / ::1). Then "Bearer dev-token" = a test student and
+#   "Bearer dev-admin" = a test admin. api/main.py refuses to start with it on outside dev.
+DEV_CLAIMS: dict[str, dict[str, Any]] = {
+    "dev-token": {"uid": "dev-student", "email": "student@dev.local", "name": "Dev Student"},
+    "dev-admin": {"uid": "dev-admin", "email": "admin@dev.local", "name": "Dev Admin"},
+}
+DEV_ROLES = {"dev-student": UserRole.STUDENT, "dev-admin": UserRole.ADMIN}
+LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def dev_login_allowed(request: Request) -> bool:
+    """True only when the dev login is switched on, in dev, for a request from this computer."""
+    settings = get_settings()
+    client = request.client.host if request.client else ""
+    return settings.DEV_LOGIN_ENABLED and settings.ENVIRONMENT == "dev" and client in LOCAL_HOSTS
+
+
 async def get_firebase_claims(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> dict[str, Any]:
     """Verify the Firebase ID token and return its claims (uid, email, ...)."""
+    token = credentials.credentials if credentials else None
+    if token in DEV_CLAIMS and dev_login_allowed(request):
+        # "dev_login" marks claims that did NOT come from Firebase (see get_current_user).
+        return {**DEV_CLAIMS[token], "dev_login": True}
+
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("Missing bearer token")
 
@@ -111,6 +136,20 @@ async def get_current_user(claims: FirebaseClaimsDep, session: SessionDep) -> Cu
     """Return the registered, active user for this token."""
     result = await session.execute(select(User).where(User.firebase_uid == claims["uid"]))
     user = result.scalar_one_or_none()
+
+    # Dev login only: create the test student / admin the first time they are used.
+    if user is None and claims.get("dev_login") and claims["uid"] in DEV_ROLES:
+        user = User(
+            firebase_uid=claims["uid"],
+            email=claims["email"],
+            display_name=claims["name"],
+            role=DEV_ROLES[claims["uid"]],
+            email_verified=True,
+            is_active=True,
+        )
+        session.add(user)
+        await session.commit()
+
     if user is None:
         raise UnauthorizedError(
             "User is not registered. Call POST /api/v1/auth/register first.",

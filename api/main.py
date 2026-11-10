@@ -68,6 +68,11 @@ logger = logging.getLogger(__name__)
 def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.LOG_LEVEL)
+    if settings.DEV_LOGIN_ENABLED:
+        if settings.ENVIRONMENT != "dev":
+            # The dev login lets anyone in as admin; never allow it on a real server.
+            raise RuntimeError("DEV_LOGIN_ENABLED=true is only allowed with ENVIRONMENT=dev")
+        logger.warning("DEV LOGIN IS ON: 'Bearer dev-admin' is an admin (this computer only)")
 
     app = FastAPI(
         title=f"{APP_NAME} API",

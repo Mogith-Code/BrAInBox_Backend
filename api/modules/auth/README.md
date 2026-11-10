@@ -117,6 +117,18 @@ the response as `dev_code`, and in the api log) → `POST /auth/email-code/verif
 `get_test_token.py` needs `FIREBASE_WEB_API_KEY` in `.env` (Project settings → General → Your apps → `apiKey`).
 Delete test accounts afterwards in Firebase → Authentication → Users.
 
+**Without Firebase (dev login).** Put `DEV_LOGIN_ENABLED=true` in `.env`, restart the api, and in
+**Authorize** type `dev-token` (a test student) or `dev-admin` (a test admin). The test users are
+created on first use. It works only when **all** of these are true, otherwise the token is refused:
+
+| Rule | Why |
+|---|---|
+| `DEV_LOGIN_ENABLED=true` (off by default) | nobody turns it on by accident |
+| `ENVIRONMENT=dev` (the api will not even start with it on anywhere else) | never on a real server |
+| the request comes from this computer (`127.0.0.1`) | other devices on the network can't use it |
+
+A request with **no** token is always 401. Never set `DEV_LOGIN_ENABLED` on a shared or online server.
+
 The backend loads the service-account file from `GOOGLE_APPLICATION_CREDENTIALS` itself, so it works with plain
 `uvicorn` as well as Docker. Without the file, logins still work, but verifying emails, resetting passwords and
 deleting accounts fail with `FIREBASE_ERROR`.
