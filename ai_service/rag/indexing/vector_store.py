@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from sqlalchemy import Select, delete, func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.rag.schemas import Chunk, RetrievedChunk
@@ -24,7 +25,13 @@ from shared.enums import DocumentStatus, SourceType
 
 logger = logging.getLogger(__name__)
 
-_PGVECTOR_AVAILABLE: bool | None = None
+# Set once the database turns out to have no pgvector (see PgVectorStore.vector_search).
+_PGVECTOR_MISSING = False
+PGVECTOR_MISSING_MESSAGE = (
+    "pgvector is not installed in this database, so RAG search uses keywords only. "
+    "Fix: use a Postgres with pgvector (docker compose up -d db, the pgserver database, or "
+    "Neon), then run `alembic upgrade head`. Never create a fake `vector` type."
+)
 
 
 @dataclass
@@ -116,55 +123,54 @@ class PgVectorStore:
     async def vector_search(
         self, embedding: list[float], filters: SearchFilters, limit: int
     ) -> list[RetrievedChunk]:
-        global _PGVECTOR_AVAILABLE
-        if _PGVECTOR_AVAILABLE is False:
-            return []
+        """Nearest chunks by cosine distance.
 
-        try:
-            distance = DocumentChunk.embedding.cosine_distance(embedding)
-            stmt = self._base_query(distance.label("distance")).where(
-                DocumentChunk.embedding.is_not(None)
-            )
-            stmt = self._apply_filters(stmt, filters).order_by(distance).limit(limit)
-            rows = (await self.session.execute(stmt)).all()
-            _PGVECTOR_AVAILABLE = True
-            # cosine similarity = 1 - cosine distance
-            return [
-                _to_retrieved(row[0], row[1], row[2], vector_score=1.0 - float(row[3]))
-                for row in rows
-            ]
-        except Exception as exc:
-            _PGVECTOR_AVAILABLE = False
-            await self.session.rollback()
-            logger.debug("vector_search fallback (pgvector operator unavailable): %s", exc)
+        A database WITHOUT the real pgvector extension (e.g. a plain Postgres, or a fake
+        `vector` type) has no `<=>` operator. Then we log one clear warning and return no
+        vector results, so search still works with keywords only. Any other database error
+        is raised as usual: we never hide real problems.
+        """
+        global _PGVECTOR_MISSING
+        if _PGVECTOR_MISSING:
             return []
+        distance = DocumentChunk.embedding.cosine_distance(embedding)
+        stmt = self._base_query(distance.label("distance")).where(
+            DocumentChunk.embedding.is_not(None)
+        )
+        stmt = self._apply_filters(stmt, filters).order_by(distance).limit(limit)
+        try:
+            rows = (await self.session.execute(stmt)).all()
+        except DBAPIError as exc:
+            if not is_missing_pgvector(exc):
+                raise
+            _PGVECTOR_MISSING = True
+            # The failed statement aborted the transaction; roll back so keyword search can run.
+            await self.session.rollback()
+            logger.warning(PGVECTOR_MISSING_MESSAGE)
+            return []
+        # cosine similarity = 1 - cosine distance
+        return [
+            _to_retrieved(row[0], row[1], row[2], vector_score=1.0 - float(row[3])) for row in rows
+        ]
 
     async def keyword_search(
         self, query: str, filters: SearchFilters, limit: int
     ) -> list[RetrievedChunk]:
         # websearch_to_tsquery understands normal search text: words, "quoted phrases", -not
-        try:
-            ts_query = func.websearch_to_tsquery("english", query)
-            rank = func.ts_rank_cd(DocumentChunk.tsv, ts_query)
-            stmt = self._base_query(rank.label("rank")).where(DocumentChunk.tsv.op("@@")(ts_query))
-            stmt = self._apply_filters(stmt, filters).order_by(rank.desc()).limit(limit)
-            rows = (await self.session.execute(stmt)).all()
-            if rows:
-                return [
-                    _to_retrieved(row[0], row[1], row[2], keyword_score=float(row[3]))
-                    for row in rows
-                ]
-        except Exception as exc:
-            logger.debug("keyword_search query error: %s", exc)
+        ts_query = func.websearch_to_tsquery("english", query)
+        rank = func.ts_rank_cd(DocumentChunk.tsv, ts_query)
+        stmt = self._base_query(rank.label("rank")).where(DocumentChunk.tsv.op("@@")(ts_query))
+        stmt = self._apply_filters(stmt, filters).order_by(rank.desc()).limit(limit)
+        rows = (await self.session.execute(stmt)).all()
+        return [_to_retrieved(row[0], row[1], row[2], keyword_score=float(row[3])) for row in rows]
 
-        # Fallback if no keyword matched: return chunks for the unit if filtered by unit_id
-        if filters.unit_id:
-            stmt = self._base_query(func.random().label("rank"))
-            stmt = self._apply_filters(stmt, filters).limit(limit)
-            rows = (await self.session.execute(stmt)).all()
-            return [_to_retrieved(row[0], row[1], row[2], keyword_score=0.5) for row in rows]
 
-        return []
+def is_missing_pgvector(exc: Exception) -> bool:
+    """True only for "pgvector is not installed" errors (no `<=>` operator / `vector` type)."""
+    text = str(exc).lower()
+    return ("operator does not exist" in text and "<=>" in text) or (
+        'type "vector" does not exist' in text
+    )
 
 
 def _to_retrieved(
