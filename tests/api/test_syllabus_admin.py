@@ -124,7 +124,7 @@ async def test_create_and_edit_the_syllabus_tree(admin_client, client, unit_numb
     # ---- the student endpoints see the new tree
     student_topics = (await client.get(f"/api/v1/units/{unit['id']}/topics")).json()
     assert [t["title"] for t in student_topics["topics"]] == ["First", "Second"]
-    assert student_topics["topics"][0]["concept_count"] == 1
+    assert [s["title"] for s in student_topics["topics"][0]["subtopics"]] == ["Law of segregation"]
 
     # ---- required fields can't be cleared
     cleared = await admin_client.patch(f"{BASE}/units/{unit['id']}", json={"title": None})

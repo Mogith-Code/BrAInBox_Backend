@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from api.core import clock
 from api.modules.exams.service import GradingQuestion, evaluate_paper
@@ -22,7 +22,8 @@ from api.modules.performance.repository import AnswerRow
 from api.modules.performance.schemas import MisconceptionOut, ResourceOut
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.schemas import UnitOut
-from shared.db.models import Unit, UnitMastery
+from shared.db.models import Unit, UnitMastery, UserTopicProgress
+from shared.enums import TopicProgressStatus
 from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
 from tests.conftest import STUDENT, _client
 
@@ -718,3 +719,147 @@ async def test_summary_for_the_logged_in_student(client, monkeypatch):
     )
     assert body["topics"]["strong"] == 1
     assert (body["streak_days"], body["study_days_last_7"]) == (1, 1)
+
+
+# --------------------------------------------------------------------------- topic progress (no DB)
+
+
+def _scored(topic_id: uuid.UUID | None, correct: int, attempted: int):  # type: ignore[no-untyped-def]
+    tally = service.TopicTally(
+        topic_id=topic_id,
+        topic="T",
+        topic_number=None,
+        unit=None,
+        correct=correct,
+        attempted=attempted,
+    )
+    return service.topic_performance(tally)
+
+
+@pytest.mark.parametrize(
+    ("correct", "attempted", "status", "score", "is_weak"),
+    [
+        (5, 5, TopicProgressStatus.MASTERED, 100, False),
+        (15, 20, TopicProgressStatus.MASTERED, 75, False),  # exactly the "A" boundary
+        (14, 20, TopicProgressStatus.IN_PROGRESS, 70, False),
+        (3, 5, TopicProgressStatus.IN_PROGRESS, 60, False),
+        (1, 5, TopicProgressStatus.IN_PROGRESS, 20, True),
+        (0, 5, TopicProgressStatus.IN_PROGRESS, 0, True),
+        # Fewer than 5 answers: too little to call it mastered or weak, whatever the score.
+        (4, 4, TopicProgressStatus.IN_PROGRESS, 100, False),
+        (0, 4, TopicProgressStatus.IN_PROGRESS, 0, False),
+    ],
+)
+def test_progress_values_from_topic_score(correct, attempted, status, score, is_weak):
+    topic_id = uuid.uuid4()
+    assert service.progress_values(STUDENT.id, _scored(topic_id, correct, attempted)) == {
+        "user_id": STUDENT.id,
+        "topic_id": topic_id,
+        "status": status,
+        "score": score,
+        "is_weak": is_weak,
+    }
+
+
+def test_progress_is_not_saved_without_a_topic_or_valid_answers():
+    assert service.progress_values(STUDENT.id, _scored(None, 5, 5)) is None  # e.g. unit papers
+    assert service.progress_values(STUDENT.id, _scored(uuid.uuid4(), 0, 0)) is None
+
+
+async def test_start_topic_requires_login(anon_client):
+    response = await anon_client.post("/api/v1/topics/bio-1.1/start")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+# --------------------------------------------------------------------------- topic progress (DB)
+
+
+async def _submit_paper(c, topic_id, selected: list[str | None]):  # type: ignore[no-untyped-def]
+    """Generate a paper with one question per entry and submit these answers ("B" is correct)."""
+    paper = (
+        await c.post(
+            "/api/v1/papers/generate",
+            json={"topic_ids": [str(topic_id)], "num_questions": len(selected)},
+        )
+    ).json()
+    answers = [
+        {"question_id": q["id"], "selected": s}
+        for q, s in zip(paper["questions"], selected, strict=True)
+    ]
+    submitted = await c.post(
+        f"/api/v1/papers/{paper['paper_id']}/submit", json={"answers": answers, "explain": False}
+    )
+    assert submitted.status_code == 200, submitted.text
+
+
+@pytest.mark.db
+async def test_submitting_a_paper_updates_the_learn_screens(exam_data):  # noqa: F811
+    async with _client(_app_with(FakeAIClient())) as c:
+        before = (await c.get(f"/api/v1/topics/{exam_data.id}")).json()
+        await _submit_paper(c, exam_data.id, ["B", "B", "A", "A", "A", None])
+        weak = (await c.get(f"/api/v1/topics/{exam_data.id}")).json()
+        # 6 more correct: 8 of 11 valid answers over both attempts.
+        await _submit_paper(c, exam_data.id, ["B"] * 6)
+        better = (await c.get(f"/api/v1/topics/{exam_data.id}")).json()
+        insights = (await c.get("/api/v1/insights/topics")).json()
+
+    assert (before["status"], before["progressPct"], before["isWeak"]) == ("not_started", 0, False)
+    assert (weak["status"], weak["progressPct"], weak["isWeak"]) == ("in_progress", 40, True)
+    assert (better["status"], better["progressPct"], better["isWeak"]) == ("in_progress", 73, False)
+    assert insights["topics"][0]["percent"] == 72.73  # Learn and Insights use the same score
+
+
+@pytest.mark.db
+async def test_a_reliable_a_grade_masters_the_topic(exam_data):  # noqa: F811
+    async with _client(_app_with(FakeAIClient())) as c:
+        await _submit_paper(c, exam_data.id, ["B"] * 5)
+        topic = (await c.get(f"/api/v1/topics/{exam_data.id}")).json()
+    assert (topic["status"], topic["progressPct"], topic["isWeak"]) == ("mastered", 100, False)
+
+
+@pytest.mark.db
+async def test_unchanged_progress_keeps_its_updated_at(exam_data, db_session):  # noqa: F811
+    async with _client(_app_with(FakeAIClient())) as c:
+        await _submit_paper(c, exam_data.id, ["B"] * 5)
+    query = select(UserTopicProgress.updated_at).where(UserTopicProgress.topic_id == exam_data.id)
+    first = (await db_session.execute(query)).scalar_one()
+    await db_session.commit()
+
+    await service.refresh_topic_progress(db_session, STUDENT.id)
+    await db_session.commit()
+
+    assert (await db_session.execute(query)).scalar_one() == first
+
+
+@pytest.mark.db
+async def test_start_topic_then_opening_it_again(exam_data):  # noqa: F811
+    async with _client(_app_with(FakeAIClient())) as c:
+        first = await c.post(f"/api/v1/topics/{exam_data.id}/start")
+        again = await c.post(f"/api/v1/topics/{exam_data.id}/start")
+        topic = (await c.get(f"/api/v1/topics/{exam_data.id}")).json()
+    assert first.status_code == 200, first.text
+    assert first.json() == {
+        "id": str(exam_data.id),  # this test topic has no public code
+        "uuid": str(exam_data.id),
+        "status": "in_progress",
+        "progressPct": 0,
+        "isWeak": False,
+    }
+    assert again.json() == first.json()
+    assert topic["status"] == "in_progress"
+
+
+@pytest.mark.db
+async def test_start_topic_never_changes_a_score_or_mastered(exam_data):  # noqa: F811
+    async with _client(_app_with(FakeAIClient())) as c:
+        await _submit_paper(c, exam_data.id, ["B"] * 5)
+        started = await c.post(f"/api/v1/topics/{exam_data.id}/start")
+    assert (started.json()["status"], started.json()["progressPct"]) == ("mastered", 100)
+
+
+@pytest.mark.db
+async def test_start_unknown_topic(client):
+    response = await client.post("/api/v1/topics/no-such-topic/start")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "TOPIC_NOT_FOUND"
