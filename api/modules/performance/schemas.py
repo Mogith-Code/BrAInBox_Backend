@@ -6,7 +6,8 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from api.modules.performance.grading import TopicStatus
-from shared.enums import MistakeType
+from api.modules.syllabus.schemas import CamelModel
+from shared.enums import MistakeType, TopicProgressStatus
 
 
 class ModuleStatus(BaseModel):
@@ -180,6 +181,17 @@ class InsightsSummaryResponse(BaseModel):
     study_days_last_7: int  # days with study activity in the last 7 days, today included
     last_study_date: date | None
     note: str
+
+
+# ---------------------------------------------------------------- topic progress (camelCase)
+class TopicProgressOut(CamelModel):
+    """Same fields and meaning as the progress on the Learn topic responses."""
+
+    id: str  # public code, e.g. "bio-6.1" (the UUID when the topic has no code)
+    uuid: uuid.UUID
+    status: TopicProgressStatus
+    progress_pct: int  # 0..100
+    is_weak: bool
 
 
 # ---------------------------------------------------------------- mistake journal

@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | Keshomigha |
 | **Purpose** | Insights for students: mistakes, mastery per concept, weak areas. |
-| **Tables** | `mistakes`, `concept_mastery` (topic insights only *read* `attempts`, `responses`, `questions`, `mcq_options`, `topics`, `units`, `misconceptions`, `model_answers`, `resources`) |
+| **Tables** | `mistakes`, `concept_mastery`, `unit_mastery`, `study_activity`, `user_topic_progress` (topic insights only *read* `attempts`, `responses`, `questions`, `mcq_options`, `topics`, `units`, `misconceptions`, `model_answers`, `resources`) |
 | **Jira epic** | BRN-E12 Performance Insights *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/performance` (tasks: `feature/performance/BRN-xx-short-name`) |
 
@@ -17,6 +17,7 @@
 | `unit_mastery_week_ago(user_id)` | newest mastery per unit older than 7 days (weekly change) |
 | `record_study_activity(user_id)` | marks today (Sri Lanka date) in `study_activity` |
 | `get_streak(user_id)` | consecutive study days ending today or yesterday |
+| `refresh_topic_progress(user_id)` | recomputes `user_topic_progress` from all finished attempts; exams and the diagnostic call it on submit, in the same transaction |
 
 New tables in migration `0002`: `unit_mastery`, `study_activity`.
 
@@ -27,6 +28,7 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 | GET | `/api/v1/insights/topics` | ✅ done | My topic-wise MCQ scores, grades, weak topics and feedback. `?attempt_id=` limits it to one attempt |
 | GET | `/api/v1/insights/summary` | ✅ done | My overview: overall mastery + weekly change, MCQ score, topic levels, streak and study days |
 | GET | `/api/v1/insights/units` | ✅ done | My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
+| POST | `/api/v1/topics/{topic_id}/start` | ✅ done | Mark a topic as started (code or UUID). Safe to repeat; never changes a score or `mastered`. Unknown → 404 `TOPIC_NOT_FOUND` |
 | GET | `/api/v1/insights/concepts` | planned | Weakest concepts |
 | GET | `/api/v1/mistakes` | ✅ done | My wrong MCQ answers, newest first, paged. Filters: `type`, `unit_id`, `status` (`open` / `resolved`) |
 | PATCH | `/api/v1/mistakes/{id}` | ✅ done | `{"resolved": true}` = fixed, `false` = open again. Not yours → 404 `MISTAKE_NOT_FOUND` |
@@ -34,6 +36,14 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 | - | (service) `update_mastery()` | planned | Called by quizzes/exams/evaluation |
 
 Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "status": "todo"}` (needs login).
+
+### How topic progress is calculated (Learn screens)
+
+`user_topic_progress` comes from the same topic score as `GET /insights/topics`, so the two screens agree:
+`score` is the percent correct over all finished attempts, rounded. `status` is `mastered` for a reliable
+grade A and `in_progress` otherwise. `is_weak` is true for a reliable grade S or F. "Reliable" means at
+least `MIN_QUESTIONS_FOR_RELIABLE_RESULT` (5) valid answers. A topic with no valid answers, or questions
+with no topic (papers by unit), changes nothing. A row whose values didn't change keeps its `updated_at`.
 
 ### How unit insights are calculated (`GET /insights/units`)
 

@@ -6,6 +6,9 @@ student's own stored answers. Thresholds come from `grading.py` (the single sour
 Unit mastery is stored as a history (one row per measurement), so we can show both the
 current level and the change over the last week. Study activity drives the streak.
 
+Topic progress (`user_topic_progress`, shown on the Learn screens) is recomputed from the same
+topic scores whenever a paper or diagnostic is submitted, so Learn and Insights always agree.
+
 Rules:
   * SQL lives in `repository.py`, not here.
   * To use another module, call ITS service (e.g. `from api.modules.syllabus import service`),
@@ -16,6 +19,7 @@ Rules:
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +55,7 @@ from api.modules.performance.schemas import (
     TopicFeedback,
     TopicInsightsResponse,
     TopicPerformance,
+    TopicProgressOut,
     TopicStatusCounts,
     UnitAverage,
     UnitInsightsResponse,
@@ -60,7 +65,7 @@ from api.modules.performance.schemas import (
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.schemas import UnitOut
 from shared.db.models import Mistake, UnitMastery
-from shared.enums import MistakeType
+from shared.enums import MistakeType, TopicProgressStatus
 
 MODULE_NAME = "performance"
 GENERAL_TOPIC = "General"  # questions not linked to a syllabus topic (same name as exams)
@@ -504,6 +509,54 @@ async def get_streak(session: AsyncSession, user_id: uuid.UUID) -> int:
         session, user_id, today - timedelta(days=STREAK_LOOKBACK_DAYS)
     )
     return count_streak(days, today)
+
+
+# =========================================================================== topic progress
+# What the Learn screens show (read by the syllabus module).
+
+
+def progress_values(user_id: uuid.UUID, t: TopicPerformance) -> dict[str, Any] | None:
+    """Pure: one `user_topic_progress` row from a topic's score, or None if there is nothing to
+    save (questions with no syllabus topic, or a topic with no valid answers)."""
+    if t.topic_id is None or t.percent is None:
+        return None
+    return {
+        "user_id": user_id,
+        "topic_id": t.topic_id,
+        # Mastered and weak need a reliable result: t.status is STRONG, WEAK... only then.
+        "status": (
+            TopicProgressStatus.MASTERED
+            if t.status == TopicStatus.STRONG
+            else TopicProgressStatus.IN_PROGRESS
+        ),
+        "score": round(t.percent),
+        "is_weak": t.status in WEAK_STATUSES,
+    }
+
+
+async def refresh_topic_progress(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Recompute progress from all the student's finished attempts. The caller commits."""
+    await session.flush()  # the attempt being submitted must be included
+    analysis = analyse_answers(await repository.get_mcq_answer_rows(session, user_id))
+    rows = [progress_values(user_id, t) for t in analysis.topics]
+    await repository.save_topic_progress(session, [r for r in rows if r is not None])
+
+
+async def start_topic(session: AsyncSession, user: CurrentUser, topic_ref: str) -> TopicProgressOut:
+    """POST /topics/{id}/start: a not-started topic becomes in_progress. Safe to call again;
+    it never changes a score or a mastered status. 404 TOPIC_NOT_FOUND."""
+    topic = await syllabus_service.resolve_topic(session, topic_ref)
+    await repository.mark_topic_started(session, user.id, topic.id)
+    await session.commit()
+    progress = await repository.get_topic_progress(session, user.id, topic.id)
+    assert progress is not None  # the row was created or already existed above
+    return TopicProgressOut(
+        id=topic.code or str(topic.id),
+        uuid=topic.id,
+        status=progress.status,
+        progress_pct=progress.score,
+        is_weak=progress.is_weak,
+    )
 
 
 # =========================================================================== GET /insights/summary

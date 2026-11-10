@@ -3,28 +3,39 @@
 | | |
 |---|---|
 | **Owner** | Keshomigha |
-| **Purpose** | Read-only syllabus tree for students: units -> topics -> concepts. |
-| **Tables** | `units`, `topics`, `concepts` |
+| **Purpose** | Read-only syllabus tree for students: subjects -> units -> topics -> concepts (sub-topics). |
+| **Tables** | `subjects`, `units`, `topics`, `concepts` (+ reads `user_topic_progress`) |
 | **Jira epic** | BRN-E03 Syllabus *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/syllabus` (tasks: `feature/syllabus/BRN-xx-short-name`) |
 
 ## Endpoints
+
+Ids can be the public code (`biology`, `u6`, `bio-6.1`) or the UUID. Responses are camelCase.
+Request/response examples: [docs/api-endpoints.md](../../../docs/api-endpoints.md#learn-navigation-subject--units--topics--sub-topics).
+
+Data: `data/syllabus/al_biology_syllabus.json` (10 units, 64 topics, 216 sub-topics), loaded with
+`python scripts/seed_syllabus.py` (idempotent).
 
 All need a logged-in user.
 
 | Method | Path | Status | Description |
 |---|---|---|---|
 | GET | `/api/v1/units` | ✅ done | Current units, Unit 1 first, each with `topic_count` |
-| GET | `/api/v1/units/{id}/topics` | ✅ done | The unit and its current topics (syllabus order), each with `concept_count`. Unknown or outdated unit → 404 `UNIT_NOT_FOUND` |
-| GET | `/api/v1/topics/{id}` | ✅ done | One topic with its unit and current concepts. Unknown → 404 `TOPIC_NOT_FOUND` |
+| GET | `/api/v1/subjects/{subject_id}/units` | ✅ done | Units of a subject + my progress (Learn). Unknown subject → 404 `SUBJECT_NOT_FOUND` |
+| GET | `/api/v1/units/{unit_id}/topics` | ✅ done | Topics of a unit + sub-topics + my progress (Learn). Unknown or outdated unit → 404 `UNIT_NOT_FOUND` |
+| GET | `/api/v1/topics/{topic_id}` | ✅ done | One topic with its sub-topics + my progress (Learn). Unknown → 404 `TOPIC_NOT_FOUND` |
 
-Placeholder: `GET /api/v1/syllabus/status` → `{"module": "syllabus", "status": "todo"}` (needs login).
+Unit `status`: `not_started` when no topic of the unit has activity, otherwise `strong` (≥ 75),
+`improving` (40–74) or `weak` (< 40) from `progressPct`.
+
+This module only **reads** `user_topic_progress`. The `performance` module writes it, including
+`POST /api/v1/topics/{topic_id}/start` (performance imports this module, so not the other way round).
 
 ### Current vs outdated
 
 Lists show the **current** syllabus only: units, topics and concepts with `is_outdated = true` are hidden
 and not counted. `GET /topics/{id}` still opens an outdated topic (old notes and questions link to it) and
-returns `is_outdated: true`, so the app can show an "Outdated syllabus" tag.
+returns `isOutdated: true`, so the app can show an "Outdated syllabus" tag.
 
 ## Admin: syllabus manager (`/api/v1/admin/syllabus`, role admin)
 
@@ -62,6 +73,7 @@ embedding (it no longer matches the text); the next embedding run recomputes it.
 
 | Function | Used by |
 |---|---|
+| `resolve_topic(ref)` | performance: find a topic by public code or UUID (404 `TOPIC_NOT_FOUND`) |
 | `get_topics(topic_ids)` | exams, content: check topic ids, get titles + unit |
 | `list_units()` | quizzes, home: units with `exam_weight` |
 | `list_topics_by_unit(unit_ids)` | home: current topics per unit |

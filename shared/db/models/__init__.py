@@ -24,6 +24,7 @@ from shared.db.models.performance import (
     Mistake,
     StudyActivity,
     UnitMastery,
+    UserTopicProgress,
 )
 from shared.db.models.quality import QuestionReport, QuestionReview, QuestionStats
 from shared.db.models.question import MCQOption, Misconception, Question, QuestionConcept
@@ -35,7 +36,7 @@ from shared.db.models.recommendation import (
     Resource,
     StudyPlan,
 )
-from shared.db.models.syllabus import EMBEDDING_DIM, Concept, Topic, Unit
+from shared.db.models.syllabus import EMBEDDING_DIM, Concept, Subject, Topic, Unit
 from shared.db.models.system import AIJob, AIUsageLog, AppConfig, AuditLog
 from shared.db.models.user import DeviceToken, Notification, StudentProfile, User, UserSettings
 from shared.db.models.visual import Visual, VisualReport
@@ -86,6 +87,7 @@ __all__ = [
     "StudentProfile",
     "StudyActivity",
     "StudyPlan",
+    "Subject",
     "Summary",
     "Topic",
     "Unit",
@@ -93,6 +95,7 @@ __all__ = [
     "Upload",
     "User",
     "UserSettings",
+    "UserTopicProgress",
     "Visual",
     "VisualReport",
     "Vote",

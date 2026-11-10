@@ -5,6 +5,7 @@ Implemented:
                                                            feedback (own data; ?attempt_id= for one)
     GET    /api/v1/insights/units                          Mastery per unit (own data)
     GET    /api/v1/insights/summary                        Overview: mastery, MCQs, topics, streak
+    POST   /api/v1/topics/{topic_id}/start                 Mark a topic as started (Learn)
     GET    /api/v1/mistakes                                My mistakes (filter by type/unit/status)
     PATCH  /api/v1/mistakes/{id}                           Mark a mistake fixed or open again
     (service) record_mistakes() called by quizzes/exams after marking
@@ -31,6 +32,7 @@ from api.modules.performance.schemas import (
     MistakeUpdate,
     ModuleStatus,
     TopicInsightsResponse,
+    TopicProgressOut,
     UnitInsightsResponse,
 )
 from shared.enums import MistakeType
@@ -79,6 +81,20 @@ async def insights_summary(user: CurrentUserDep, session: SessionDep) -> Insight
     """The same numbers as `/insights/units` and `/insights/topics`, one per card, plus the
     streak and study days. A new student gets nulls and zeros, never made-up values."""
     return await service.get_insights_summary(session, user)
+
+
+@router.post(
+    "/topics/{topic_id}/start",
+    response_model=TopicProgressOut,
+    summary="Mark a topic as started (Learn)",
+)
+async def start_topic(topic_id: str, user: CurrentUserDep, session: SessionDep) -> TopicProgressOut:
+    """`topic_id`: the public code (`bio-6.1`) or the UUID. A not-started topic becomes
+    `in_progress`. Safe to call every time the topic is opened: a score or a `mastered` status
+    is never changed.
+
+    Errors: 401 not logged in · 404 `TOPIC_NOT_FOUND`."""
+    return await service.start_topic(session, user, topic_id)
 
 
 @router.get(

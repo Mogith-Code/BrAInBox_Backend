@@ -357,6 +357,7 @@ async def submit_paper(
         score=float(result.marks_obtained),
         responses=responses,
     )
+    await performance_service.refresh_topic_progress(session, user.id)
     await session.commit()
     result.attempt_id = attempt.id
 

@@ -1,6 +1,6 @@
 """All SQL queries for the performance module. Owner: Keshomigha.
 
-Tables: mistakes, concept_mastery, unit_mastery, study_activity
+Tables: mistakes, concept_mastery, unit_mastery, study_activity, user_topic_progress
 Read-only for topic insights: attempts, responses, questions, mcq_options, topics, units,
 misconceptions, model_answers, resources. Read-only for admin analytics: users, ai_usage_log.
 Only this module's `service.py` may import this file.
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -32,8 +32,9 @@ from shared.db.models import (
     Unit,
     UnitMastery,
     User,
+    UserTopicProgress,
 )
-from shared.enums import ContentStatus, MistakeType, QuestionType, UserRole
+from shared.enums import ContentStatus, MistakeType, QuestionType, TopicProgressStatus, UserRole
 
 # Attempts in these states have been marked, so their responses can be analysed.
 FINISHED_ATTEMPT_STATUSES = ("submitted", "graded")
@@ -207,6 +208,65 @@ async def study_days_since(session: AsyncSession, user_id: uuid.UUID, since: dat
         )
     )
     return set(result.scalars())
+
+
+# ---------------------------------------------------------------- topic progress (Learn screens)
+_PROGRESS_KEY = "uq_user_topic_progress_user_topic"
+
+
+async def save_topic_progress(session: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Insert or update progress rows. A row whose values did not change is left alone, so
+    `updated_at` stays the time of the last real change. No commit."""
+    if not rows:
+        return
+    stmt = insert(UserTopicProgress).values(rows)
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint=_PROGRESS_KEY,
+            set_={
+                "status": stmt.excluded.status,
+                "score": stmt.excluded.score,
+                "is_weak": stmt.excluded.is_weak,
+                "updated_at": func.now(),
+            },
+            where=or_(
+                UserTopicProgress.status != stmt.excluded.status,
+                UserTopicProgress.score != stmt.excluded.score,
+                UserTopicProgress.is_weak != stmt.excluded.is_weak,
+            ),
+        )
+    )
+
+
+async def mark_topic_started(
+    session: AsyncSession, user_id: uuid.UUID, topic_id: uuid.UUID
+) -> None:
+    """Create the row as in_progress. An existing score or status is kept. No commit."""
+    stmt = insert(UserTopicProgress).values(
+        user_id=user_id,
+        topic_id=topic_id,
+        status=TopicProgressStatus.IN_PROGRESS,
+        score=0,
+        is_weak=False,
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint=_PROGRESS_KEY,
+            set_={"status": TopicProgressStatus.IN_PROGRESS, "updated_at": func.now()},
+            where=UserTopicProgress.status == TopicProgressStatus.NOT_STARTED,
+        )
+    )
+
+
+async def get_topic_progress(
+    session: AsyncSession, user_id: uuid.UUID, topic_id: uuid.UUID
+) -> UserTopicProgress | None:
+    result = await session.execute(
+        select(UserTopicProgress).where(
+            UserTopicProgress.user_id == user_id, UserTopicProgress.topic_id == topic_id
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------- mistakes: recording
