@@ -15,12 +15,13 @@ Rules:
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core import clock
 from api.core.errors import ForbiddenError, NotFoundError
+from api.core.pagination import Page, PageParams
 from api.core.security import CurrentUser
 from api.modules.performance import grading, repository
 from api.modules.performance.grading import (
@@ -29,11 +30,20 @@ from api.modules.performance.grading import (
     WEAK_STATUSES,
     TopicStatus,
 )
-from api.modules.performance.repository import AnswerRow
+from api.modules.performance.repository import AnswerRow, MistakeRow
 from api.modules.performance.schemas import (
+    AIFeatureUsage,
+    AnalyticsAIUsage,
+    AnalyticsOverview,
+    AnalyticsPerformance,
+    CommonMisconception,
+    DailyCount,
     GradeBandOut,
     InsightsSummaryResponse,
     MisconceptionOut,
+    MissedTopic,
+    MistakeOut,
+    MistakeUpdate,
     ModuleStatus,
     OverallResult,
     ResourceOut,
@@ -42,13 +52,15 @@ from api.modules.performance.schemas import (
     TopicInsightsResponse,
     TopicPerformance,
     TopicStatusCounts,
+    UnitAverage,
     UnitInsightsResponse,
     UnitMasteryOut,
     UnitRank,
 )
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.schemas import UnitOut
-from shared.db.models import UnitMastery
+from shared.db.models import Mistake, UnitMastery
+from shared.enums import MistakeType
 
 MODULE_NAME = "performance"
 GENERAL_TOPIC = "General"  # questions not linked to a syllabus topic (same name as exams)
@@ -360,7 +372,7 @@ async def get_topic_insights(
     )
 
 
-# TODO(Keshomigha): record_mistake / update_mastery
+# TODO(Keshomigha): update_mastery
 
 
 # =========================================================================== unit mastery + streak
@@ -546,3 +558,268 @@ async def get_insights_summary(session: AsyncSession, user: CurrentUser) -> Insi
         session, user.id, today - timedelta(days=STREAK_LOOKBACK_DAYS)
     )
     return build_summary(units, analysis, study_days, today)
+
+
+# =========================================================================== mistake journal
+
+
+def wrong_answers(rows: list[AnswerRow]) -> list[AnswerRow]:
+    """The answers that count as mistakes. Unanswered and unreliable answers are not mistakes,
+    the same rule as the topic scores."""
+    return [r for r in latest_answer_per_question(rows) if is_valid_answer(r) and not r.is_correct]
+
+
+def build_mistakes(
+    user_id: uuid.UUID,
+    wrong: list[AnswerRow],
+    misconception_concepts: dict[uuid.UUID, uuid.UUID | None],
+    main_concepts: dict[uuid.UUID, uuid.UUID],
+) -> list[Mistake]:
+    """Pure: one Mistake per wrong answer. Choosing an option linked to a misconception is a
+    `misconception`; otherwise a `knowledge_gap`. Types such as `careless` can't be told apart
+    automatically. The concept is the misconception's, else the one the question tests most."""
+    mistakes = []
+    for row in wrong:
+        concept = misconception_concepts.get(row.misconception_id) if row.misconception_id else None
+        mistakes.append(
+            Mistake(
+                user_id=user_id,
+                question_id=row.question_id,
+                response_id=row.response_id,
+                misconception_id=row.misconception_id,
+                concept_id=concept or main_concepts.get(row.question_id),
+                mistake_type=(
+                    MistakeType.MISCONCEPTION if row.misconception_id else MistakeType.KNOWLEDGE_GAP
+                ),
+            )
+        )
+    return mistakes
+
+
+async def record_mistakes(session: AsyncSession, user_id: uuid.UUID, attempt_id: uuid.UUID) -> int:
+    """Save the wrong MCQ answers of this student's finished attempt; returns how many were new.
+
+    For exams and quizzes: call it after marking the attempt. The caller commits. Calling it
+    twice for an attempt adds nothing, and an attempt that isn't finished has no answers yet."""
+    wrong = wrong_answers(await repository.get_mcq_answer_rows(session, user_id, attempt_id))
+    already = await repository.recorded_response_ids(session, [r.response_id for r in wrong])
+    new = [r for r in wrong if r.response_id not in already]
+    if not new:
+        return 0
+    misconception_ids = list({r.misconception_id for r in new if r.misconception_id})
+    misconceptions = await repository.get_misconceptions(session, misconception_ids)
+    mistakes = build_mistakes(
+        user_id,
+        new,
+        misconception_concepts={m.id: m.concept_id for m in misconceptions},
+        main_concepts=await repository.get_main_concepts(session, [r.question_id for r in new]),
+    )
+    await repository.add_mistakes(session, mistakes)
+    return len(mistakes)
+
+
+def _mistake_out(row: MistakeRow, correct_answers: dict[uuid.UUID, str]) -> MistakeOut:
+    mistake, misconception = row.mistake, row.misconception
+    return MistakeOut(
+        id=mistake.id,
+        question_id=mistake.question_id,
+        question=row.question,
+        your_answer=row.your_answer,
+        correct_answer=correct_answers.get(mistake.question_id) if mistake.question_id else None,
+        explanation=row.explanation,
+        mistake_type=mistake.mistake_type,
+        misconception=MisconceptionOut.model_validate(misconception) if misconception else None,
+        correction=misconception.correction_md if misconception else None,
+        topic_id=row.topic_id,
+        topic=row.topic,
+        topic_number=row.topic_number,
+        unit_id=row.unit_id,
+        unit_number=row.unit_number,
+        unit=row.unit,
+        source=row.source,
+        is_resolved=mistake.resolved_at is not None,
+        resolved_at=mistake.resolved_at,
+        created_at=mistake.created_at,
+    )
+
+
+async def list_mistakes(
+    session: AsyncSession,
+    user: CurrentUser,
+    paging: PageParams,
+    *,
+    mistake_type: MistakeType | None = None,
+    unit_id: uuid.UUID | None = None,
+    resolved: bool | None = None,
+) -> Page[MistakeOut]:
+    """GET /mistakes: the logged-in student's mistakes, newest first."""
+    rows, total = await repository.list_mistakes(
+        session,
+        user.id,
+        mistake_type=mistake_type,
+        unit_id=unit_id,
+        resolved=resolved,
+        offset=paging.offset,
+        limit=paging.size,
+    )
+    question_ids = list({r.mistake.question_id for r in rows if r.mistake.question_id})
+    correct = await repository.get_correct_answers(session, question_ids)
+    return Page.create([_mistake_out(r, correct) for r in rows], total, paging)
+
+
+async def update_mistake(
+    session: AsyncSession, user: CurrentUser, mistake_id: uuid.UUID, req: MistakeUpdate
+) -> MistakeOut:
+    """PATCH /mistakes/{id}: the "Fixed" toggle. Someone else's mistake is simply "not found"."""
+    row = await repository.get_mistake_row(session, user.id, mistake_id)
+    if row is None:
+        raise NotFoundError("Mistake not found", code="MISTAKE_NOT_FOUND")
+    mistake = row.mistake
+    if req.resolved and mistake.resolved_at is None:  # keep the first date if tapped twice
+        mistake.resolved_at = clock.now()
+    elif not req.resolved:
+        mistake.resolved_at = None
+    await session.commit()
+    question_ids = [mistake.question_id] if mistake.question_id else []
+    return _mistake_out(row, await repository.get_correct_answers(session, question_ids))
+
+
+# =========================================================================== admin analytics
+# Used by admin/analytics_admin.py. Totals over all students, never one student's data.
+# A period of `days` days ends today (Sri Lanka date) and includes today.
+
+MOST_MISSED_LIMIT = 10
+MISCONCEPTIONS_LIMIT = 10
+
+
+def period_start(today: date, days: int) -> date:
+    return today - timedelta(days=days - 1)
+
+
+def _start_of_day(day: date) -> datetime:
+    return datetime.combine(day, time.min, tzinfo=clock.SRI_LANKA)
+
+
+def fill_days(counts: dict[date, int], first_day: date, last_day: date) -> list[DailyCount]:
+    """Pure: one entry per day, oldest first. Days without data are 0, so a chart has no gaps."""
+    total_days = (last_day - first_day).days + 1
+    days = [first_day + timedelta(days=n) for n in range(total_days)]
+    return [DailyCount(day=d, count=counts.get(d, 0)) for d in days]
+
+
+def change_percent(current: int, previous: int) -> float | None:
+    """Pure: the change against the previous period; None when it had nothing to compare with."""
+    return round(100 * (current - previous) / previous, 1) if previous else None
+
+
+def feature_usage(by_feature: dict[str, int]) -> list[AIFeatureUsage]:
+    """Pure: most used first, with each feature's share of all requests."""
+    total = sum(by_feature.values())
+    ranked = sorted(by_feature.items(), key=lambda item: (-item[1], item[0]))
+    return [
+        AIFeatureUsage(feature=name, requests=count, percent=round(100 * count / total, 1))
+        for name, count in ranked
+    ]
+
+
+def build_unit_averages(
+    units: list[UnitOut], averages: dict[uuid.UUID, tuple[float, int]]
+) -> list[UnitAverage]:
+    """Pure: one row per current unit. A unit nobody has been measured in is None, never 0 %."""
+    rows = []
+    for unit in units:
+        average, students = averages.get(unit.id, (None, 0))
+        rows.append(
+            UnitAverage(
+                unit_id=unit.id,
+                number=unit.number,
+                title=unit.title,
+                average_mastery=round(average, 1) if average is not None else None,
+                students_assessed=students,
+            )
+        )
+    return rows
+
+
+async def analytics_overview(session: AsyncSession, days: int) -> AnalyticsOverview:
+    """GET /admin/analytics/overview"""
+    today = clock.today()
+    first_day = period_start(today, days)
+    since = _start_of_day(first_day)
+    active = await repository.count_active_students(session, first_day, today)
+    previous = await repository.count_active_students(
+        session, first_day - timedelta(days=days), first_day - timedelta(days=1)
+    )
+    daily = await repository.daily_active_students(session, first_day)
+    return AnalyticsOverview(
+        days=days,
+        since=first_day,
+        total_students=await repository.count_students(session),
+        new_students=await repository.count_students(session, joined_since=since),
+        active_students=active,
+        active_students_previous=previous,
+        active_change_percent=change_percent(active, previous),
+        attempts_completed=await repository.count_finished_attempts(session, since),
+        mcq_answers=await repository.count_mcq_answers(session, since),
+        daily_active_students=fill_days(daily, first_day, today),
+    )
+
+
+async def analytics_performance(session: AsyncSession, days: int) -> AnalyticsPerformance:
+    """GET /admin/analytics/performance. Read from the stored answers, so it doesn't depend on
+    mistakes having been recorded."""
+    first_day = period_start(clock.today(), days)
+    since = _start_of_day(first_day)
+    units = await syllabus_service.get_units(session)
+    missed = await repository.most_missed_topics(
+        session, since, MIN_QUESTIONS_FOR_RELIABLE_RESULT, MOST_MISSED_LIMIT
+    )
+    misconceptions = await repository.common_misconceptions(session, since, MISCONCEPTIONS_LIMIT)
+    return AnalyticsPerformance(
+        days=days,
+        since=first_day,
+        units=build_unit_averages(units, await repository.unit_mastery_averages(session)),
+        min_answers_per_topic=MIN_QUESTIONS_FOR_RELIABLE_RESULT,
+        most_missed_topics=[
+            MissedTopic(
+                topic_id=row.topic_id,
+                topic=row.topic,
+                topic_number=row.topic_number,
+                unit_number=row.unit_number,
+                unit=row.unit,
+                answers=row.answers,
+                wrong=row.wrong,
+                wrong_percent=round(100 * row.wrong / row.answers, 1),
+            )
+            for row in missed
+        ],
+        misconceptions=[
+            CommonMisconception(
+                misconception_id=row.misconception_id,
+                title=row.title,
+                times_chosen=row.times_chosen,
+                students=row.students,
+            )
+            for row in misconceptions
+        ],
+    )
+
+
+async def analytics_ai_usage(session: AsyncSession, days: int) -> AnalyticsAIUsage:
+    """GET /admin/analytics/ai-usage. Cost and tokens stay None until they are recorded."""
+    today = clock.today()
+    first_day = period_start(today, days)
+    since = _start_of_day(first_day)
+    totals = await repository.ai_usage_totals(session, since)
+    daily = await repository.daily_ai_requests(session, since)
+    return AnalyticsAIUsage(
+        days=days,
+        since=first_day,
+        total_requests=totals.requests,
+        images=totals.images,
+        total_cost_usd=float(totals.cost_usd) if totals.cost_usd is not None else None,
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        by_feature=feature_usage(await repository.ai_usage_by_feature(session, since)),
+        daily_requests=fill_days(daily, first_day, today),
+    )
