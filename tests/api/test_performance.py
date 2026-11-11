@@ -22,8 +22,19 @@ from api.modules.performance.repository import AnswerRow
 from api.modules.performance.schemas import MisconceptionOut, ResourceOut
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.schemas import UnitOut
-from shared.db.models import Unit, UnitMastery, UserTopicProgress
-from shared.enums import TopicProgressStatus
+from shared.db.models import (
+    Attempt,
+    MCQOption,
+    Paper,
+    Question,
+    Response,
+    Topic,
+    Unit,
+    UnitMastery,
+    User,
+    UserTopicProgress,
+)
+from shared.enums import AttemptKind, QuestionType, TopicProgressStatus, UserRole
 from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
 from tests.conftest import STUDENT, _client
 
@@ -863,3 +874,62 @@ async def test_start_unknown_topic(client):
     response = await client.post("/api/v1/topics/no-such-topic/start")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "TOPIC_NOT_FOUND"
+
+
+# --------------------------------------------------------------------------- which attempts count
+
+
+@pytest.mark.db
+async def test_which_attempts_count(db_session):
+    """One answer in an attempt of each status and kind: marked attempts of every kind count
+    (the diagnostic included), unfinished and abandoned ones never do."""
+    user = User(firebase_uid=f"finished-{uuid.uuid4().hex[:12]}", role=UserRole.STUDENT)
+    unit = Unit(number=random.randint(100_000, 999_000), title="Finished attempts unit")
+    db_session.add_all([user, unit])
+    await db_session.flush()
+    topic = Topic(unit_id=unit.id, number="F.1", title="Finished attempts topic")
+    paper = Paper(title="Finished attempts paper")
+    db_session.add_all([topic, paper])
+    await db_session.flush()
+
+    cases = [
+        ("graded", AttemptKind.EXAM, True),
+        ("graded", AttemptKind.DIAGNOSTIC, True),
+        ("submitted", AttemptKind.QUIZ, True),
+        ("evaluated", AttemptKind.EXAM, True),
+        ("in_progress", AttemptKind.EXAM, False),
+        ("abandoned", AttemptKind.QUIZ, False),
+    ]
+    expected = set()
+    for status, kind, counts in cases:
+        attempt = Attempt(paper_id=paper.id, user_id=user.id, kind=kind, status=status)
+        question = Question(
+            topic_id=topic.id, question_type=QuestionType.MCQ, stem="Finished attempts question"
+        )
+        db_session.add_all([attempt, question])
+        await db_session.flush()
+        option = MCQOption(question_id=question.id, label="A", text="x", is_correct=False)
+        db_session.add(option)
+        await db_session.flush()
+        db_session.add(
+            Response(
+                attempt_id=attempt.id,
+                question_id=question.id,
+                selected_option_id=option.id,
+                is_correct=False,
+            )
+        )
+        if counts:
+            expected.add(attempt.id)
+    await db_session.commit()
+    try:
+        rows = await repository.get_mcq_answer_rows(db_session, user.id)
+        assert {r.attempt_id for r in rows} == expected
+    finally:
+        await db_session.execute(delete(Paper).where(Paper.id == paper.id))
+        await db_session.execute(
+            delete(Question).where(Question.stem == "Finished attempts question")
+        )
+        await db_session.execute(delete(User).where(User.id == user.id))
+        await db_session.execute(delete(Unit).where(Unit.id == unit.id))
+        await db_session.commit()
