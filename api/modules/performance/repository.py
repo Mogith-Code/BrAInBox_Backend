@@ -34,10 +34,24 @@ from shared.db.models import (
     User,
     UserTopicProgress,
 )
-from shared.enums import ContentStatus, MistakeType, QuestionType, TopicProgressStatus, UserRole
+from shared.enums import (
+    AttemptStatus,
+    ContentStatus,
+    MistakeType,
+    QuestionType,
+    TopicProgressStatus,
+    UserRole,
+)
 
-# Attempts in these states have been marked, so their responses can be analysed.
-FINISHED_ATTEMPT_STATUSES = ("submitted", "graded")
+# Attempts in these states have been marked, so their answers count everywhere in this module
+# (topic insights, mistakes, Learn progress, admin analytics). Every attempt kind counts,
+# the diagnostic included. `evaluated` = marked by written-answer evaluation; its MCQ answers
+# count too. Not counted: in_progress (not marked yet) and abandoned (never finished).
+FINISHED_ATTEMPT_STATUSES = (
+    AttemptStatus.SUBMITTED,
+    AttemptStatus.GRADED,
+    AttemptStatus.EVALUATED,
+)
 
 
 async def get_attempt(session: AsyncSession, attempt_id: uuid.UUID) -> Attempt | None:

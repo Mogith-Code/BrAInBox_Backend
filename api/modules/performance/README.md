@@ -129,10 +129,26 @@ official exam rules, so a grade is a practice indicator, never an official exam 
 provisional percent/grade is shown, but it is never listed as a weak topic). Exams uses the same rule for
 its per-paper `weak_topics` through `service.is_weak_topic_percent`.
 
+## Which attempts count
+
+One rule for the whole module (`FINISHED_ATTEMPT_STATUSES` in `repository.py`): topic insights, the
+summary, mistakes, Learn progress and admin analytics all use it, so they never disagree.
+
+| Attempt status | Counts? | Why |
+|---|---|---|
+| `submitted`, `graded` | ✅ | Marked (exams and the diagnostic write `graded`) |
+| `evaluated` | ✅ | Marked by written-answer evaluation; its MCQ answers count like any other |
+| `in_progress` | ❌ | Not marked yet |
+| `abandoned` | ❌ | Never finished |
+
+**Every attempt kind counts, the diagnostic included.** Its answers are real answers to approved
+questions, and for a new student the only data there is. With 15 questions over 10 units a topic rarely
+reaches the 5-answer minimum from the diagnostic alone, so it can't make a topic look weak on its own.
+
 ## How topic insights are calculated
 
-1. Read the student's MCQ `responses` from **their own** attempts with status `submitted`/`graded`.
-   Another student's `attempt_id` → 403, unknown → 404.
+1. Read the student's MCQ `responses` from **their own** finished attempts (see "Which attempts
+   count" below). Another student's `attempt_id` → 403, unknown → 404.
 2. Duplicates: one answer per question per attempt (the latest). The same question in two attempts counts twice.
 3. **Valid attempted** = an option of that question was selected and `is_correct` is stored. Unanswered
    questions are counted separately; anything else is `excluded`.
