@@ -28,3 +28,12 @@ Placeholder right now: `GET /api/v1/quality/status` → `{"module": "quality", "
 
 Models live in `shared/db/models/`. Call other modules through their `service.py`, never their `repository.py`.
 Tests: `tests/api/test_quality.py`.
+
+## Admin quality review (built)
+
+`service.review_queue()` and `service.record_decision()`, used by `admin/questions_admin.py`
+(`GET /admin/questions/quality`, `POST /admin/questions/{id}/review`). The checks come from the newest AI
+`question_reviews` row (keys such as `single_correct_answer`, `distractor_quality`, `syllabus_match`,
+`duplicate_check`; values `true/false`, `"pass"|"review"|"fail"` or `{"result", "note"}`) and fall back to
+rule checks. When the REVIEW_QUESTIONS pipeline is finished it only needs to save those keys.
+Tests: `tests/api/test_admin_quality.py`.
