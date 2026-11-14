@@ -119,6 +119,52 @@ def create_app() -> FastAPI:
     for router in MODULE_ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
 
+    @app.on_event("startup")
+    async def auto_migrate_dev_schema() -> None:
+        if settings.ENVIRONMENT != "dev":
+            return
+        try:
+            from shared.db.session import engine
+
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS subjects ("
+                        "code VARCHAR(50) UNIQUE, name VARCHAR(100), level VARCHAR(50), "
+                        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                        "created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());"
+                    )
+                )
+                await conn.execute(
+                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS subject_id UUID;")
+                )
+                await conn.execute(
+                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS code VARCHAR(20);")
+                )
+                await conn.execute(
+                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS periods INTEGER;")
+                )
+                await conn.execute(
+                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS icon VARCHAR(50);")
+                )
+                await conn.execute(
+                    text("ALTER TABLE topics ADD COLUMN IF NOT EXISTS code VARCHAR(30);")
+                )
+                await conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS user_topic_progress ("
+                        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                        "user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                        "topic_id UUID NOT NULL REFERENCES topics(id) ON DELETE CASCADE, "
+                        "status VARCHAR(32) NOT NULL, score INTEGER NOT NULL, is_weak BOOLEAN NOT NULL, "
+                        "created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), "
+                        "CONSTRAINT uq_user_topic_progress_user_topic UNIQUE (user_id, topic_id));"
+                    )
+                )
+            logger.info("Auto-verified dev database schema (Learn navigation columns present).")
+        except Exception as exc:
+            logger.warning("Could not auto-verify schema: %s", exc)
+
     _add_branded_docs(app)
     return app
 
