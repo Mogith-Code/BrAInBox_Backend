@@ -8,6 +8,18 @@
 | **Jira epic** | BRN-E14 Community *(placeholder key – replace with the real one)* |
 | **Git branch** | `feature/community` (tasks: `feature/community/BRN-xx-short-name`) |
 
+## Built: admin side (`admin/moderation_admin.py`)
+
+| Function (`service.py`) | What it does |
+|---|---|
+| `moderation_queue` | open `content_reports` (posts, replies) + visual reports (visuals module), one item per target, oldest first |
+| `resolve_report` | keep / warn / remove; closes every open report of the target; warn adds an in-app notification for the author |
+| `list_groups`, `create_group` | study groups with member count and moderator (409 `GROUP_NAME_TAKEN`) |
+
+`posts.moderation_reason` / `moderation_score` (and the same on `replies`, migration `0006_moderation_flags`) are the
+AI moderator's label and confidence (0-1); the MODERATE_POST job will fill them.
+Tests: `tests/api/test_admin_moderation.py`.
+
 ## Planned endpoints
 
 | Method | Path | Description |
