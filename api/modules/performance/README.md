@@ -17,7 +17,7 @@
 | `unit_mastery_week_ago(user_id)` | newest mastery per unit older than 7 days (weekly change) |
 | `record_study_activity(user_id)` | marks today (Sri Lanka date) in `study_activity` |
 | `get_streak(user_id)` | consecutive study days ending today or yesterday |
-| `refresh_topic_progress(user_id)` | recomputes `user_topic_progress` from all finished attempts; exams and the diagnostic call it on submit, in the same transaction |
+| `refresh_topic_progress(user_id)` | recomputes `user_topic_progress` from all finished attempts. Exams and the diagnostic call it on submit today; `after_attempt_marked` (below) runs it too and should replace that call |
 
 New tables in migration `0002`: `unit_mastery`, `study_activity`.
 
@@ -29,11 +29,11 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 | GET | `/api/v1/insights/summary` | ✅ done | My overview: overall mastery + weekly change, MCQ score, topic levels, streak and study days |
 | GET | `/api/v1/insights/units` | ✅ done | My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
 | POST | `/api/v1/topics/{topic_id}/start` | ✅ done | Mark a topic as started (code or UUID). Safe to repeat; never changes a score or `mastered`. Unknown → 404 `TOPIC_NOT_FOUND` |
-| GET | `/api/v1/insights/concepts` | planned | Weakest concepts |
+| GET | `/api/v1/insights/concepts` | ✅ done | My score per concept (sub-topic), weakest first. Empty until questions are linked to concepts (`linked_answers: 0`) |
 | GET | `/api/v1/mistakes` | ✅ done | My wrong MCQ answers, newest first, paged. Filters: `type`, `unit_id`, `status` (`open` / `resolved`) |
 | PATCH | `/api/v1/mistakes/{id}` | ✅ done | `{"resolved": true}` = fixed, `false` = open again. Not yours → 404 `MISTAKE_NOT_FOUND` |
-| - | (service) `record_mistakes()` | ✅ built, ⚠️ **not called yet** | Exams and quizzes must call it after marking, or the journal stays empty |
-| - | (service) `update_mastery()` | planned | Called by quizzes/exams/evaluation |
+| - | (service) `after_attempt_marked()` | ✅ built, ⚠️ **not called yet** | ONE call after marking: mistakes + unit and concept mastery + Learn progress. Exams and quizzes must call it, or the journal stays empty |
+| - | (service) `record_mistakes()`, `update_mastery()` | ✅ built | The parts `after_attempt_marked()` runs |
 
 Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "status": "todo"}` (needs login).
 
@@ -57,9 +57,49 @@ with no topic (papers by unit), changes nothing. A row whose values didn't chang
 5. `average_mastery`, `strongest` and `weakest` use assessed units only (ties: the lower unit number).
    Snapshots of units no longer in the syllabus are ignored.
 
+### After an attempt is marked (`after_attempt_marked`)
+
+Exams and quizzes call **one** function after marking, in the same transaction (the caller commits).
+It replaces their current `refresh_topic_progress(...)` call:
+
+```python
+from shared.enums import MasterySource
+
+await performance_service.after_attempt_marked(
+    session, user.id, attempt.id, source=MasterySource.EXAM  # QUIZ / PRACTICE / DIAGNOSTIC
+)
+```
+
+It runs, in order:
+
+| Step | What it saves |
+|---|---|
+| `record_mistakes` | one `mistakes` row per wrong MCQ answer (details below) |
+| `update_mastery` | a `unit_mastery` snapshot per unit in the attempt, and `concept_mastery` for every concept the attempt touched |
+| `refresh_topic_progress` | `user_topic_progress` for the Learn screens |
+
+- **Unit snapshots** use `grading.mastery_percent(correct, asked)` = (correct + 0.5) / (asked + 1), the
+  diagnostic's formula, over this attempt only. Unanswered questions count as asked (wrong), like the
+  diagnostic. For `source=DIAGNOSTIC` this step is skipped, because the diagnostic saves its own.
+- **Concept mastery** is recomputed from **all** the student's answers to questions linked to the concept
+  (`question_concepts`), with the same formula, stored 0-1. Nothing happens until questions are linked.
+- Call it **once per attempt**: unit snapshots are history rows, so a second call would add another.
+  Mistakes and concept mastery are safe to repeat.
+
+### How concept insights are calculated (`GET /insights/concepts`)
+
+Concepts are the syllabus sub-topics. A student's answer counts for a concept when its question is linked
+to the concept in `question_concepts` (a question linked to two concepts counts for both). Scoring is
+**the same rule as topics** (`score_level`): percent correct over valid answers, the grade bands, and
+"reliable" only from 5 answers. Concepts are listed weakest first; `weak_concepts` are reliable S/F ones.
+
+`linked_answers` / `total_answers` show how many of the student's answers had a concept link. **While no
+questions are linked, the list is empty and the `note` says why** - it does not mean nothing is weak.
+
 ### How mistakes are recorded (`record_mistakes(session, user_id, attempt_id)`)
 
-Call it **after the attempt is marked**, in the same transaction; the caller commits:
+`after_attempt_marked` calls it. To call it on its own, do it **after the attempt is marked**, in the same
+transaction; the caller commits:
 
 ```python
 await performance_service.record_mistakes(session, user.id, attempt.id)
@@ -129,6 +169,25 @@ official exam rules, so a grade is a practice indicator, never an official exam 
 provisional percent/grade is shown, but it is never listed as a weak topic). Exams uses the same rule for
 its per-paper `weak_topics` through `service.is_weak_topic_percent`.
 
+## One mastery scale (proposal)
+
+Three different scales are in use, so the same score can be "strong" on one screen and "ok" on another:
+
+| Where | Owner | Scale |
+|---|---|---|
+| Topic / unit / concept insights, exam weak topics | Keshomigha | `grading.py`: A ≥ 75, B ≥ 65, C ≥ 55, S ≥ 35, F below (weak = S or F) |
+| Diagnostic result (`quizzes/service.py`) | Udith | strong ≥ 70, ok ≥ 40 |
+| Learn unit status (`syllabus/service.py`) | Samni | strong ≥ 75, improving ≥ 40 |
+
+Proposal: everyone uses `grading.py`, which is meant to be the one place for thresholds:
+
+- the formula: `grading.mastery_percent(correct, asked)`
+- the level: `grading.grade_for(percent)` → `grade`, `label`, `status` (`strong` / `good` / `developing` /
+  `weak` / `very_weak`), `understanding`
+- weak or not: `grading.is_weak_percent(percent)`
+
+To be agreed by Keshomigha, Udith and Samni; then the diagnostic and Learn switch to these functions.
+
 ## Which attempts count
 
 One rule for the whole module (`FINISHED_ATTEMPT_STATUSES` in `repository.py`): topic insights, the
@@ -171,4 +230,5 @@ reaches the 5-answer minimum from the diagnostic alone, so it can't make a topic
 | `repository.py` | All SQL queries for this module |
 
 Models live in `shared/db/models/`. Call other modules through their `service.py`, never their `repository.py`.
-Tests: `tests/api/test_performance.py`, `tests/api/test_mistakes.py`, `tests/api/test_analytics_admin.py`.
+Tests: `tests/api/test_performance.py`, `tests/api/test_mistakes.py`, `tests/api/test_analytics_admin.py`,
+`tests/api/test_mastery_concepts.py`.
