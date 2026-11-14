@@ -120,3 +120,12 @@ class PostDetailOut(PostOut):
     """One post with its replies: the accepted answer first, then the highest score."""
 
     replies: list[ReplyOut]
+
+
+# ---------------------------------------------------------------- replies
+class ReplyCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=5_000)  # markdown
+
+
+class ReplyUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=5_000)
