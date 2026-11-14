@@ -120,3 +120,64 @@ class UploadOut(BaseModel):
     summary: UploadSummary | None = None
     error: UploadError | None = None
     created_at: datetime
+
+
+# ---------------------------------------------------------------- admin: content library
+# Matches BrAInBox_Mobile apps/admin/lib/features/content_review/domain/content_review_models.dart
+ContentItemType = Literal["note", "short_note", "diagram"]
+ContentStatusValue = Literal["draft", "pending_review", "approved", "rejected", "archived"]
+
+
+class ContentItemOut(BaseModel):
+    """One note, short note or diagram in the admin content library."""
+
+    id: uuid.UUID
+    title: str
+    type: ContentItemType
+    syllabus_code: str | None = None  # topic number, e.g. "5.4"
+    unit_number: int | None = None
+    status: ContentStatusValue
+    is_ai_generated: bool
+    model: str | None = None
+    prompt_version: str | None = None
+    body_markdown: str | None = None  # notes; diagrams: their Mermaid code in a mermaid block
+    image_url: str | None = None  # diagrams
+    auto_check: str | None = None  # one sentence from the automatic checks, null = nothing to say
+    updated_at: datetime
+
+
+class ContentReviewIn(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ContentEditIn(BaseModel):
+    body_markdown: str = Field(min_length=1, max_length=MAX_TEXT_CHARS)
+
+
+# ---------------------------------------------------------------- admin: RAG sources
+# The admin app has a placeholder screen for these; this is the proposed shape.
+RAG_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+MAX_RAG_BYTES = 40 * 1024 * 1024  # 40 MB
+
+
+class RagSourceOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    source_type: str  # SourceType: syllabus | teachers_guide | approved_note | marking_scheme...
+    unit_number: int | None = None
+    year: int | None = None
+    status: str  # pending | ingesting | ready | failed
+    chunk_count: int
+    page_count: int | None = None
+    error_message: str | None = None
+    indexed_at: datetime | None = None
+    updated_at: datetime
+
+
+class RagJobOut(BaseModel):
+    job_id: uuid.UUID
+    document_id: uuid.UUID | None = None  # null for "reindex everything"
+
+
+class RagReindexIn(BaseModel):
+    document_id: uuid.UUID | None = None  # null = every document

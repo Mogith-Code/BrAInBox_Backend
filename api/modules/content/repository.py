@@ -6,12 +6,13 @@ Only this module's `service.py` may import this file.
 """
 
 import uuid
+from datetime import date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import AIJob, Note, Summary, Upload
-from shared.enums import JobStatus, JobType
+from shared.db.models import AIJob, Note, SourceDocument, Summary, Topic, Unit, Upload
+from shared.enums import ContentStatus, JobStatus, JobType
 
 
 async def count_notes(session: AsyncSession) -> int:
@@ -106,3 +107,104 @@ async def get_summary_for_upload(session: AsyncSession, upload_id: uuid.UUID) ->
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------- admin: notes library
+async def list_notes(
+    session: AsyncSession,
+    *,
+    note_type: str | None,
+    status: ContentStatus | None,
+    unit_number: int | None,
+    limit: int,
+) -> list[tuple[Note, Topic, Unit]]:
+    """Notes with their topic and unit, last changed first. No status = all but archived."""
+    stmt = (
+        select(Note, Topic, Unit)
+        .join(Topic, Topic.id == Note.topic_id)
+        .join(Unit, Unit.id == Topic.unit_id)
+        .order_by(Note.updated_at.desc(), Note.id)
+        .limit(limit)
+    )
+    if note_type is not None:
+        stmt = stmt.where(Note.note_type == note_type)
+    if status is not None:
+        stmt = stmt.where(Note.status == status)
+    else:
+        stmt = stmt.where(Note.status != ContentStatus.ARCHIVED)
+    if unit_number is not None:
+        stmt = stmt.where(Unit.number == unit_number)
+    return [(n, t, u) for n, t, u in (await session.execute(stmt)).all()]
+
+
+async def get_note_with_topic(
+    session: AsyncSession, note_id: uuid.UUID
+) -> tuple[Note, Topic, Unit] | None:
+    row = (
+        await session.execute(
+            select(Note, Topic, Unit)
+            .join(Topic, Topic.id == Note.topic_id)
+            .join(Unit, Unit.id == Topic.unit_id)
+            .where(Note.id == note_id)
+        )
+    ).first()
+    return (row[0], row[1], row[2]) if row else None
+
+
+async def other_approved_notes(session: AsyncSession, note: Note) -> list[Note]:
+    """Approved topic-level notes of the same topic and kind (only one may be approved)."""
+    result = await session.execute(
+        select(Note).where(
+            Note.topic_id == note.topic_id,
+            Note.note_type == note.note_type,
+            Note.concept_id.is_(None),
+            Note.status == ContentStatus.APPROVED,
+            Note.id != note.id,
+        )
+    )
+    return list(result.scalars())
+
+
+async def pending_review_counts(session: AsyncSession, older_than: datetime) -> tuple[int, int]:
+    """For the dashboard: (notes waiting for review, how many of them are older)."""
+    result = await session.execute(
+        select(func.count(), func.count().filter(Note.created_at < older_than)).where(
+            Note.status == ContentStatus.PENDING_REVIEW
+        )
+    )
+    total, old = result.one()
+    return int(total), int(old)
+
+
+async def notes_made_per_day(session: AsyncSession, since: datetime) -> dict[date, int]:
+    """{Sri Lanka date: notes created} since `since` - for the dashboard chart."""
+    day = func.date(func.timezone("Asia/Colombo", Note.created_at))
+    result = await session.execute(
+        select(day, func.count()).where(Note.created_at >= since).group_by(day)
+    )
+    return {d: int(n) for d, n in result.all()}
+
+
+# ---------------------------------------------------------------- admin: RAG source documents
+async def list_source_documents(
+    session: AsyncSession, limit: int
+) -> list[tuple[SourceDocument, int | None]]:
+    """(document, its unit number), last changed first."""
+    result = await session.execute(
+        select(SourceDocument, Unit.number)
+        .outerjoin(Unit, Unit.id == SourceDocument.unit_id)
+        .order_by(SourceDocument.updated_at.desc(), SourceDocument.id)
+        .limit(limit)
+    )
+    return [(d, n) for d, n in result.all()]
+
+
+async def get_source_document(
+    session: AsyncSession, document_id: uuid.UUID
+) -> SourceDocument | None:
+    return await session.get(SourceDocument, document_id)
+
+
+async def add_row(session: AsyncSession, row: object) -> None:
+    session.add(row)
+    await session.flush()
