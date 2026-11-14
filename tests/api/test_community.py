@@ -427,3 +427,143 @@ async def test_delete_post(client, admin_client, forum, db_session):
     async with _client_as(OTHER) as other:
         assert (await other.get(f"/api/v1/posts/{theirs.id}")).status_code == 200
     assert (await admin_client.delete(f"/api/v1/posts/{theirs.id}")).status_code == 204
+
+
+# --------------------------------------------------------------------------- replies (no DB)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", f"/api/v1/posts/{uuid.uuid4()}/replies"),
+        ("patch", f"/api/v1/replies/{uuid.uuid4()}"),
+        ("delete", f"/api/v1/replies/{uuid.uuid4()}"),
+        ("post", f"/api/v1/posts/{uuid.uuid4()}/accept/{uuid.uuid4()}"),
+        ("delete", f"/api/v1/posts/{uuid.uuid4()}/accept"),
+    ],
+)
+async def test_replies_require_login(anon_client, method, path):
+    assert (await anon_client.request(method, path, json={})).status_code == 401
+
+
+@pytest.mark.parametrize("body", [{}, {"body": ""}, {"body": "x" * 5001}])
+async def test_reply_validation(client, body):
+    response = await client.post(f"/api/v1/posts/{uuid.uuid4()}/replies", json=body)
+    assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------- replies (DB)
+
+
+async def _reply_count(client, post_id) -> int:  # type: ignore[no-untyped-def]
+    return (await client.get(f"/api/v1/posts/{post_id}")).json()["reply_count"]
+
+
+@pytest.mark.db
+async def test_reply_and_reply_count(client, forum, db_session):
+    post = await _post(db_session, forum.group, OTHER.id, "Question")
+
+    response = await client.post(f"/api/v1/posts/{post.id}/replies", json={"body": "  Answer  "})
+    assert response.status_code == 201, response.text
+    reply = response.json()
+    assert (reply["body"], reply["is_mine"], reply["author"]["name"]) == (
+        "Answer",
+        True,
+        "Nethmi Perera",
+    )
+    assert (reply["moderation_status"], reply["is_accepted"]) == ("approved", False)
+    assert await _reply_count(client, post.id) == 1
+
+    # two replies at the same moment are both counted
+    async with _client_as(OTHER) as other:
+        await asyncio.gather(
+            client.post(f"/api/v1/posts/{post.id}/replies", json={"body": "a"}),
+            other.post(f"/api/v1/posts/{post.id}/replies", json={"body": "b"}),
+        )
+    assert await _reply_count(client, post.id) == 3
+
+
+@pytest.mark.db
+async def test_only_members_can_reply_and_only_to_visible_posts(client, forum, db_session):
+    outside = CommunityGroup(name="Outside", slug=f"outside-{uuid.uuid4().hex[:8]}")
+    db_session.add(outside)
+    await db_session.flush()
+    not_member = await _post(db_session, outside, OTHER.id, "Not my group")
+    hidden = await _post(
+        db_session, forum.group, OTHER.id, "Pending", moderation_status=ModerationStatus.PENDING
+    )
+    try:
+        blocked = await client.post(f"/api/v1/posts/{not_member.id}/replies", json={"body": "x"})
+        assert blocked.status_code == 403
+        assert blocked.json()["error"]["code"] == "NOT_A_MEMBER"
+        invisible = await client.post(f"/api/v1/posts/{hidden.id}/replies", json={"body": "x"})
+        assert invisible.json()["error"]["code"] == "POST_NOT_FOUND"
+    finally:
+        await db_session.execute(delete(CommunityGroup).where(CommunityGroup.id == outside.id))
+        await db_session.commit()
+
+
+@pytest.mark.db
+async def test_edit_and_delete_a_reply(client, admin_client, forum, db_session):
+    post = await _post(db_session, forum.group, OTHER.id, "Question")
+    mine = (await client.post(f"/api/v1/posts/{post.id}/replies", json={"body": "mine"})).json()
+    async with _client_as(OTHER) as other:
+        theirs = (
+            await other.post(f"/api/v1/posts/{post.id}/replies", json={"body": "theirs"})
+        ).json()
+
+    blocked = await client.patch(f"/api/v1/replies/{theirs['id']}", json={"body": "hacked"})
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "NOT_REPLY_AUTHOR"
+    edited = await client.patch(f"/api/v1/replies/{mine['id']}", json={"body": " better "})
+    assert edited.json()["body"] == "better"
+
+    assert (await client.delete(f"/api/v1/replies/{theirs['id']}")).status_code == 403
+    assert (await client.delete(f"/api/v1/replies/{mine['id']}")).status_code == 204
+    assert await _reply_count(client, post.id) == 1
+    gone = await client.patch(f"/api/v1/replies/{mine['id']}", json={"body": "x"})
+    assert gone.json()["error"]["code"] == "REPLY_NOT_FOUND"
+    assert (await client.delete(f"/api/v1/replies/{mine['id']}")).status_code == 404
+
+    assert (await admin_client.delete(f"/api/v1/replies/{theirs['id']}")).status_code == 204
+    assert await _reply_count(client, post.id) == 0  # never below 0
+    detail = (await client.get(f"/api/v1/posts/{post.id}")).json()
+    assert detail["replies"] == []
+
+
+@pytest.mark.db
+async def test_accepting_an_answer(client, forum, db_session):
+    mine = await _post(db_session, forum.group, STUDENT.id, "My question")
+    other_post = await _post(db_session, forum.group, OTHER.id, "Their question")
+    async with _client_as(OTHER) as other:
+        first = (await other.post(f"/api/v1/posts/{mine.id}/replies", json={"body": "1"})).json()
+        second = (await other.post(f"/api/v1/posts/{mine.id}/replies", json={"body": "2"})).json()
+        elsewhere = (
+            await other.post(f"/api/v1/posts/{other_post.id}/replies", json={"body": "x"})
+        ).json()
+        # only the post's author may accept
+        blocked = await other.post(f"/api/v1/posts/{mine.id}/accept/{first['id']}")
+        assert blocked.status_code == 403
+        assert blocked.json()["error"]["code"] == "NOT_POST_AUTHOR"
+
+    accepted = (await client.post(f"/api/v1/posts/{mine.id}/accept/{second['id']}")).json()
+    assert accepted["accepted_reply_id"] == second["id"]
+    assert [(r["id"], r["is_accepted"]) for r in accepted["replies"]][0] == (second["id"], True)
+
+    switched = (await client.post(f"/api/v1/posts/{mine.id}/accept/{first['id']}")).json()
+    assert switched["accepted_reply_id"] == first["id"]
+    assert [r["id"] for r in switched["replies"] if r["is_accepted"]] == [first["id"]]
+
+    wrong_post = await client.post(f"/api/v1/posts/{mine.id}/accept/{elsewhere['id']}")
+    assert wrong_post.json()["error"]["code"] == "REPLY_NOT_FOUND"
+
+    cleared = (await client.delete(f"/api/v1/posts/{mine.id}/accept")).json()
+    assert cleared["accepted_reply_id"] is None
+    assert not any(r["is_accepted"] for r in cleared["replies"])
+
+    # deleting the accepted answer clears the acceptance
+    await client.post(f"/api/v1/posts/{mine.id}/accept/{first['id']}")
+    async with _client_as(OTHER) as other:
+        assert (await other.delete(f"/api/v1/replies/{first['id']}")).status_code == 204
+    after = (await client.get(f"/api/v1/posts/{mine.id}")).json()
+    assert after["accepted_reply_id"] is None
