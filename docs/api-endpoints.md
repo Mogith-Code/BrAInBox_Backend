@@ -297,7 +297,7 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | GET | `/api/v1/insights/topics` | ✅ My topic-wise MCQ scores, grades, weak topics and feedback (`?attempt_id=` for one attempt) |
 | GET | `/api/v1/insights/summary` | ✅ My overview: overall mastery + weekly change, MCQ score, topic levels, streak and study days |
 | GET | `/api/v1/insights/units` | ✅ My mastery per unit (0-100) with grade, weekly change, strongest / weakest unit |
-| GET | `/api/v1/insights/concepts` | Weakest concepts |
+| GET | `/api/v1/insights/concepts` | ✅ My score per concept (sub-topic), weakest first; empty until questions are linked to concepts |
 | GET | `/api/v1/mistakes` | ✅ My wrong MCQ answers, newest first, paged (`?type=`, `?unit_id=`, `?status=open\|resolved`) |
 | PATCH | `/api/v1/mistakes/{id}` | ✅ `{resolved}` → mark a mistake fixed or open again |
 | - | (service) | record_mistake() and update_mastery() called by quizzes/exams/evaluation |

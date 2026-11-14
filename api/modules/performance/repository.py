@@ -19,6 +19,8 @@ from sqlalchemy.orm import aliased
 from shared.db.models import (
     AIUsageLog,
     Attempt,
+    Concept,
+    ConceptMastery,
     MCQOption,
     Misconception,
     Mistake,
@@ -34,10 +36,24 @@ from shared.db.models import (
     User,
     UserTopicProgress,
 )
-from shared.enums import ContentStatus, MistakeType, QuestionType, TopicProgressStatus, UserRole
+from shared.enums import (
+    AttemptStatus,
+    ContentStatus,
+    MistakeType,
+    QuestionType,
+    TopicProgressStatus,
+    UserRole,
+)
 
-# Attempts in these states have been marked, so their responses can be analysed.
-FINISHED_ATTEMPT_STATUSES = ("submitted", "graded")
+# Attempts in these states have been marked, so their answers count everywhere in this module
+# (topic insights, mistakes, Learn progress, admin analytics). Every attempt kind counts,
+# the diagnostic included. `evaluated` = marked by written-answer evaluation; its MCQ answers
+# count too. Not counted: in_progress (not marked yet) and abandoned (never finished).
+FINISHED_ATTEMPT_STATUSES = (
+    AttemptStatus.SUBMITTED,
+    AttemptStatus.GRADED,
+    AttemptStatus.EVALUATED,
+)
 
 
 async def get_attempt(session: AsyncSession, attempt_id: uuid.UUID) -> Attempt | None:
@@ -62,6 +78,7 @@ class AnswerRow:
     misconception_id: uuid.UUID | None  # misconception behind the selected option
     is_correct: bool | None
     created_at: datetime
+    unit_id: uuid.UUID | None = None  # the topic's unit (None for questions without a topic)
 
 
 async def get_mcq_answer_rows(
@@ -84,6 +101,7 @@ async def get_mcq_answer_rows(
             MCQOption.misconception_id,
             Response.is_correct,
             Response.created_at,
+            Topic.unit_id,
         )
         .join(Attempt, Attempt.id == Response.attempt_id)
         .join(Question, Question.id == Response.question_id)
@@ -159,6 +177,75 @@ async def get_topic_resources(
 async def add_unit_mastery(session: AsyncSession, rows: list[UnitMastery]) -> None:
     session.add_all(rows)
     await session.flush()
+
+
+# ---------------------------------------------------------------- concepts
+async def get_concept_links(
+    session: AsyncSession, question_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """{question_id: [concept_id, ...]} from question_concepts. Unlinked questions are left out."""
+    if not question_ids:
+        return {}
+    result = await session.execute(
+        select(QuestionConcept.question_id, QuestionConcept.concept_id).where(
+            QuestionConcept.question_id.in_(question_ids)
+        )
+    )
+    links: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for question_id, concept_id in result.all():
+        links.setdefault(question_id, []).append(concept_id)
+    return links
+
+
+@dataclass
+class ConceptInfo:
+    id: uuid.UUID
+    code: str | None
+    name: str
+    topic_id: uuid.UUID
+    topic: str
+    unit_number: int
+    unit: str
+
+
+async def get_concepts(session: AsyncSession, concept_ids: list[uuid.UUID]) -> list[ConceptInfo]:
+    """The concepts with their topic and unit (outdated ones too: they are the student's history)."""
+    if not concept_ids:
+        return []
+    result = await session.execute(
+        select(
+            Concept.id,
+            Concept.code,
+            Concept.name,
+            Topic.id.label("topic_id"),
+            Topic.title.label("topic"),
+            Unit.number.label("unit_number"),
+            Unit.title.label("unit"),
+        )
+        .join(Topic, Topic.id == Concept.topic_id)
+        .join(Unit, Unit.id == Topic.unit_id)
+        .where(Concept.id.in_(concept_ids))
+    )
+    return [ConceptInfo(**row._asdict()) for row in result.all()]
+
+
+async def save_concept_mastery(session: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Insert or replace the student's mastery of these concepts. No commit."""
+    if not rows:
+        return
+    stmt = insert(ConceptMastery).values(rows)
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_concept_mastery_user_concept",
+            set_={
+                "mastery_score": stmt.excluded.mastery_score,
+                "attempts_count": stmt.excluded.attempts_count,
+                "correct_count": stmt.excluded.correct_count,
+                "last_practiced_at": stmt.excluded.last_practiced_at,
+                "updated_at": func.now(),
+            },
+        )
+    )
 
 
 async def latest_unit_mastery(
