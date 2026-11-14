@@ -320,10 +320,10 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | GET | `/api/v1/groups/{id}` | ✅ One group (UUID or slug, e.g. `unit-6`) |
 | POST | `/api/v1/groups/{id}/join` | ✅ Join a group (safe to repeat) |
 | DELETE | `/api/v1/groups/{id}/join` | ✅ Leave a group (safe to repeat) |
-| GET | `/api/v1/groups/{id}/posts` | Feed of a group |
-| POST | `/api/v1/groups/{id}/posts` | Create a post (published straight away for now; AI moderation later) |
-| GET | `/api/v1/posts/{id}` | Post with replies |
-| PATCH / DELETE | `/api/v1/posts/{id}` | Edit / delete my own post |
+| GET | `/api/v1/groups/{id}/posts` | ✅ Feed of a group (`?sort=new\|top`, paged) |
+| POST | `/api/v1/groups/{id}/posts` | ✅ Create a post (members; published straight away for now; AI moderation later) |
+| GET | `/api/v1/posts/{id}` | ✅ Post with its replies |
+| PATCH / DELETE | `/api/v1/posts/{id}` | ✅ Edit my post / delete my post (admins can delete any) |
 | POST | `/api/v1/posts/{id}/replies` | Reply |
 | POST | `/api/v1/posts/{id}/accept/{reply_id}` | Mark the best answer (post author) |
 | POST | `/api/v1/votes` | Up/down vote a post or reply |

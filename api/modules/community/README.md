@@ -19,10 +19,11 @@ posts live under their group (`/groups/{id}/posts`).
 | GET | `/api/v1/groups/{id}` | ✅ done | One group. `id` = UUID or slug (`general`, `unit-6`). Unknown → 404 `GROUP_NOT_FOUND` |
 | POST | `/api/v1/groups/{id}/join` | ✅ done | Join. Joining again changes nothing |
 | DELETE | `/api/v1/groups/{id}/join` | ✅ done | Leave. Leaving again changes nothing |
-| GET | `/api/v1/groups/{id}/posts` | planned | Feed of a group (newest / top, paged) |
-| POST | `/api/v1/groups/{id}/posts` | planned | Create a post (members only) |
-| GET | `/api/v1/posts/{id}` | planned | Post with replies |
-| PATCH / DELETE | `/api/v1/posts/{id}` | planned | Edit / delete my own post (soft delete) |
+| GET | `/api/v1/groups/{id}/posts` | ✅ done | Feed of a group: `?sort=new` (default) or `top`, paged (`page`, `size`) |
+| POST | `/api/v1/groups/{id}/posts` | ✅ done | Create a post. Members only → 403 `NOT_A_MEMBER`. Topic must be in the group's unit → 400 `TOPIC_NOT_IN_GROUP_UNIT` |
+| GET | `/api/v1/posts/{id}` | ✅ done | Post with its replies (accepted answer first, then highest score). Not visible → 404 `POST_NOT_FOUND` |
+| PATCH | `/api/v1/posts/{id}` | ✅ done | Edit my post (send only the fields to change). Not mine → 403 `NOT_POST_AUTHOR` |
+| DELETE | `/api/v1/posts/{id}` | ✅ done | Delete my post (or any post as admin). Soft delete |
 | POST | `/api/v1/posts/{id}/replies` | planned | Reply |
 | POST | `/api/v1/posts/{id}/accept/{reply_id}` | planned | The post's author marks the best answer |
 | POST | `/api/v1/votes` | planned | +1 / -1 on a post or reply |
@@ -38,11 +39,23 @@ Placeholder: `GET /api/v1/community/status` → `{"module": "community", "status
 - `member_count` is changed inside the database in the same transaction as the join / leave, so two taps at
   the same moment can't miscount, and it never goes below 0.
 
+### Posts
+
+- **Who can do what:** anyone who can see a group reads its posts; only **members** post; only the **author**
+  edits; the author **or an admin** deletes.
+- **Who sees what:** approved posts, plus **my own** posts that are `pending` or `flagged` (with that status, so the
+  app can show "under review"). `removed` and deleted posts are hidden from everyone. Replies follow the same rule.
+- A post's `unit_id` is its group's unit (or its topic's unit). Its `topic_id` must belong to the group's unit.
+- **Tags:** at most 5, each up to 50 characters, stored trimmed and lower-case without duplicates.
+- **Delete is soft** (`deleted_at`): the row stays so replies and votes keep working, but nobody sees it.
+- Authors are shown by display name only (`"Student"` when they have none); `author` is `null` for an AI suggested
+  answer or a deleted account.
+
 ### Moderation (decision)
 
 **For now, new posts are published straight away** (`moderation_status = approved`) and students can report
-bad ones; reports go to `content_reports`, the admin moderation queue. This is one setting, so it can be
-switched later.
+bad ones; reports go to `content_reports`, the admin moderation queue. This is one setting,
+`NEW_POST_STATUS` in `service.py`, so it can be switched later. Edits don't change the status.
 
 Later (AI step): a new post starts as `pending`, the `MODERATE_POST` job checks it (bullying, hate, sexual
 content, personal data, spam, cheating), then marks it `approved` or `flagged`. Flagged posts are hidden from
