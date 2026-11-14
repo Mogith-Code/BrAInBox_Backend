@@ -191,6 +191,25 @@ async def latest_unit_mastery_rows(
     return {row.unit_id: row for row in result.scalars()}
 
 
+async def average_mastery_by_user(
+    session: AsyncSession, user_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, float]:
+    """{user_id: average of the newest mastery per unit}. Students with no mastery are left out."""
+    if not user_ids:
+        return {}
+    latest = (
+        select(UnitMastery.user_id, UnitMastery.mastery)
+        .where(UnitMastery.user_id.in_(user_ids))
+        .ext(distinct_on(UnitMastery.user_id, UnitMastery.unit_id))
+        .order_by(UnitMastery.user_id, UnitMastery.unit_id, UnitMastery.created_at.desc())
+        .subquery()
+    )
+    result = await session.execute(
+        select(latest.c.user_id, func.avg(latest.c.mastery)).group_by(latest.c.user_id)
+    )
+    return {user_id: float(avg) for user_id, avg in result.all()}
+
+
 # ---------------------------------------------------------------- study activity (streak)
 async def add_study_day(session: AsyncSession, user_id: uuid.UUID, day: date) -> None:
     """One row per student per day; a second call on the same day does nothing."""
@@ -326,8 +345,9 @@ class MistakeRow:
 
 def _mistakes_query(user_id: uuid.UUID) -> Select[Any]:
     selected = aliased(MCQOption)
-    return (
-        select(
+    # More than 10 columns: SQLAlchemy's typing gives up, so say "any row" explicitly.
+    stmt: Select[Any] = (
+        select(  # type: ignore[assignment]
             Mistake,
             Question.stem.label("question"),
             Question.explanation.label("explanation"),
@@ -352,6 +372,7 @@ def _mistakes_query(user_id: uuid.UUID) -> Select[Any]:
         .outerjoin(Misconception, Misconception.id == Mistake.misconception_id)
         .where(Mistake.user_id == user_id)
     )
+    return stmt
 
 
 def _mistake_row(row: Any) -> MistakeRow:
@@ -606,3 +627,39 @@ async def daily_ai_requests(session: AsyncSession, since: datetime) -> dict[date
         select(day, func.count(AIUsageLog.id)).where(AIUsageLog.created_at >= since).group_by(day)
     )
     return {row_day: count for row_day, count in result.all()}
+
+
+async def daily_finished_attempts(session: AsyncSession, since: datetime) -> dict[date, int]:
+    """{Sri Lanka date: students' quizzes / papers / diagnostics finished} - dashboard."""
+    day = func.date(func.timezone("Asia/Colombo", Attempt.submitted_at))
+    result = await session.execute(
+        select(day, func.count(Attempt.id))
+        .join(User, User.id == Attempt.user_id)
+        .where(
+            _IS_STUDENT,
+            Attempt.status.in_(FINISHED_ATTEMPT_STATUSES),
+            Attempt.submitted_at >= since,
+        )
+        .group_by(day)
+    )
+    return {d: int(n) for d, n in result.all()}
+
+
+async def top_misconception_per_topic(
+    session: AsyncSession, since: datetime, topic_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """{topic_id: the misconception students chose most often in that topic}."""
+    if not topic_ids:
+        return {}
+    chosen = func.count(Response.id)
+    stmt = (
+        _valid_answers(since, Question.topic_id, Misconception.title, chosen.label("n"))
+        .join(Misconception, Misconception.id == MCQOption.misconception_id)
+        .where(Question.topic_id.in_(topic_ids), Response.is_correct.is_(False))
+        .group_by(Question.topic_id, Misconception.id)
+        .order_by(Question.topic_id, chosen.desc(), Misconception.title)
+    )
+    top: dict[uuid.UUID, str] = {}
+    for topic_id, title, _ in (await session.execute(stmt)).all():
+        top.setdefault(topic_id, title)
+    return top

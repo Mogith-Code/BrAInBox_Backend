@@ -93,13 +93,3 @@ class VisualReportOut(BaseModel):
     details: str | None = None
     status: ModerationStatus
     created_at: datetime
-
-
-class VisualReportAdminOut(VisualReportOut):
-    """One row of the admin reports queue (admin/moderation_admin.py)."""
-
-    target_type: str = "visual"
-    reported_by: uuid.UUID
-    visual_title: str
-    image_url: str | None = None
-    mermaid_code: str | None = None

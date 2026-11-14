@@ -33,6 +33,8 @@ from api.core.ai_client import AIClient
 from api.core.config import get_settings
 from api.core.errors import ConflictError, NotFoundError, TooManyRequestsError
 from api.core.security import CurrentUser
+from api.modules.community.schemas import ModerationAction, ModerationItemOut
+from api.modules.content.schemas import ContentItemOut
 from api.modules.syllabus import service as syllabus_service
 from api.modules.visuals import repository
 from api.modules.visuals.schemas import (
@@ -42,7 +44,6 @@ from api.modules.visuals.schemas import (
     TopicVisualsOut,
     VisualLabelOut,
     VisualOut,
-    VisualReportAdminOut,
     VisualReportOut,
 )
 from shared.db.models import AIJob, Visual, VisualReport
@@ -295,23 +296,138 @@ async def report_visual(
     return VisualReportOut.model_validate(report, from_attributes=True)
 
 
-async def list_reports(
-    session: AsyncSession, base_url: str, status: ModerationStatus, limit: int = 50
-) -> list[VisualReportAdminOut]:
-    """Admin reports queue (admin/moderation_admin.py): each report with its visual."""
-    rows = await repository.list_reports(session, status, limit)
-    return [
-        VisualReportAdminOut(
-            id=report.id,
-            visual_id=visual.id,
-            reason=report.reason,
-            details=report.details,
-            status=report.status,
-            created_at=report.created_at,
-            reported_by=report.user_id,
-            visual_title=visual.title,
-            image_url=await storage.public_image_url(visual.image_path, base_url),
-            mermaid_code=visual.mermaid_code,
+# --------------------------------------------------------------------------- admin moderation
+# Used by the community module's moderation queue (admin/moderation_admin.py).
+
+NOT_BIOLOGY_FLAG = "Not Biology"
+
+
+async def moderation_items(session: AsyncSession, base_url: str) -> list[ModerationItemOut]:
+    """Open visual reports, one item per visual (oldest report first)."""
+    items = []
+    for report, visual, count, creator in await repository.open_report_groups(session):
+        items.append(
+            ModerationItemOut(
+                id=report.id,
+                target_type="visual",
+                target_id=visual.id,
+                reason=report.reason,
+                details=report.details,
+                author_handle=creator,
+                text=visual.prompt or visual.alt_text,
+                visual_title=visual.title,
+                image_url=await storage.public_image_url(visual.image_path, base_url),
+                ai_flag_label=NOT_BIOLOGY_FLAG if visual.safety_passed is False else None,
+                report_count=count,
+                created_at=report.created_at,
+            )
         )
-        for report, visual in rows
-    ]
+    return items
+
+
+async def resolve_report(
+    session: AsyncSession, report_id: uuid.UUID, action: ModerationAction, admin_id: uuid.UUID
+) -> tuple[uuid.UUID | None, str] | None:
+    """Resolve every open report of this report's visual. None = not a visual report.
+
+    Returns (who made the visual, the report reason) so the caller can warn them.
+    409 REPORT_ALREADY_RESOLVED. The caller commits."""
+    report = await repository.get_report(session, report_id)
+    if report is None:
+        return None
+    if report.status != ModerationStatus.PENDING:
+        raise ConflictError("This report was already resolved", code="REPORT_ALREADY_RESOLVED")
+    visual = await repository.get_visual(session, report.visual_id)
+    assert visual is not None  # reports are deleted with their visual (CASCADE)
+    now = clock.now()
+    new_status = ModerationStatus.REMOVED if action == "remove" else ModerationStatus.APPROVED
+    for row in await repository.pending_reports_of(session, visual.id):
+        row.status = new_status
+        row.resolved_by = admin_id
+        row.resolved_at = now
+    if action == "remove":
+        visual.status = ContentStatus.REJECTED  # hidden from everyone, its maker included
+    return visual.created_by, report.reason
+
+
+# --------------------------------------------------------------------------- admin content library
+# Used by the content module (admin/content_admin.py): diagrams waiting for review.
+
+MERMAID_FENCE = "```"
+
+
+def _diagram_check(visual: Visual) -> str | None:
+    if visual.safety_passed is False:
+        return "Safety check failed: the AI said this is not a Biology visual."
+    if visual.image_path is None:
+        return "No PNG yet: the app draws it from the Mermaid code."
+    return None
+
+
+async def diagram_item(visual: Visual, topic: Any, unit: Any, base_url: str) -> ContentItemOut:
+    body = (
+        f"{MERMAID_FENCE}mermaid\n{visual.mermaid_code}\n{MERMAID_FENCE}"
+        if visual.mermaid_code
+        else visual.alt_text
+    )
+    return ContentItemOut(
+        id=visual.id,
+        title=visual.title,
+        type="diagram",
+        syllabus_code=topic.number if topic is not None else None,
+        unit_number=unit.number if unit is not None else None,
+        status=visual.status.value,  # type: ignore[arg-type]
+        is_ai_generated=visual.is_ai_generated,
+        model=visual.model,
+        prompt_version=visual.prompt_version,
+        body_markdown=body,
+        image_url=await storage.public_image_url(visual.image_path, base_url),
+        auto_check=_diagram_check(visual),
+        updated_at=visual.updated_at,
+    )
+
+
+async def diagrams_for_review(
+    session: AsyncSession,
+    base_url: str,
+    status: ContentStatus | None,
+    unit_number: int | None,
+    limit: int,
+) -> list[ContentItemOut]:
+    rows = await repository.list_for_review(session, status, unit_number, limit)
+    return [await diagram_item(v, t, u, base_url) for v, t, u in rows]
+
+
+async def get_diagram_item(
+    session: AsyncSession, visual_id: uuid.UUID, base_url: str
+) -> ContentItemOut | None:
+    row = await repository.get_with_topic(session, visual_id)
+    return await diagram_item(*row, base_url) if row else None
+
+
+async def review_diagram(
+    session: AsyncSession, visual_id: uuid.UUID, approve: bool, admin_id: uuid.UUID, base_url: str
+) -> ContentItemOut | None:
+    """Approve (shared with every student) or reject a visual. None = no such visual."""
+    row = await repository.get_with_topic(session, visual_id)
+    if row is None:
+        return None
+    visual, topic, unit = row
+    if approve:
+        visual.status = ContentStatus.APPROVED
+        visual.verified_by = admin_id
+        visual.verified_at = clock.now()
+    else:
+        visual.status = ContentStatus.REJECTED
+    visual.updated_at = clock.now()
+    await session.commit()
+    return await diagram_item(visual, topic, unit, base_url)
+
+
+async def waiting_for_review_counts(session: AsyncSession, older_than: Any) -> tuple[int, int]:
+    """For the admin dashboard: (waiting, waiting longer than `older_than`)."""
+    return await repository.waiting_for_review_counts(session, older_than)
+
+
+async def reports_per_day(session: AsyncSession, since: Any) -> dict[Any, int]:
+    return await repository.reports_per_day(session, since)
