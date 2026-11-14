@@ -3,9 +3,10 @@
 Groups: every student sees the public groups ("General" first, then one per unit) and can join
 or leave them. A private group is only visible to its members and can't be joined from the app.
 
-Posts: anyone who can see a group can read its posts; only members can post. Only the author
-can edit; the author or an admin can delete (soft delete). New posts are published straight
-away for now (NEW_POST_STATUS); AI moderation will switch that to "pending".
+Posts and replies: anyone who can see a group can read them; only members can post or reply.
+Only the author can edit; the author or an admin can delete (soft delete). The post's author
+picks the accepted answer. New posts and replies are published straight away for now
+(NEW_CONTENT_STATUS); AI moderation will switch that to "pending".
 
 Rules:
   * SQL lives in `repository.py`, not here.
@@ -32,17 +33,20 @@ from api.modules.community.schemas import (
     PostDetailOut,
     PostOut,
     PostUpdate,
+    ReplyCreate,
     ReplyOut,
+    ReplyUpdate,
 )
 from api.modules.syllabus import service as syllabus_service
-from shared.db.models import CommunityGroup, Post
+from shared.db.models import CommunityGroup, Post, Reply
 from shared.enums import ModerationStatus
 
 MODULE_NAME = "community"
 
-# Decision (option A): publish new posts straight away and rely on reports. When AI moderation
-# (MODERATE_POST) is added, change this to ModerationStatus.PENDING.
-NEW_POST_STATUS = ModerationStatus.APPROVED
+# Decision (option A): publish new posts and replies straight away and rely on reports. When AI
+# moderation (MODERATE_POST) is added, change this to ModerationStatus.PENDING - and only count a
+# reply in the post's reply_count once it is approved.
+NEW_CONTENT_STATUS = ModerationStatus.APPROVED
 UNNAMED_AUTHOR = "Student"
 
 
@@ -212,7 +216,7 @@ async def create_post(
         body=req.body.strip(),
         tags=req.tags,
         is_question=req.is_question,
-        moderation_status=NEW_POST_STATUS,
+        moderation_status=NEW_CONTENT_STATUS,
     )
     await repository.add_post(session, post)
     await session.commit()
@@ -267,3 +271,90 @@ async def delete_post(session: AsyncSession, user: CurrentUser, post_id: uuid.UU
         raise ForbiddenError("Only the author can delete this post", code="NOT_POST_AUTHOR")
     row.post.deleted_at = clock.now()
     await session.commit()
+
+
+# =========================================================================== replies
+
+
+async def _require_member(session: AsyncSession, user: CurrentUser, post: Post) -> None:
+    """Only members of the post's group may reply (403 NOT_A_MEMBER)."""
+    if post.group_id is None:
+        return
+    group_row = await repository.get_group(session, post.group_id, user.id)
+    if group_row is None or group_row[1] is None:
+        raise ForbiddenError("Join the group to reply", code="NOT_A_MEMBER")
+
+
+async def _visible_reply(session: AsyncSession, user: CurrentUser, reply_id: uuid.UUID) -> ReplyRow:
+    """A reply the user may see, on a post the user may see, or 404 REPLY_NOT_FOUND."""
+    row = await repository.get_reply(session, reply_id, user.id)
+    if row is None:
+        raise NotFoundError("Reply not found", code="REPLY_NOT_FOUND")
+    try:
+        await _visible_post(session, user, row.reply.post_id)
+    except NotFoundError as exc:  # the post was deleted, or its group is private
+        raise NotFoundError("Reply not found", code="REPLY_NOT_FOUND") from exc
+    return row
+
+
+async def create_reply(
+    session: AsyncSession, user: CurrentUser, post_id: uuid.UUID, req: ReplyCreate
+) -> ReplyOut:
+    """POST /posts/{id}/replies. Members of the post's group only."""
+    post = (await _visible_post(session, user, post_id)).post
+    await _require_member(session, user, post)
+    reply = Reply(
+        post_id=post.id,
+        author_id=user.id,
+        body=req.body.strip(),
+        moderation_status=NEW_CONTENT_STATUS,
+    )
+    await repository.add_reply(session, reply)
+    if reply.moderation_status == ModerationStatus.APPROVED:  # only visible replies are counted
+        await repository.change_reply_count(session, post.id, +1)
+    await session.commit()
+    return reply_out(await _visible_reply(session, user, reply.id), user)
+
+
+async def update_reply(
+    session: AsyncSession, user: CurrentUser, reply_id: uuid.UUID, req: ReplyUpdate
+) -> ReplyOut:
+    """PATCH /replies/{id}: only the author (403 NOT_REPLY_AUTHOR)."""
+    row = await _visible_reply(session, user, reply_id)
+    if row.reply.author_id != user.id:
+        raise ForbiddenError("Only the author can edit this reply", code="NOT_REPLY_AUTHOR")
+    row.reply.body = req.body.strip()
+    await session.commit()
+    return reply_out(await _visible_reply(session, user, reply_id), user)
+
+
+async def delete_reply(session: AsyncSession, user: CurrentUser, reply_id: uuid.UUID) -> None:
+    """DELETE /replies/{id}: the author or an admin (soft delete). A deleted accepted answer is
+    no longer accepted, and the post's reply_count goes down."""
+    reply = (await _visible_reply(session, user, reply_id)).reply
+    if reply.author_id != user.id and not user.is_admin:
+        raise ForbiddenError("Only the author can delete this reply", code="NOT_REPLY_AUTHOR")
+    if reply.is_accepted:
+        await repository.set_accepted_reply(session, reply.post_id, None)
+    if reply.moderation_status == ModerationStatus.APPROVED:
+        await repository.change_reply_count(session, reply.post_id, -1)
+    reply.deleted_at = clock.now()
+    await session.commit()
+
+
+async def accept_reply(
+    session: AsyncSession, user: CurrentUser, post_id: uuid.UUID, reply_id: uuid.UUID | None
+) -> PostDetailOut:
+    """POST /posts/{id}/accept/{reply_id} (or DELETE /posts/{id}/accept with reply_id=None).
+    Only the post's author (403 NOT_POST_AUTHOR). The reply must be a visible reply of this
+    post (404 REPLY_NOT_FOUND). Accepting another reply replaces the old one."""
+    post = (await _visible_post(session, user, post_id)).post
+    if post.author_id != user.id:
+        raise ForbiddenError("Only the post's author can accept an answer", code="NOT_POST_AUTHOR")
+    if reply_id is not None:
+        reply = (await _visible_reply(session, user, reply_id)).reply
+        if reply.post_id != post.id or reply.moderation_status != ModerationStatus.APPROVED:
+            raise NotFoundError("Reply not found", code="REPLY_NOT_FOUND")
+    await repository.set_accepted_reply(session, post.id, reply_id)
+    await session.commit()
+    return await get_post(session, user, post_id)
