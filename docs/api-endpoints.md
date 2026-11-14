@@ -324,8 +324,10 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | POST | `/api/v1/groups/{id}/posts` | ✅ Create a post (members; published straight away for now; AI moderation later) |
 | GET | `/api/v1/posts/{id}` | ✅ Post with its replies |
 | PATCH / DELETE | `/api/v1/posts/{id}` | ✅ Edit my post / delete my post (admins can delete any) |
-| POST | `/api/v1/posts/{id}/replies` | Reply |
-| POST | `/api/v1/posts/{id}/accept/{reply_id}` | Mark the best answer (post author) |
+| POST | `/api/v1/posts/{id}/replies` | ✅ Reply (members of the post's group) |
+| PATCH / DELETE | `/api/v1/replies/{id}` | ✅ Edit my reply / delete my reply (admins can delete any) |
+| POST | `/api/v1/posts/{id}/accept/{reply_id}` | ✅ Mark the best answer (post author) |
+| DELETE | `/api/v1/posts/{id}/accept` | ✅ Un-mark the best answer (post author) |
 | POST | `/api/v1/votes` | Up/down vote a post or reply |
 | POST | `/api/v1/posts/{id}/report` | Report a post (and `/replies/{id}/report`) |
 

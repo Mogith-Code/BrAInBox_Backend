@@ -24,8 +24,11 @@ posts live under their group (`/groups/{id}/posts`).
 | GET | `/api/v1/posts/{id}` | ✅ done | Post with its replies (accepted answer first, then highest score). Not visible → 404 `POST_NOT_FOUND` |
 | PATCH | `/api/v1/posts/{id}` | ✅ done | Edit my post (send only the fields to change). Not mine → 403 `NOT_POST_AUTHOR` |
 | DELETE | `/api/v1/posts/{id}` | ✅ done | Delete my post (or any post as admin). Soft delete |
-| POST | `/api/v1/posts/{id}/replies` | planned | Reply |
-| POST | `/api/v1/posts/{id}/accept/{reply_id}` | planned | The post's author marks the best answer |
+| POST | `/api/v1/posts/{id}/replies` | ✅ done | Reply. Members of the post's group only → 403 `NOT_A_MEMBER` |
+| PATCH | `/api/v1/replies/{id}` | ✅ done | Edit my reply. Not mine → 403 `NOT_REPLY_AUTHOR`. Unknown → 404 `REPLY_NOT_FOUND` |
+| DELETE | `/api/v1/replies/{id}` | ✅ done | Delete my reply (or any reply as admin). Soft delete |
+| POST | `/api/v1/posts/{id}/accept/{reply_id}` | ✅ done | The post's author marks the best answer (replaces the old one). Returns the post with replies |
+| DELETE | `/api/v1/posts/{id}/accept` | ✅ done | The post's author un-marks it |
 | POST | `/api/v1/votes` | planned | +1 / -1 on a post or reply |
 | POST | `/api/v1/posts/{id}/report` | planned | Report a post (and `/replies/{id}/report` for a reply) |
 
@@ -51,11 +54,22 @@ Placeholder: `GET /api/v1/community/status` → `{"module": "community", "status
 - Authors are shown by display name only (`"Student"` when they have none); `author` is `null` for an AI suggested
   answer or a deleted account.
 
+### Replies and the accepted answer
+
+- Only **members** of the post's group reply; only the **author** edits; the author **or an admin** deletes
+  (soft delete). Replies follow the same "who sees what" rule as posts.
+- `reply_count` counts **visible** (approved) replies. It changes inside the database in the same transaction
+  as the reply / delete, so replies at the same moment are all counted, and it never goes below 0.
+- The **post's author** picks one accepted answer (`accepted_reply_id` on the post, `is_accepted` on the
+  reply). Accepting another reply replaces it; `DELETE /posts/{id}/accept` removes it. Deleting the accepted
+  reply removes the acceptance. A reply from another post → 404 `REPLY_NOT_FOUND`.
+
 ### Moderation (decision)
 
 **For now, new posts are published straight away** (`moderation_status = approved`) and students can report
 bad ones; reports go to `content_reports`, the admin moderation queue. This is one setting,
-`NEW_POST_STATUS` in `service.py`, so it can be switched later. Edits don't change the status.
+`NEW_CONTENT_STATUS` in `service.py` (posts and replies), so it can be switched later. Edits don't change the
+status.
 
 Later (AI step): a new post starts as `pending`, the `MODERATE_POST` job checks it (bullying, hate, sexual
 content, personal data, spam, cheating), then marks it `approved` or `flagged`. Flagged posts are hidden from
