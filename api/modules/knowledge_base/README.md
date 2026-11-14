@@ -28,3 +28,9 @@ Placeholder right now: `GET /api/v1/knowledge-base/status` → `{"module": "know
 
 Models live in `shared/db/models/`. Call other modules through their `service.py`, never their `repository.py`.
 Tests: `tests/api/test_knowledge_base.py`.
+
+## Admin model answers (built)
+
+`service.admin_list_model_answers / admin_create_model_answer / admin_set_keywords`, used by
+`admin/knowledge_admin.py` (`/admin/model-answers`). A model answer has marking points (`answer_points`), each with
+keywords (`keywords`). Tests: `tests/api/test_admin_model_answers.py`.
