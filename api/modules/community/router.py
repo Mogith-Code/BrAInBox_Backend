@@ -9,9 +9,13 @@
     GET    /api/v1/posts/{id}                 a post with its replies
     PATCH  /api/v1/posts/{id}                 edit my post
     DELETE /api/v1/posts/{id}                 delete my post (soft delete; admins too)
+    POST   /api/v1/posts/{id}/replies         reply (members of the post's group)
+    PATCH  /api/v1/replies/{id}               edit my reply
+    DELETE /api/v1/replies/{id}               delete my reply (soft delete; admins too)
+    POST   /api/v1/posts/{id}/accept/{reply}  the post's author marks the best answer
+    DELETE /api/v1/posts/{id}/accept          the post's author un-marks it
 
 Planned endpoints (details in README.md):
-    POST   /api/v1/posts/{id}/replies         Reply
     POST   /api/v1/votes                      Up/down vote a post or reply
     POST   /api/v1/posts/{id}/report          Report a post (and replies) to moderators
 
@@ -35,6 +39,9 @@ from api.modules.community.schemas import (
     PostDetailOut,
     PostOut,
     PostUpdate,
+    ReplyCreate,
+    ReplyOut,
+    ReplyUpdate,
 )
 
 router = APIRouter(tags=["Community"])
@@ -122,3 +129,59 @@ async def delete_post(post_id: uuid.UUID, user: CurrentUserDep, session: Session
     """The author or an admin. Soft delete: replies and votes stay, but nobody sees the post."""
     await service.delete_post(session, user, post_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------- replies
+
+
+@router.post(
+    "/posts/{post_id}/replies",
+    response_model=ReplyOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Reply to a post",
+)
+async def create_reply(
+    post_id: uuid.UUID, req: ReplyCreate, user: CurrentUserDep, session: SessionDep
+) -> ReplyOut:
+    """Members of the post's group only: 403 `NOT_A_MEMBER`. Published straight away for now."""
+    return await service.create_reply(session, user, post_id, req)
+
+
+@router.patch("/replies/{reply_id}", response_model=ReplyOut, summary="Edit my reply")
+async def update_reply(
+    reply_id: uuid.UUID, req: ReplyUpdate, user: CurrentUserDep, session: SessionDep
+) -> ReplyOut:
+    """Only the author: 403 `NOT_REPLY_AUTHOR`. 404 `REPLY_NOT_FOUND`."""
+    return await service.update_reply(session, user, reply_id, req)
+
+
+@router.delete(
+    "/replies/{reply_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete my reply"
+)
+async def delete_reply(reply_id: uuid.UUID, user: CurrentUserDep, session: SessionDep) -> Response:
+    """The author or an admin. A deleted accepted answer stops being accepted."""
+    await service.delete_reply(session, user, reply_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/posts/{post_id}/accept/{reply_id}",
+    response_model=PostDetailOut,
+    summary="Mark the best answer to my post",
+)
+async def accept_reply(
+    post_id: uuid.UUID, reply_id: uuid.UUID, user: CurrentUserDep, session: SessionDep
+) -> PostDetailOut:
+    """Only the post's author: 403 `NOT_POST_AUTHOR`. Accepting another reply replaces the old
+    one. The reply must belong to this post: 404 `REPLY_NOT_FOUND`."""
+    return await service.accept_reply(session, user, post_id, reply_id)
+
+
+@router.delete(
+    "/posts/{post_id}/accept", response_model=PostDetailOut, summary="Un-mark the best answer"
+)
+async def unaccept_reply(
+    post_id: uuid.UUID, user: CurrentUserDep, session: SessionDep
+) -> PostDetailOut:
+    """Only the post's author: 403 `NOT_POST_AUTHOR`."""
+    return await service.accept_reply(session, user, post_id, None)
