@@ -183,5 +183,48 @@ async def list_replies(
         .outerjoin(User, User.id == Reply.author_id)
         .where(Reply.post_id == post_id, _visible(Reply, user_id))
         .order_by(Reply.is_accepted.desc(), Reply.score.desc(), Reply.created_at, Reply.id)
+        .execution_options(populate_existing=True)  # is_accepted / score change in SQL
     )
     return [ReplyRow(*row) for row in result.all()]
+
+
+async def get_reply(
+    session: AsyncSession, reply_id: uuid.UUID, user_id: uuid.UUID
+) -> ReplyRow | None:
+    """A reply the user may see, or None. Fresh values (is_accepted / score change in SQL)."""
+    result = await session.execute(
+        select(Reply, User.display_name)
+        .outerjoin(User, User.id == Reply.author_id)
+        .where(Reply.id == reply_id, _visible(Reply, user_id))
+        .execution_options(populate_existing=True)
+    )
+    row = result.first()
+    return ReplyRow(*row) if row else None
+
+
+async def add_reply(session: AsyncSession, reply: Reply) -> None:
+    session.add(reply)
+    await session.flush()
+
+
+async def change_reply_count(session: AsyncSession, post_id: uuid.UUID, delta: int) -> None:
+    """Add delta to the post's reply_count inside the database (never below 0)."""
+    await session.execute(
+        update(Post)
+        .where(Post.id == post_id)
+        .values(reply_count=func.greatest(Post.reply_count + delta, 0))
+    )
+
+
+async def set_accepted_reply(
+    session: AsyncSession, post_id: uuid.UUID, reply_id: uuid.UUID | None
+) -> None:
+    """Make `reply_id` the post's only accepted reply (None = no accepted reply)."""
+    await session.execute(
+        update(Reply)
+        .where(Reply.post_id == post_id, Reply.is_accepted.is_(True))
+        .values(is_accepted=False)
+    )
+    if reply_id is not None:
+        await session.execute(update(Reply).where(Reply.id == reply_id).values(is_accepted=True))
+    await session.execute(update(Post).where(Post.id == post_id).values(accepted_reply_id=reply_id))
