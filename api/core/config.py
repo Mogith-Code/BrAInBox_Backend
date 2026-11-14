@@ -16,6 +16,8 @@ class ApiSettings(SharedSettings):
 
     # Comma-separated list. "*" is allowed inside an entry, e.g. "http://localhost:*"
     CORS_ORIGINS: str = "http://localhost:*,http://127.0.0.1:*"
+    # Extra origins for the deployed admin portal, e.g. "https://admin.brainbox.lk" (comma-separated)
+    ADMIN_ORIGINS: str = ""
 
     # How AI jobs are run: "local" (FastAPI BackgroundTasks) or "cloudtasks" (Google Cloud Tasks)
     JOB_RUNNER: str = "local"
@@ -75,7 +77,8 @@ class ApiSettings(SharedSettings):
         return "^(" + "|".join(patterns) + ")$" if patterns else None
 
     def _cors_list(self) -> list[str]:
-        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+        origins = f"{self.CORS_ORIGINS},{self.ADMIN_ORIGINS}"
+        return [o.strip() for o in origins.split(",") if o.strip()]
 
 
 @lru_cache

@@ -44,3 +44,30 @@ async def delete_user(uid: str) -> None:
         raise ServiceUnavailableError(
             "Could not delete the account. Please try again.", code="FIREBASE_ERROR"
         ) from exc
+
+
+async def set_disabled(uid: str, disabled: bool) -> None:
+    """Disable (suspend) or enable a Firebase account, so the user cannot get new tokens.
+
+    A user with no Firebase account (e.g. demo data) is only changed in our database. In dev
+    without Firebase configured this is skipped with a warning.
+    """
+    from firebase_admin import auth as firebase_auth
+
+    from api.core.config import get_settings
+
+    settings = get_settings()
+    if not settings.FIREBASE_PROJECT_ID and settings.ENVIRONMENT in {"dev", "test"}:
+        logger.warning("Firebase not configured: %s only changed in the database", uid)
+        return
+    try:
+        await run_in_threadpool(
+            firebase_auth.update_user, uid, app=_get_firebase_app(), disabled=disabled
+        )
+    except firebase_auth.UserNotFoundError:
+        logger.info("Firebase user %s does not exist; only the database is changed", uid)
+    except Exception as exc:
+        logger.error("Firebase set_disabled failed for %s: %s", uid, type(exc).__name__)
+        raise ServiceUnavailableError(
+            "Could not update the account. Please try again.", code="FIREBASE_ERROR"
+        ) from exc
