@@ -8,11 +8,9 @@ Implemented:
     POST   /api/v1/topics/{topic_id}/start                 Mark a topic as started (Learn)
     GET    /api/v1/mistakes                                My mistakes (filter by type/unit/status)
     PATCH  /api/v1/mistakes/{id}                           Mark a mistake fixed or open again
-    (service) record_mistakes() called by quizzes/exams after marking
-
-Planned endpoints (details in README.md):
-    GET    /api/v1/insights/concepts                       Weakest concepts
-    (service) update_mastery() called by quizzes/exams/evaluation
+    GET    /api/v1/insights/concepts                       Score per concept, weakest first (own data)
+    (service) after_attempt_marked() called by quizzes/exams after marking: records mistakes,
+              unit + concept mastery and Learn progress
 
 Rule: routers only validate input, check the role and call `service`. No SQL here.
 """
@@ -27,6 +25,7 @@ from api.core.pagination import Page, PageParamsDep
 from api.core.security import CurrentUserDep
 from api.modules.performance import service
 from api.modules.performance.schemas import (
+    ConceptInsightsResponse,
     InsightsSummaryResponse,
     MistakeOut,
     MistakeUpdate,
@@ -70,6 +69,17 @@ async def unit_insights(user: CurrentUserDep, session: SessionDep) -> UnitInsigh
     """Every current unit, Unit 1 first, with the newest mastery (0-100) and its grade.
     A unit never measured has `mastery: null` and status `not_attempted` (never 0 %)."""
     return await service.get_unit_insights(session, user)
+
+
+@router.get(
+    "/insights/concepts",
+    response_model=ConceptInsightsResponse,
+    summary="My score per concept (sub-topic), weakest first",
+)
+async def concept_insights(user: CurrentUserDep, session: SessionDep) -> ConceptInsightsResponse:
+    """Concepts come from questions linked to them. `linked_answers: 0` means the questions I
+    answered aren't linked to concepts yet, so the list is empty for that reason."""
+    return await service.get_concept_insights(session, user)
 
 
 @router.get(
