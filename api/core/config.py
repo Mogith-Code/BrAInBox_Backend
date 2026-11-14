@@ -31,6 +31,10 @@ class ApiSettings(SharedSettings):
     # Dev only: return the code in the API response ("dev_code") so you can test without email.
     # Works ONLY when ENVIRONMENT=dev; ignored everywhere else.
     DEV_EXPOSE_CODES: bool = False
+    # Dev only: accept "Bearer dev-token" (test student) / "Bearer dev-admin" (test admin) in /docs,
+    # for requests from this computer, so you can test without Firebase. ENVIRONMENT must be dev:
+    # the api refuses to start with this on anywhere else (api/main.py).
+    DEV_LOGIN_ENABLED: bool = False
 
     # --- Email sending: "console" (prints to the log, dev) or "smtp"
     EMAIL_BACKEND: str = "console"

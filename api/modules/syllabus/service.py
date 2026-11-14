@@ -4,6 +4,16 @@ Student syllabus tree (read-only): units -> topics -> concepts. Lists show the C
 syllabus only (`is_outdated` rows are hidden). A single topic can still be opened by id when
 it is outdated, because old notes and questions link to it; the response says so.
 
+Learn navigation (Samni): subject -> units -> topics -> sub-topics, with the current student's
+progress from `user_topic_progress`:
+    * topic: status / score / is_weak from the student's row (no row = not started, 0, False)
+    * unit:  progressPct = average topic score (topics without a row count as 0),
+             status = not_started (no activity in any topic), otherwise
+             strong (>= 75) | improving (40..74) | weak (< 40)
+
+Progress is only READ here. performance.service writes it (performance imports this module, so
+this module must not import performance).
+
 Rules:
   * SQL lives in `repository.py`, not here.
   * To use another module, call ITS service (e.g. `from api.modules.syllabus import service`),
@@ -20,33 +30,32 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.errors import AppError, ConflictError, NotFoundError
+from api.core.security import CurrentUser
 from api.modules.syllabus import repository
 from api.modules.syllabus.schemas import (
     AdminConceptOut,
     AdminTopicOut,
     AdminUnitOut,
     ConceptCreate,
-    ConceptOut,
     ConceptUpdate,
-    ModuleStatus,
+    LearnUnitOut,
+    SubtopicOut,
     TopicCreate,
     TopicDetailOut,
     TopicOut,
     TopicUpdate,
     UnitCreate,
     UnitOut,
-    UnitRef,
+    UnitStatus,
     UnitTopicsOut,
+    UnitTopicsSummary,
     UnitUpdate,
 )
-from shared.db.models import Concept, Topic, Unit
+from shared.db.models import Concept, Topic, Unit, UserTopicProgress
+from shared.enums import TopicProgressStatus
 
-MODULE_NAME = "syllabus"
-
-
-async def get_status() -> ModuleStatus:
-    """Placeholder used by the status route."""
-    return ModuleStatus(module=MODULE_NAME, status="todo")
+STRONG_FROM = 75  # unit average >= 75 -> "strong"
+IMPROVING_FROM = 40  # unit average 40..74 -> "improving", below -> "weak"
 
 
 @dataclass
@@ -58,6 +67,16 @@ class TopicInfo:
     unit_id: uuid.UUID
     unit_title: str
     unit_number: int = 0  # e.g. 6 for Unit 6 (added for visuals: "unit_code")
+    code: str | None = None  # public code, e.g. "bio-6.1" (set by resolve_topic)
+
+
+async def resolve_topic(session: AsyncSession, topic_ref: str) -> TopicInfo:
+    """A topic by its public code or UUID, outdated ones included. 404 TOPIC_NOT_FOUND."""
+    row = await repository.get_topic_with_unit(session, parse_ref(topic_ref))
+    if row is None:
+        raise NotFoundError(f"Topic '{topic_ref}' not found", code="TOPIC_NOT_FOUND")
+    topic, unit = row
+    return TopicInfo(topic.id, topic.title, unit.id, unit.title, unit.number, topic.code)
 
 
 async def get_topics(session: AsyncSession, topic_ids: list[uuid.UUID]) -> list[TopicInfo]:
@@ -131,49 +150,124 @@ async def get_units(session: AsyncSession) -> list[UnitOut]:
     return [_unit_out(unit, count) for unit, count in rows]
 
 
-async def get_unit_topics(session: AsyncSession, unit_id: uuid.UUID) -> UnitTopicsOut:
-    """GET /units/{id}/topics: the unit and its current topics. Outdated units are not found."""
-    unit = await repository.get_unit(session, unit_id)
-    if unit is None or unit.is_outdated:
-        raise NotFoundError("Unit not found", code="UNIT_NOT_FOUND")
-    rows = await repository.list_current_topics_with_concept_counts(session, unit_id)
-    topics = [
-        TopicOut(
-            id=topic.id,
-            number=topic.number,
-            title=topic.title,
-            description=topic.description,
-            concept_count=count,
-        )
-        for topic, count in rows
-    ]
-    return UnitTopicsOut(unit=_unit_out(unit, len(topics)), topics=topics)
+# --------------------------------------------------------------------------- pure helpers
 
 
-async def get_topic_detail(session: AsyncSession, topic_id: uuid.UUID) -> TopicDetailOut:
-    """GET /topics/{id}: one topic with its unit and current concepts."""
-    found = await repository.get_topic_with_unit(session, topic_id)
-    if found is None:
-        raise NotFoundError("Topic not found", code="TOPIC_NOT_FOUND")
-    topic, unit = found
-    concepts = await repository.list_current_concepts(session, topic_id)
-    return TopicDetailOut(
-        id=topic.id,
-        number=topic.number,
+def parse_ref(value: str) -> repository.Ref:
+    """A path parameter is either a UUID or a public code ("u6", "bio-6.1")."""
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return value
+
+
+def unit_status(progress_pct: int, started: bool) -> UnitStatus:
+    """`started` = the student has activity in at least one topic of the unit."""
+    if not started:
+        return "not_started"
+    if progress_pct >= STRONG_FROM:
+        return "strong"
+    if progress_pct >= IMPROVING_FROM:
+        return "improving"
+    return "weak"
+
+
+def unit_out(unit: Unit, topic_count: int, average_score: float, started: bool) -> LearnUnitOut:
+    progress_pct = round(average_score)
+    return LearnUnitOut(
+        id=unit.code or str(unit.id),
+        uuid=unit.id,
+        number=unit.number,
+        title=unit.title,
+        periods=unit.periods,
+        icon=unit.icon,
+        topic_count=topic_count,
+        progress_pct=progress_pct,
+        status=unit_status(progress_pct, started),
+    )
+
+
+def topic_out(
+    topic: Topic, progress: UserTopicProgress | None, concepts: list[Concept]
+) -> TopicOut:
+    return TopicOut(
+        id=topic.code or str(topic.id),
+        uuid=topic.id,
+        code=topic.number,
         title=topic.title,
-        description=topic.description,
+        order=topic.order_index,
+        status=progress.status if progress else TopicProgressStatus.NOT_STARTED,
+        progress_pct=progress.score if progress else 0,
+        is_weak=progress.is_weak if progress else False,
+        subtopics=[SubtopicOut(id=c.code or str(c.id), title=c.name) for c in concepts],
+    )
+
+
+def summarise_topics(topics: list[TopicOut]) -> UnitTopicsSummary:
+    return UnitTopicsSummary(
+        mastered=sum(1 for t in topics if t.status == TopicProgressStatus.MASTERED),
+        weak=sum(1 for t in topics if t.is_weak),
+    )
+
+
+def _group_by_topic(concepts: list[Concept]) -> dict[uuid.UUID, list[Concept]]:
+    grouped: dict[uuid.UUID, list[Concept]] = {}
+    for concept in concepts:
+        grouped.setdefault(concept.topic_id, []).append(concept)
+    return grouped
+
+
+# --------------------------------------------------------------------------- endpoints
+
+
+async def list_subject_units(
+    session: AsyncSession, user: CurrentUser, subject_ref: str
+) -> list[LearnUnitOut]:
+    """Units of a subject with the student's progress. 404 SUBJECT_NOT_FOUND."""
+    subject = await repository.get_subject(session, parse_ref(subject_ref))
+    if subject is None:
+        raise NotFoundError(f"Subject '{subject_ref}' not found", code="SUBJECT_NOT_FOUND")
+    rows = await repository.list_units_with_scores(session, subject.id, user.id)
+    return [
+        unit_out(unit, count, average, started_count > 0)
+        for unit, count, average, started_count in rows
+    ]
+
+
+async def list_unit_topics(
+    session: AsyncSession, user: CurrentUser, unit_ref: str
+) -> UnitTopicsOut:
+    """Topics of a unit (with sub-topics and the student's progress). 404 UNIT_NOT_FOUND."""
+    unit = await repository.get_unit(session, parse_ref(unit_ref))
+    if unit is None or unit.is_outdated:
+        raise NotFoundError(f"Unit '{unit_ref}' not found", code="UNIT_NOT_FOUND")
+    rows = await repository.list_topics_with_progress(session, unit.id, user.id)
+    concepts = _group_by_topic(await repository.list_concepts(session, [t.id for t, _ in rows]))
+    topics = [topic_out(topic, progress, concepts.get(topic.id, [])) for topic, progress in rows]
+
+    average = sum(t.progress_pct for t in topics) / len(topics) if topics else 0.0
+    started = any(t.status != TopicProgressStatus.NOT_STARTED for t in topics)
+    return UnitTopicsOut(
+        unit=unit_out(unit, len(topics), average, started),
+        summary=summarise_topics(topics),
+        topics=topics,
+    )
+
+
+async def get_topic(session: AsyncSession, user: CurrentUser, topic_ref: str) -> TopicDetailOut:
+    """One topic with its sub-topics and the student's progress. 404 TOPIC_NOT_FOUND."""
+    row = await repository.get_topic_with_unit(session, parse_ref(topic_ref))
+    if row is None:
+        raise NotFoundError(f"Topic '{topic_ref}' not found", code="TOPIC_NOT_FOUND")
+    topic, unit = row
+    progress = await repository.get_progress(session, topic.id, user.id)
+    concepts = await repository.list_concepts(session, [topic.id])
+    return TopicDetailOut(
+        **topic_out(topic, progress, concepts).model_dump(),
         is_outdated=topic.is_outdated,
-        unit=UnitRef(id=unit.id, number=unit.number, title=unit.title),
-        concepts=[
-            ConceptOut(
-                id=c.id,
-                code=c.code,
-                name=c.name,
-                description=c.description,
-                learning_outcome=c.learning_outcome,
-            )
-            for c in concepts
-        ],
+        unit_id=unit.code or str(unit.id),
+        unit_number=unit.number,
+        unit_title=unit.title,
     )
 
 

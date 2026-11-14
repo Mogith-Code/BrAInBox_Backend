@@ -10,8 +10,8 @@ python scripts/seed_dev.py --with-samples         # syllabus, groups, settings, 
 docker compose exec api python -m scripts.seed_dev --with-samples    # same, inside Docker
 ```
 
-Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation`.
-53 app tables (54 with Alembic's own `alembic_version`).
+Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation` -> `0005_learn_navigation`.
+55 app tables (56 with Alembic's own `alembic_version`).
 
 ---
 
@@ -59,9 +59,12 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 ### `syllabus.py` - Keshomigha
 | Table | Purpose |
 |---|---|
-| `units` | The 10 units. `number` (1-10) is the code and the display order; `exam_weight` = past-paper weight. |
-| `topics` | Topics in a unit, `number` like `"6.2"`. |
-| `concepts` | Ideas inside a topic, `code` like `"6.2.1"`, with an embedding. |
+| `subjects` | A subject, e.g. Biology at G.C.E. A/L. `code` like `"biology"`. |
+| `units` | The 10 units. `number` (1-10) is the display order; `code` like `"u6"`; `exam_weight` = past-paper weight; `periods` and `icon` for the Learn screens. |
+| `topics` | Topics in a unit, `number` like `"6.2"`, `code` like `"bio-6.1"`. |
+| `concepts` | Ideas (sub-topics) inside a topic, `code` like `"bio-6.1.1"`, with an embedding. |
+
+`code` is the public id the app navigates with (set by `scripts/seed_syllabus.py`, unique, nullable for rows created before migration 0005).
 
 ### `content.py` - Samni
 | Table | Purpose |
@@ -116,6 +119,7 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 | `unit_mastery` | **History** of unit mastery (0-100): every diagnostic/quiz adds rows. Current = newest row per unit. |
 | `mastery_snapshots` | Overall mastery (0-100) per student per day, for weekly progress. |
 | `study_activity` | One row per student per study day (streak), with minutes and actions. |
+| `user_topic_progress` | One student's progress with one topic (Learn screens): status, score (0-100), is_weak. Unique per (user, topic). Written only by `performance.service`: recomputed from the student's answers when a paper or diagnostic is submitted, or set to `in_progress` by `POST /topics/{id}/start`. No row = not started. |
 
 ### `recommendation.py` - Udith (daily plan: Mogith)
 | Table | Purpose |

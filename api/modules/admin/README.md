@@ -21,7 +21,7 @@ Everything here is mounted under **`/api/v1/admin`** and requires role **`admin`
 | `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
 | `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
 | `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts manager (details in `syllabus/README.md`) |
-| `analytics_admin.py` | Keshomigha | `/admin/analytics` | usage, performance, AI cost |
+| `analytics_admin.py` | Keshomigha | `/admin/analytics` | ✅ usage, performance, AI usage (details in `performance/README.md`) |
 | `moderation_admin.py` | Mogith | `/admin/moderation` | reports queue (posts, replies, visuals) |
 | `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
 

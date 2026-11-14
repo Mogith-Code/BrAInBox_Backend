@@ -310,6 +310,7 @@ async def submit_diagnostic(
     await performance_service.record_unit_mastery(
         session, user_id, marked.mastery_by_unit_id, source="diagnostic"
     )
+    await performance_service.refresh_topic_progress(session, user_id)
     await session.commit()
     return _result(attempt, marked)
 
