@@ -316,15 +316,18 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/groups` | List groups |
-| POST | `/api/v1/groups` | Create a group |
-| POST | `/api/v1/groups/{id}/join` | Join a group |
-| GET | `/api/v1/posts` | Feed (filter by group/topic/tag) |
-| POST | `/api/v1/posts` | Create a post -> MODERATE_POST + SUGGEST_ANSWER jobs |
+| GET | `/api/v1/groups` | ✅ Groups I can see (General first, then units), with `is_member` and `member_count` |
+| GET | `/api/v1/groups/{id}` | ✅ One group (UUID or slug, e.g. `unit-6`) |
+| POST | `/api/v1/groups/{id}/join` | ✅ Join a group (safe to repeat) |
+| DELETE | `/api/v1/groups/{id}/join` | ✅ Leave a group (safe to repeat) |
+| GET | `/api/v1/groups/{id}/posts` | Feed of a group |
+| POST | `/api/v1/groups/{id}/posts` | Create a post (published straight away for now; AI moderation later) |
 | GET | `/api/v1/posts/{id}` | Post with replies |
+| PATCH / DELETE | `/api/v1/posts/{id}` | Edit / delete my own post |
 | POST | `/api/v1/posts/{id}/replies` | Reply |
+| POST | `/api/v1/posts/{id}/accept/{reply_id}` | Mark the best answer (post author) |
 | POST | `/api/v1/votes` | Up/down vote a post or reply |
-| POST | `/api/v1/reports` | Report a post or reply |
+| POST | `/api/v1/posts/{id}/report` | Report a post (and `/replies/{id}/report`) |
 
 ## jobs — shared
 
