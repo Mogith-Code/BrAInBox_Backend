@@ -14,6 +14,7 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["USE_FAKE_AI"] = "true"
 os.environ["AI_SERVICE_TOKEN"] = "test-service-token"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["DEV_LOGIN_ENABLED"] = "false"
 if os.environ.get("TEST_DATABASE_URL"):
     os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
