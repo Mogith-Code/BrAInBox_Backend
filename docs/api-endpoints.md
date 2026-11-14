@@ -336,14 +336,140 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 
 | File | Owner | Prefix | Planned endpoints |
 |---|---|---|---|
-| `content_admin.py` | Samni | `/admin/content` | notes CRUD, approve/reject, trigger note generation |
-| `rag_admin.py` | Samni | `/admin/rag` | `POST /documents` (upload + RAG_INGEST job), `GET /documents`, `POST /documents/{id}/reindex` |
-| `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
-| `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
+| `dashboard_admin.py` | Samni | `/admin/dashboard` | ✅ dashboard: KPIs, 14-day activity, newest reports, most missed topics (below) |
+| `content_admin.py` | Samni | `/admin/content` | ✅ content library: notes, short notes, diagrams; approve / reject / edit (below) |
+| `rag_admin.py` | Samni | `/admin/rag` | ✅ `GET/POST /sources`, `POST /reindex` (below); `/documents` are older placeholders |
+| `questions_admin.py` | Udith | `/admin/questions` | ✅ question bank + editor, quality review, past papers (below) |
+| `knowledge_admin.py` | Keshomigha | `/admin/model-answers` | ✅ model answers, marking points, keywords (below) |
 | `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts: list (outdated included), add, edit, mark outdated; delete only empty + unused topics/concepts (units are never deleted) |
 | `analytics_admin.py` | Keshomigha | `/admin/analytics` | ✅ `GET /overview`, `/performance`, `/ai-usage` (all with `?days=`, default 30): student activity, average mastery per unit, most-missed topics, misconceptions, AI requests per feature and day |
-| `moderation_admin.py` | Mogith | `/admin/moderation` | ✅ `GET /reports` (visual reports with `visual_title` + `image_url`); planned: posts, replies, resolve |
-| `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
+| `moderation_admin.py` | Mogith | `/admin/moderation`, `/admin/community` | ✅ reports queue (posts, replies, visuals) + resolve, study groups (below) |
+| `users_admin.py` | Mogith | `/admin/users` | ✅ Students list + suspend / reinstate (below) |
+
+### Admin: students (`users_admin.py`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/users?search=&exam_year=&status=active\|suspended\|inactive&district=&page=&page_size=` | ✅ `{items: [{id, full_name, email, school, district, exam_year, avg_mastery (0-100 or null), status, last_active_at}], total, active_total}`. Students only; `search` = name or email, any case; `page_size` 1-100 (default 20) |
+| PATCH | `/api/v1/admin/users/{id}` | ✅ `{is_active}` → the row. `false` suspends (Firebase account disabled too, the student gets `USER_DISABLED`), `true` reinstates |
+
+`status`: **suspended** = `is_active` false (wins over the others) · **inactive** = no study activity for 30+ days
+(counted from sign-up if they never studied) · **active** = the rest. `active_total` = active students matching
+the filters, ignoring `status`. `avg_mastery` = average of the newest mastery per unit. Every change is written to `audit_log`.
+
+### Admin: moderation + study groups (`moderation_admin.py`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/moderation/reports` | ✅ Open reports, **one item per reported target**, oldest first: `[{id, target_type: post\|reply\|visual, target_id, reason, details, author_handle, group_name, text, visual_title, image_url, ai_flag_label, ai_flag_score (0-1 or null), report_count, created_at}]`. `id` = the oldest open report |
+| POST | `/api/v1/admin/moderation/reports/{id}/resolve` | ✅ `{action: keep\|warn\|remove}` → 204. Closes every open report of that target. keep = dismiss · warn = in-app notification to the author + dismiss · remove = hide the post / reply (`moderation_status: removed`) or visual (`status: rejected`) |
+| GET | `/api/v1/admin/community/groups` | ✅ `[{id, name, members, moderator_name (null = none), is_open}]`, by name |
+| POST | `/api/v1/admin/community/groups` | ✅ `{name}` (2-120 characters) → 201 the group |
+
+### Admin: content library (`content_admin.py`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/content?type=note\|short_note\|diagram&status=&unit=` | ✅ `[{id, title, type, syllabus_code ("5.4"), unit_number, status, is_ai_generated, model, prompt_version, body_markdown, image_url, auto_check, updated_at}]`, last changed first (max 200). No `status`: notes in every status except archived + diagrams waiting for review (draft / pending_review) |
+| POST | `/api/v1/admin/content/{id}/approve` | ✅ optional `{note}` → the item. A diagram becomes `approved` (shared, `is_verified`); an older approved note of the same topic + kind is archived |
+| POST | `/api/v1/admin/content/{id}/reject` | ✅ optional `{note}` → the item (`rejected`) |
+| PATCH | `/api/v1/admin/content/{id}` | ✅ `{body_markdown}` → the note (version + 1). Diagrams: 409 `CONTENT_NOT_EDITABLE` |
+
+`auto_check` is one sentence from the automatic checks (e.g. "No syllabus sources were cited..."), or null.
+Diagrams' `body_markdown` is their Mermaid code in a mermaid code block.
+
+### Admin: question bank + editor (`questions_admin.py`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/questions?unit=&type=mcq\|structured\|essay&difficulty=easy\|medium\|hard&status=&page=&page_size=` | ✅ `{items: [{id, code ("Q-1042"), stem, unit_number, topic_title, type, difficulty, source_year, is_ai_generated, status}], total, past_paper_percent}`, newest first. `status`: draft \| pending_review \| approved \| rejected \| archived \| outdated; without it archived ones are hidden |
+| POST | `/api/v1/admin/questions/bulk` | ✅ `{ids (1-200), action: approve\|mark_outdated\|delete}` → 204. All or nothing. `delete` removes unused questions and **archives** ones students answered |
+| GET | `/api/v1/admin/questions/{id}` | ✅ `{id, code, stem, type, difficulty, unit_id, topic_id, concept_id, explanation, status, is_ai_generated, options: [{label A-E, text, is_correct, misconception}]}` |
+| POST | `/api/v1/admin/questions` | ✅ the same body without `id` / `code` → 201 the question |
+| PUT | `/api/v1/admin/questions/{id}` | ✅ the same body → the question. Options are updated in place by label, so students' saved answers keep pointing at them |
+
+Publishing (`status: "approved"`, or bulk approve) needs, for an MCQ: text on every option, exactly one correct option,
+and a misconception on every wrong one. Otherwise 422 `QUESTION_INCOMPLETE` with the problems in
+`details: [{field: "options.D.misconception", message}]`. Misconceptions are stored in `misconceptions` (one row per
+text and concept, reused) and linked from `mcq_options.misconception_id`. `unit_id` / `topic_id` / `concept_id` must
+belong together; a missing unit or topic is filled in from the level below. Outdated questions are hidden from students.
+
+### Admin: quality review (`questions_admin.py` → quality module)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/questions/quality` | ✅ `{in_queue, auto_check_failed, with_student_reports, avg_review_minutes, items: [{id, code, stem, unit_number, topic_code, checks: [{name, result: pass\|review\|fail, note}], student_reports: [{text, count}]}]}`. Items = AI questions waiting for review, oldest first |
+| POST | `/api/v1/admin/questions/{id}/review` | ✅ `{approve}` → 204. true = approved (same publish rules as the editor), false = rejected. Saved as an admin `question_reviews` row |
+
+The four checks, always in this order: **Single correct answer**, **Distractor quality**, **Syllabus match**,
+**Duplicate check**. The newest AI review (`question_reviews.checks`, written by the REVIEW_QUESTIONS job) is used
+when it has the check. Otherwise "Single correct answer" and "Duplicate check" are worked out from the data, and
+the other two are `review` ("Not checked by the AI reviewer yet."). `avg_review_minutes` = average time from a
+question's creation to an admin's decision over the last 30 days (null = none yet).
+
+### Admin: past papers (`questions_admin.py`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/questions/past-papers` | ✅ `[{id, year, paper_type: paper_1_mcq\|paper_2_structured, scheme_linked, extraction: done\|running\|low_confidence\|failed, questions_extracted, progress (0-1), low_confidence, outdated_syllabus}]`, newest year first |
+| POST | `/api/v1/admin/questions/past-papers` | ✅ multipart: `file` (PDF ≤ 40 MB), `year` (1990-2100), `paper_type`, optional `scheme` (marking scheme PDF) → 201 the paper with `extraction: "running"`. An EXTRACT_PAST_PAPER job runs in the background |
+| GET | `/api/v1/admin/questions/past-papers/{id}/questions` | ✅ `[{id, label ("Q3 (b)"), marks, text, ocr_confidence (0-1), model_answer, keywords, suggested_keywords}]` in paper order |
+| PUT | `/api/v1/admin/questions/past-papers/questions/{id}` | ✅ `{model_answer, keywords}` → the question (keywords trimmed, no repeats) |
+
+Extraction (ai_service `pipelines/questions/past_paper_extract.py`, no LLM, free): PDF text layer + Tesseract OCR
+for scanned pages → split at numbered questions ("12." / "12)"); Paper 2 is split again into parts "(a)", "(b)".
+Marks come from "(4 marks)". `ocr_confidence` = share of normal-looking words; below 0.8 counts as
+`low_confidence`. Progress: 0 queued → 0.2 reading → 0.9 saving → 1 done. The file type is checked from the bytes
+(`%PDF-`), because Flutter web uploads PDFs as `application/octet-stream`.
+
+### Admin: dashboard (`dashboard_admin.py`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/dashboard` | ✅ `{title: "Dashboard", message: null, batch_label: "A/L 2027 batch", kpis: [{kind, label, value, delta, trend: good\|bad\|warning, sparkline: [8 ints]}], activity: {day_labels: [14], quizzes: [14], notes_generated: [14]}, recent_reports: [{title, subtitle, meta, severity: high\|medium\|null}], missed_topics_attempts, missed_topics: [{topic, unit ("Unit 6 · Genetics"), miss_rate (0-1), attempts, top_misconception}]}` |
+
+| KPI `kind` | `value` | `delta` / `trend` | `sparkline` (last 8 days) |
+|---|---|---|---|
+| `students` | students with study activity in the last 7 days | % vs the 7 days before; bad if down | active students per day |
+| `quizzes` | quizzes / papers / diagnostics finished today | difference vs yesterday | finished per day |
+| `aiReview` (camelCase on purpose) | AI questions + notes + diagrams waiting for review | "N older than 48h"; `warning` if N > 0 | AI questions + notes made per day |
+| `reports` | open moderation items (one per reported target) | new reports today vs yesterday; bad if up | new reports per day |
+
+`batch_label` = the exam year most students chose. `recent_reports` = the 5 newest open moderation items
+(severity high: 3+ reports, AI score ≥ 0.9 or "offensive"; medium: 2 reports or AI score ≥ 0.7).
+`missed_topics` = the 5 most missed topics of the last 30 days (same rule as `/admin/analytics/performance`) with
+the misconception chosen most often there; `missed_topics_attempts` = all MCQ answers in those 30 days.
+Admins' own activity is never counted. Day labels use Sri Lanka dates.
+
+### Admin: MCQ → misconception mapping (`questions_admin.py`, placeholder screen in the app)
+
+| Method | Path | Description |
+|---|---|---|
+| PUT | `/api/v1/admin/options/{option_id}/misconception` | ✅ `{misconception: "..." \| null}` → `{option_id, question_id, question_code, label, text, is_correct, misconception}`. null / "" removes the link; the same text is stored once per concept in `misconceptions` and reused |
+
+### Admin: knowledge base / model answers (`knowledge_admin.py`, placeholder screen in the app)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/model-answers?question_id=&status=` | ✅ `[ModelAnswerOut]`, last changed first (max 200) |
+| POST | `/api/v1/admin/model-answers` | ✅ `{question_id, answer_text, source: marking_scheme\|admin\|ai, status: draft\|approved, points: [{text, marks, keywords: [..]}]}` → 201 `ModelAnswerOut`. One model answer per question |
+| PUT | `/api/v1/admin/model-answers/{answer_id}/keywords` | ✅ `{points: [{point_id, keywords: [..]}]}` → `ModelAnswerOut`. Replaces the keywords of the listed points; other points keep theirs |
+
+`ModelAnswerOut`: `{id, question_id, question_code, question_stem, answer_text, total_marks (sum of the points), source,
+status, points: [{id, text, marks, keywords (A-Z)}], updated_at}`. Keywords are trimmed and de-duplicated (any case).
+
+### Admin: RAG sources (`rag_admin.py`, placeholder screen in the app)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/rag/sources` | ✅ `[{id, title, source_type, unit_number, year, status: pending\|ingesting\|ready\|failed, chunk_count, page_count, error_message, indexed_at, updated_at}]` |
+| POST | `/api/v1/admin/rag/sources` | ✅ multipart `file` (PDF / DOCX / TXT / MD, ≤ 40 MB), `title`, `source_type`, optional `unit_number`, `year` → 202 `{job_id, document_id}` (RAG_INGEST job) |
+| POST | `/api/v1/admin/rag/reindex` | ✅ optional `{document_id}` → 202 `{job_id, document_id}`. No id = every document in one job (`{"all": true}`) |
+
+Poll `GET /api/v1/jobs/{job_id}` for the job. Note: the ai_service reads the file from its own disk, so ingestion
+works in dev (files under `LOCAL_STORAGE_DIR`); with `STORAGE_BUCKET` set, downloading the file in the ai_service is
+still a TODO (`ai_service/rag/ingestion/pipeline.py`). The older placeholder routes `/admin/rag/documents` still exist.
+
 
 ## Error codes (for the app's `ErrorMessages`)
 
@@ -361,6 +487,30 @@ Failed AI jobs return `status: "failed"` with `error` (a sentence) and `error_co
 | `AI_SERVICE_UNAVAILABLE` | 503 / job `error_code` | all AI features | the AI is busy or down; try again later |
 | `AI_DAILY_LIMIT` | 422 / job `error_code` | all AI features | today's free AI allowance (whole app) is used up; try tomorrow |
 | `FILE_NOT_FOUND` | 404 | visuals (dev file route) | no such stored image |
+| `USER_NOT_FOUND` | 404 | admin users | unknown user id |
+| `CANNOT_SUSPEND_SELF` | 400 | admin users | an admin tried to suspend their own account |
+| `FIREBASE_ERROR` | 503 | admin users, auth | Firebase could not update the account; nothing was changed |
+| `REPORT_NOT_FOUND` | 404 | admin moderation | unknown report id |
+| `REPORT_ALREADY_RESOLVED` | 409 | admin moderation | the report was closed already |
+| `GROUP_NAME_TAKEN` | 409 | admin community groups | a group with this name (any case) exists |
+| `CONTENT_NOT_FOUND` | 404 | admin content | no note or visual with this id |
+| `CONTENT_NOT_EDITABLE` | 409 | admin content | diagrams can't be edited as text |
+| `QUESTION_NOT_FOUND` | 404 | questions, admin questions | unknown question id |
+| `QUESTION_INCOMPLETE` | 422 | admin questions | can't publish yet; `details` lists the missing fields |
+| `UNIT_NOT_FOUND` / `CONCEPT_NOT_FOUND` | 404 | admin questions | unknown unit / concept id in the editor |
+| `SYLLABUS_MISMATCH` | 422 | admin questions | the topic is not in the unit, or the concept not in the topic |
+| `PAST_PAPER_EXISTS` | 409 | admin past papers | this year + paper type is already uploaded |
+| `PAST_PAPER_NOT_FOUND` / `PAST_PAPER_QUESTION_NOT_FOUND` | 404 | admin past papers | unknown paper / extracted question |
+| `FILE_TOO_LARGE` | 413 | content, admin past papers | the file is over the limit (past papers: 40 MB) |
+| `UNSUPPORTED_FILE_TYPE` | 415 | content, admin past papers | not a PDF |
+| `EMPTY_FILE` | 422 | content, admin past papers | the uploaded file is empty |
+| `NO_QUESTIONS_FOUND` | job `error` | admin past papers | no numbered questions were found in the PDF |
+| `SOURCE_NOT_FOUND` | 404 | admin RAG | unknown source document id |
+| `MODEL_ANSWER_EXISTS` | 409 | admin model answers | the question already has a model answer |
+| `MODEL_ANSWER_NOT_FOUND` | 404 | admin model answers | unknown model answer id |
+| `POINT_NOT_IN_ANSWER` | 422 | admin model answers | a `point_id` belongs to another model answer |
+| `OPTION_NOT_FOUND` | 404 | admin MCQ mapping | unknown option id |
+| `CORRECT_OPTION_NO_MISCONCEPTION` | 422 | admin MCQ mapping | the correct option can't have a misconception |
 
 ## Internal AI service (`ai_service`, port 8001, not public)
 
@@ -375,3 +525,4 @@ Every request needs `X-Service-Token`. Only `api/core/ai_client.py` calls these.
 | POST | `/sync/diagnostic-summary` | ✅ 2-sentence diagnostic summary (prompt `diagnostic/summary.v1`) |
 | POST | `/sync/next-action` | ✅ One-sentence reason for the home "next best action" (prompt `home/next_action.v1`) |
 | POST | `/sync/keyword-score` | Quick keyword score for an answer (fast) |
+| (job) | `extract_past_paper` | ✅ Split a past paper PDF into questions (OCR for scanned pages) |

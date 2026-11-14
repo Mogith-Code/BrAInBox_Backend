@@ -77,6 +77,33 @@ live in one place:
 
 Each Docker image installs only its own extra, so the API image never contains AI SDKs.
 
+## Admin portal (local)
+
+The admin portal (Flutter web, `BrAInBox_Mobile/apps/admin`) only uses `/api/v1/admin/*` + `/auth/me`,
+and only lets users with role `admin` in. All its endpoints are listed in
+[docs/api-endpoints.md](docs/api-endpoints.md) (sections "Admin: ...").
+
+1. Database: `docker compose up -d db`, then `alembic upgrade head` (migrations `0006`-`0008` are the admin ones).
+2. `.env`: `FIREBASE_PROJECT_ID` (+ `GOOGLE_APPLICATION_CREDENTIALS` for suspending users in Firebase).
+   Leave `ADMIN_ORIGINS` empty locally.
+3. Sign in once in the portal (or the app) with your Firebase account, then make yourself an admin:
+   `python -m scripts.make_admin you@example.com`
+4. Demo data (optional): `python -m scripts.seed_admin_demo`
+5. Start the api: `uvicorn api.main:app --reload --port 8000`
+6. Start the portal (in `BrAInBox_Mobile/apps/admin`):
+   `flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000/api/v1`
+
+- `make_admin` finds the user by email in our database (or in Firebase, if they signed in but never
+  registered) and sets `role=admin`. Roles come from our database, not a Firebase custom claim.
+  Sign out and in again in the portal afterwards.
+- `seed_admin_demo` adds 6 demo students, groups, posts and reports, questions (some AI ones waiting for review),
+  notes, a diagram, a finished quiz and a past paper, so every admin screen has data. Running it again adds
+  nothing; `--clear` removes it. It refuses to run when `ENVIRONMENT` is `prod` / `production`.
+- CORS already allows `http://localhost:*` and `http://127.0.0.1:*` (any Flutter web port).
+  For the deployed portal, set `ADMIN_ORIGINS=https://admin.example.lk` (comma-separated).
+- Without Firebase you can still try the endpoints with curl: set `DEV_LOGIN_ENABLED=true` (dev only) and send
+  `Authorization: Bearer dev-admin` from this computer.
+
 ## Tests
 
 ```bash

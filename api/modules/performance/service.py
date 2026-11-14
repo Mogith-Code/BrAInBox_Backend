@@ -409,6 +409,12 @@ async def unit_mastery_week_ago(session: AsyncSession, user_id: uuid.UUID) -> di
     )
 
 
+async def average_mastery(session: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """{user_id: 0-100} average current unit mastery (admin Students list). No data = left out."""
+    averages = await repository.average_mastery_by_user(session, user_ids)
+    return {user_id: round(value) for user_id, value in averages.items()}
+
+
 # ---------------------------------------------------------------- GET /insights/units
 
 NOT_ASSESSED_TEXT = "Not assessed yet"
@@ -875,4 +881,32 @@ async def analytics_ai_usage(session: AsyncSession, days: int) -> AnalyticsAIUsa
         output_tokens=totals.output_tokens,
         by_feature=feature_usage(await repository.ai_usage_by_feature(session, since)),
         daily_requests=fill_days(daily, first_day, today),
+    )
+
+
+# =========================================================================== admin dashboard
+# Small reads for admin/service.py (the dashboard). Same rules as the analytics above.
+
+
+async def active_students(session: AsyncSession, first_day: date, last_day: date) -> int:
+    return await repository.count_active_students(session, first_day, last_day)
+
+
+async def daily_active(session: AsyncSession, first_day: date) -> dict[date, int]:
+    return await repository.daily_active_students(session, first_day)
+
+
+async def daily_finished_attempts(session: AsyncSession, first_day: date) -> dict[date, int]:
+    return await repository.daily_finished_attempts(session, _start_of_day(first_day))
+
+
+async def answers_since(session: AsyncSession, first_day: date) -> int:
+    return await repository.count_mcq_answers(session, _start_of_day(first_day))
+
+
+async def top_misconceptions(
+    session: AsyncSession, first_day: date, topic_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    return await repository.top_misconception_per_topic(
+        session, _start_of_day(first_day), topic_ids
     )

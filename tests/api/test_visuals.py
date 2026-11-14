@@ -492,12 +492,12 @@ async def test_admin_reports_queue_shows_visual(topic, db_session) -> None:  # t
         forbidden = await c.get("/api/v1/admin/moderation/reports")
 
     assert queue.status_code == 200
-    [item] = [r for r in queue.json() if r["visual_id"] == str(visual.id)]
+    [item] = [r for r in queue.json() if r["target_id"] == str(visual.id)]
     assert item["target_type"] == "visual"
     assert item["visual_title"] == "Nephron"
     assert item["image_url"] == f"http://test/api/v1/files/visuals/{topic.id}/nephron.png"
     assert item["reason"] == "inaccurate"
-    assert item["reported_by"] == str(STUDENT.id)
+    assert item["report_count"] == 1
     assert forbidden.status_code == 403
 
 

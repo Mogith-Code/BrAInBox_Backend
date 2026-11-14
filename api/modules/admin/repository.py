@@ -15,4 +15,6 @@ async def count_audit_log(session: AsyncSession) -> int:
     return result.scalar_one()
 
 
-# TODO(Mogith): insert_audit_entry(session, ...) and list_audit_entries(session, offset, limit)
+async def insert_audit_entry(session: AsyncSession, entry: AuditLog) -> None:
+    session.add(entry)
+    await session.flush()

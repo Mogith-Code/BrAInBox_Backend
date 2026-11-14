@@ -101,7 +101,9 @@ class Post(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     moderation_status: Mapped[ModerationStatus] = mapped_column(
         str_enum(ModerationStatus), default=ModerationStatus.PENDING
     )
-    moderation_reason: Mapped[str | None] = mapped_column(Text)
+    moderation_reason: Mapped[str | None] = mapped_column(Text)  # the AI flag label, e.g. "Spam"
+    # How sure the AI moderator is (0-1); shown as `ai_flag_score` in the admin queue.
+    moderation_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
     score: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # sum of votes
     reply_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Circular FK (posts <-> replies), so it is created after both tables (use_alter).
@@ -138,6 +140,8 @@ class Reply(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     moderation_status: Mapped[ModerationStatus] = mapped_column(
         str_enum(ModerationStatus), default=ModerationStatus.PENDING
     )
+    moderation_reason: Mapped[str | None] = mapped_column(Text)  # the AI flag label
+    moderation_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))  # 0-1
     score: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     job_id: Mapped[uuid.UUID | None] = mapped_column(

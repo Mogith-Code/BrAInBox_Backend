@@ -26,3 +26,15 @@ async def get_by_user_id(session: AsyncSession, user_id: uuid.UUID) -> StudentPr
 # TODO(Mogith): add the queries this module needs, one small async function each, e.g.
 #   async def get_by_id(session: AsyncSession, id: uuid.UUID) -> StudentProfile | None:
 #       return await session.get(StudentProfile, id)
+
+
+async def most_common_exam_year(session: AsyncSession, from_year: int) -> int | None:
+    """The exam year most students chose (this year or later) - the admin dashboard batch."""
+    result = await session.execute(
+        select(StudentProfile.exam_year)
+        .where(StudentProfile.exam_year >= from_year)
+        .group_by(StudentProfile.exam_year)
+        .order_by(func.count().desc(), StudentProfile.exam_year)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()

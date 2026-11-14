@@ -494,3 +494,46 @@ async def admin_update_concept(
 async def admin_delete_concept(session: AsyncSession, concept_id: uuid.UUID) -> None:
     concept = await _admin_concept(session, concept_id)
     await _delete_or_conflict(session, concept, "This concept")
+
+
+# =========================================================================== for other modules
+
+
+@dataclass
+class Placement:
+    unit_id: uuid.UUID | None
+    topic_id: uuid.UUID | None
+    concept_id: uuid.UUID | None
+
+
+async def check_placement(
+    session: AsyncSession,
+    unit_id: uuid.UUID | None,
+    topic_id: uuid.UUID | None,
+    concept_id: uuid.UUID | None,
+) -> Placement:
+    """Check that a unit / topic / concept exist and belong together (used by the admin
+    question editor). A missing unit or topic is filled in from the level below.
+
+    404 UNIT_NOT_FOUND / TOPIC_NOT_FOUND / CONCEPT_NOT_FOUND · 422 SYLLABUS_MISMATCH."""
+    if concept_id is not None:
+        concept = await repository.get_concept(session, concept_id)
+        if concept is None:
+            raise NotFoundError(f"Concept '{concept_id}' not found", code="CONCEPT_NOT_FOUND")
+        if topic_id is not None and concept.topic_id != topic_id:
+            raise _mismatch("The concept is not part of this topic")
+        topic_id = concept.topic_id
+    if topic_id is not None:
+        topic = await repository.get_topic(session, topic_id)
+        if topic is None:
+            raise NotFoundError(f"Topic '{topic_id}' not found", code="TOPIC_NOT_FOUND")
+        if unit_id is not None and topic.unit_id != unit_id:
+            raise _mismatch("The topic is not part of this unit")
+        unit_id = topic.unit_id
+    if unit_id is not None and await repository.get_unit(session, unit_id) is None:
+        raise NotFoundError(f"Unit '{unit_id}' not found", code="UNIT_NOT_FOUND")
+    return Placement(unit_id, topic_id, concept_id)
+
+
+def _mismatch(message: str) -> AppError:
+    return AppError(message, code="SYLLABUS_MISMATCH", status_code=422)
