@@ -21,7 +21,7 @@ import logging
 import math
 import re
 import secrets
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,8 @@ from api.core.errors import (
 )
 from api.modules.auth import repository
 from api.modules.auth.schemas import (
+    AdminStudentOut,
+    AdminStudentPage,
     CodeSentOut,
     ModuleStatus,
     OnboardingOut,
@@ -47,6 +49,7 @@ from api.modules.auth.schemas import (
     UpdateMeRequest,
     UserOut,
 )
+from api.modules.performance import service as performance_service
 from api.modules.profiles import service as profiles_service
 from api.modules.quizzes import service as quizzes_service
 from shared.db.models import EmailCode, PasswordResetToken, User
@@ -382,3 +385,77 @@ async def complete_reset(session: AsyncSession, reset_token: str, new_password: 
     await firebase_users.update_user(user.firebase_uid, password=new_password)
     token.used_at = now
     await session.commit()
+
+
+# =========================================================================== admin: Students
+# Used by admin/users_admin.py.
+
+INACTIVE_AFTER_DAYS = 30
+
+
+def _inactive_before() -> date:
+    return clock.today() - timedelta(days=INACTIVE_AFTER_DAYS)
+
+
+def _student_out(row: repository.StudentRow, mastery: dict[Any, int]) -> AdminStudentOut:
+    user = row.user
+    return AdminStudentOut(
+        id=user.id,
+        full_name=(user.display_name or "").strip() or (user.email or "Student"),
+        email=user.email,
+        school=row.school,
+        district=row.district,
+        exam_year=row.exam_year,
+        avg_mastery=mastery.get(user.id),
+        status=row.status,  # type: ignore[arg-type]
+        last_active_at=row.last_active_at,
+    )
+
+
+async def admin_list_students(
+    session: AsyncSession,
+    *,
+    search: str | None,
+    exam_year: int | None,
+    status: str | None,
+    district: str | None,
+    offset: int,
+    limit: int,
+) -> AdminStudentPage:
+    """Students only. inactive = no study activity for 30+ days; suspended wins over inactive."""
+    rows, total, active_total = await repository.list_students(
+        session,
+        inactive_before=_inactive_before(),
+        search=search,
+        exam_year=exam_year,
+        district=district,
+        status=status,
+        offset=offset,
+        limit=limit,
+    )
+    mastery = await performance_service.average_mastery(session, [r.user.id for r in rows])
+    return AdminStudentPage(
+        items=[_student_out(r, mastery) for r in rows], total=total, active_total=active_total
+    )
+
+
+async def admin_set_active(
+    session: AsyncSession, admin_id: Any, user_id: Any, is_active: bool
+) -> AdminStudentOut:
+    """Suspend (false) or reinstate (true). The Firebase account is disabled / enabled too, so a
+    suspended student gets USER_DISABLED on every request and cannot sign in again."""
+    user = await repository.get_user_by_id(session, user_id)
+    if user is None:
+        raise NotFoundError("User not found", code="USER_NOT_FOUND")
+    if user.id == admin_id and not is_active:
+        raise AppError("You cannot suspend your own account", code="CANNOT_SUSPEND_SELF")
+    if user.is_active != is_active:
+        # Firebase first: if it fails, nothing is changed in our database.
+        await firebase_users.set_disabled(user.firebase_uid, disabled=not is_active)
+        user.is_active = is_active
+        user.disabled_at = None if is_active else clock.now()
+        await session.commit()
+    row = await repository.get_student_row(session, user.id, _inactive_before())
+    assert row is not None
+    mastery = await performance_service.average_mastery(session, [user.id])
+    return _student_out(row, mastery)
