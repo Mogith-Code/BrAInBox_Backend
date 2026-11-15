@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -58,6 +59,8 @@ class Question(UUIDPrimaryKeyMixin, TimestampMixin, AIGeneratedMixin, Base):
         CheckConstraint("marks > 0", name="marks_positive"),
     )
 
+    # Short number for people, shown as the code "Q-4821" (filled by Postgres).
+    number: Mapped[int] = mapped_column(Integer, Identity(start=1000), unique=True)
     unit_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("units.id", ondelete="RESTRICT"), index=True
     )
@@ -83,6 +86,8 @@ class Question(UUIDPrimaryKeyMixin, TimestampMixin, AIGeneratedMixin, Base):
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     embedding_model: Mapped[str | None] = mapped_column(String(64))
+    # Marked outdated by an admin (syllabus changed); hidden from students like an archived one.
+    is_outdated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class Misconception(UUIDPrimaryKeyMixin, TimestampMixin, Base):

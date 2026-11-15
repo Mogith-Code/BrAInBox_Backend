@@ -396,5 +396,6 @@ class JobType(StrEnum):
     SUGGEST_ANSWER = "suggest_answer"
     RANK_RESOURCES = "rank_resources"
     RAG_INGEST = "rag_ingest"
+    EXTRACT_PAST_PAPER = "extract_past_paper"  # admin past-paper upload: OCR + split
     # Every value needs a pipeline in ai_service/jobs (a test checks this), so add
     # tag_post / embed_concepts / next_action together with their pipeline.

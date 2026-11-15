@@ -16,6 +16,7 @@ from ai_service.pipelines.questions import (
     generate_questions,
     mcq_mapping,
     paper_builder,
+    past_paper_extract,
     quality_checks,
 )
 from ai_service.pipelines.recommendations import rank_resources
@@ -45,6 +46,7 @@ DISPATCH: dict[JobType, PipelineFn] = {
     JobType.SUGGEST_ANSWER: suggested_answer.run,
     JobType.RANK_RESOURCES: rank_resources.run,
     JobType.RAG_INGEST: rag_ingest.run_job,
+    JobType.EXTRACT_PAST_PAPER: past_paper_extract.run,
 }
 
 

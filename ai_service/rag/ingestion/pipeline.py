@@ -194,7 +194,10 @@ async def ingest_directory(
 
 
 async def run_job(payload: dict[str, Any]) -> dict[str, Any]:
-    """RAG_INGEST job: payload = {"document_id": "...", "force": false}."""
+    """RAG_INGEST job: payload = {"document_id": "...", "force": false},
+    or {"all": true, "force": true} to re-index every document (admin "Reindex")."""
+    if payload.get("all"):
+        return await _run_all(force=bool(payload.get("force", True)))
     document_id = uuid.UUID(str(payload["document_id"]))
     async with SessionLocal() as session:
         doc = await session.get(SourceDocument, document_id)
@@ -217,3 +220,20 @@ async def run_job(payload: dict[str, Any]) -> dict[str, Any]:
         "chunk_count": result.chunk_count,
         "error": result.error,
     }
+
+
+async def _run_all(force: bool) -> dict[str, Any]:
+    """Re-ingest every source document whose file is available; the others are reported."""
+    async with SessionLocal() as session:
+        docs = list((await session.execute(select(SourceDocument))).scalars())
+        results: list[dict[str, Any]] = []
+        for doc in docs:
+            path = Path(doc.file_path)
+            if not path.exists():
+                results.append({"document_id": str(doc.id), "status": "missing"})
+                continue
+            result = await ingest_file(session, path, source_type=doc.source_type, force=force)
+            results.append(
+                {"document_id": str(doc.id), "status": result.status, "chunks": result.chunk_count}
+            )
+    return {"documents": len(docs), "results": results}

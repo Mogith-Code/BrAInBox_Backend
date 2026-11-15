@@ -4,6 +4,8 @@ The Flutter app depends on these shapes exactly (see README.md). JSON is snake_c
 """
 
 import uuid
+from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -81,3 +83,31 @@ class PasswordResetCompleteRequest(BaseModel):
 
 class ResetDoneOut(BaseModel):
     reset: bool = True
+
+
+# ---------------------------------------------------------------- admin: Students (users_admin.py)
+StudentStatus = Literal["active", "suspended", "inactive"]
+
+
+class AdminStudentOut(BaseModel):
+    """One row of the admin Students table (BrAInBox_Mobile apps/admin users_models.dart)."""
+
+    id: uuid.UUID
+    full_name: str
+    email: str | None = None
+    school: str | None = None
+    district: str | None = None
+    exam_year: int | None = None
+    avg_mastery: int | None = None  # 0-100, null = no mastery data yet
+    status: StudentStatus
+    last_active_at: datetime | None = None
+
+
+class AdminStudentPage(BaseModel):
+    items: list[AdminStudentOut]
+    total: int
+    active_total: int
+
+
+class AdminStudentUpdate(BaseModel):
+    is_active: bool

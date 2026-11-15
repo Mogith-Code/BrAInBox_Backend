@@ -252,3 +252,27 @@ async def student_in_db(db_session: AsyncSession) -> AsyncIterator[uuid.UUID]:
     await db_session.commit()
     yield STUDENT.id
     await delete_test_user(db_session)
+
+
+@pytest.fixture
+async def admin_in_db(db_session: AsyncSession) -> AsyncIterator[uuid.UUID]:
+    """The test admin as a real users row (admin actions write audit_log rows that point to it)."""
+    from sqlalchemy import delete
+
+    from shared.db.models import AuditLog, User
+
+    if await db_session.get(User, ADMIN.id) is None:
+        db_session.add(
+            User(
+                id=ADMIN.id,
+                firebase_uid=ADMIN.firebase_uid,
+                email=ADMIN.email,
+                display_name="Admin Amara",
+                role=UserRole.ADMIN,
+            )
+        )
+        await db_session.commit()
+    yield ADMIN.id
+    await db_session.rollback()
+    await db_session.execute(delete(AuditLog).where(AuditLog.actor_id == ADMIN.id))
+    await db_session.commit()
