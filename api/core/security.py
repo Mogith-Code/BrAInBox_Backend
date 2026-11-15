@@ -109,9 +109,7 @@ async def get_firebase_claims(
     """Verify the Firebase ID token and return its claims (uid, email, ...)."""
     token = credentials.credentials if credentials else None
     if token is None and dev_login_allowed(request):
-        referer = request.headers.get("referer", "")
-        if "/docs" in referer or "/redoc" in referer:
-            token = "dev-token"
+        token = "dev-token"
 
     if token in DEV_CLAIMS and dev_login_allowed(request):
         # "dev_login" marks claims that did NOT come from Firebase (see get_current_user).

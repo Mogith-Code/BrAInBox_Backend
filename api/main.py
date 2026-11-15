@@ -119,6 +119,49 @@ def create_app() -> FastAPI:
     for router in MODULE_ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
 
+    # Legacy compatibility for standalone exam app (/exam/*)
+    import uuid
+    from pydantic import BaseModel
+    from api.modules.exams import service as exams_service
+    from api.modules.exams.schemas import AnswerItem, EvaluateResponse, PaperGenerateRequest, PaperOut, SubmitRequest, UnitPaperGenerateRequest
+    from api.core.ai_client import AIClientDep
+    from api.core.security import CurrentUserDep
+    from fastapi import APIRouter
+
+    class LegacyEvaluateRequest(BaseModel):
+        paper_id: uuid.UUID
+        answers: list[dict[str, Any]]
+        explain: bool = True
+
+    exam_compat = APIRouter(prefix="/exam", tags=["Exams Legacy"])
+
+    @exam_compat.post("/generate-paper-by-units", response_model=PaperOut, response_model_exclude_none=True, include_in_schema=False)
+    async def legacy_generate_by_units(
+        req: UnitPaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+    ) -> PaperOut:
+        return await exams_service.generate_paper_by_units(session, user, req, ai)
+
+    @exam_compat.post("/generate-paper", response_model=PaperOut, response_model_exclude_none=True, include_in_schema=False)
+    async def legacy_generate(
+        req: PaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+    ) -> PaperOut:
+        return await exams_service.generate_paper(session, user, req, ai)
+
+    @exam_compat.post("/evaluate", response_model=EvaluateResponse, include_in_schema=False)
+    async def legacy_evaluate(
+        req: LegacyEvaluateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+    ) -> EvaluateResponse:
+        submit_req = SubmitRequest(
+            answers=[
+                AnswerItem(question_id=uuid.UUID(str(a["question_id"])), selected=a.get("selected"))
+                for a in req.answers
+            ],
+            explain=req.explain,
+        )
+        return await exams_service.submit_paper(session, user, req.paper_id, submit_req, ai)
+
+    app.include_router(exam_compat)
+
     @app.on_event("startup")
     async def auto_migrate_dev_schema() -> None:
         if settings.ENVIRONMENT != "dev":
