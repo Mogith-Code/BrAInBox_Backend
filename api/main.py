@@ -5,41 +5,27 @@ Docs:          http://localhost:8000/docs   and   http://localhost:8000/redoc
 """
 
 import logging
-import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Response
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from sqlalchemy import text
 
-from api.core.ai_client import AIClientDep
 from api.core.config import get_settings
 from api.core.database import SessionDep
 from api.core.errors import register_error_handlers
-from api.core.security import CurrentUserDep
 from api.modules.admin.router import router as admin_router
 from api.modules.auth.router import router as auth_router
 from api.modules.community.router import router as community_router
 from api.modules.content.router import router as content_router
 from api.modules.evaluation.router import router as evaluation_router
-from api.modules.exams import service as exams_service
+from api.modules.exams.router import legacy_router as exams_legacy_router
 from api.modules.exams.router import router as exams_router
-from api.modules.exams.schemas import (
-    AnswerItem,
-    EvaluateResponse,
-    PaperGenerateRequest,
-    PaperOut,
-    SubmitRequest,
-    UnitPaperGenerateRequest,
-)
 from api.modules.home.router import router as home_router
 from api.modules.jobs.router import router as jobs_router
 from api.modules.knowledge_base.router import router as knowledge_base_router
@@ -80,102 +66,6 @@ MODULE_ROUTERS = [
 logger = logging.getLogger(__name__)
 
 
-# Legacy compatibility for standalone exam app (/exam/*)
-class LegacyEvaluateRequest(BaseModel):
-    paper_id: uuid.UUID
-    answers: list[dict[str, Any]]
-    explain: bool = True
-
-
-exam_compat_router = APIRouter(prefix="/exam", tags=["Exams Legacy"])
-
-
-@exam_compat_router.post(
-    "/generate-paper-by-units",
-    response_model=PaperOut,
-    response_model_exclude_none=True,
-    include_in_schema=False,
-)
-async def legacy_generate_by_units(
-    req: UnitPaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
-) -> PaperOut:
-    return await exams_service.generate_paper_by_units(session, user, req, ai)
-
-
-@exam_compat_router.post(
-    "/generate-paper",
-    response_model=PaperOut,
-    response_model_exclude_none=True,
-    include_in_schema=False,
-)
-async def legacy_generate(
-    req: PaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
-) -> PaperOut:
-    return await exams_service.generate_paper(session, user, req, ai)
-
-
-@exam_compat_router.post("/evaluate", response_model=EvaluateResponse, include_in_schema=False)
-async def legacy_evaluate(
-    req: LegacyEvaluateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
-) -> EvaluateResponse:
-    submit_req = SubmitRequest(
-        answers=[
-            AnswerItem(question_id=uuid.UUID(str(a["question_id"])), selected=a.get("selected"))
-            for a in req.answers
-        ],
-        explain=req.explain,
-    )
-    return await exams_service.submit_paper(session, user, req.paper_id, submit_req, ai)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
-    if settings.ENVIRONMENT == "dev":
-        try:
-            from shared.db.session import engine
-
-            async with engine.begin() as conn:
-                await conn.execute(
-                    text(
-                        "CREATE TABLE IF NOT EXISTS subjects ("
-                        "code VARCHAR(50) UNIQUE, name VARCHAR(100), level VARCHAR(50), "
-                        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
-                        "created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now());"
-                    )
-                )
-                await conn.execute(
-                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS subject_id UUID;")
-                )
-                await conn.execute(
-                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS code VARCHAR(20);")
-                )
-                await conn.execute(
-                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS periods INTEGER;")
-                )
-                await conn.execute(
-                    text("ALTER TABLE units ADD COLUMN IF NOT EXISTS icon VARCHAR(50);")
-                )
-                await conn.execute(
-                    text("ALTER TABLE topics ADD COLUMN IF NOT EXISTS code VARCHAR(30);")
-                )
-                await conn.execute(
-                    text(
-                        "CREATE TABLE IF NOT EXISTS user_topic_progress ("
-                        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
-                        "user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
-                        "topic_id UUID NOT NULL REFERENCES topics(id) ON DELETE CASCADE, "
-                        "status VARCHAR(32) NOT NULL, score INTEGER NOT NULL, is_weak BOOLEAN NOT NULL, "
-                        "created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), "
-                        "CONSTRAINT uq_user_topic_progress_user_topic UNIQUE (user_id, topic_id));"
-                    )
-                )
-            logger.info("Auto-verified dev database schema (Learn navigation columns present).")
-        except Exception as exc:
-            logger.warning("Could not auto-verify schema: %s", exc)
-    yield
-
-
 def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.LOG_LEVEL)
@@ -195,7 +85,6 @@ def create_app() -> FastAPI:
             "Authenticate with `Authorization: Bearer <Firebase ID token>`."
         ),
         version=settings.API_VERSION,
-        lifespan=lifespan,
         # We serve our own branded docs pages below.
         docs_url=None,
         redoc_url=None,
@@ -231,7 +120,8 @@ def create_app() -> FastAPI:
     for router in MODULE_ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
 
-    app.include_router(exam_compat_router)
+    # Old URLs of Udith's standalone exam app (/exam/*, no /api/v1): see exams/router.py
+    app.include_router(exams_legacy_router)
 
     _add_branded_docs(app)
     return app

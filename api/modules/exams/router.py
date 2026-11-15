@@ -4,6 +4,12 @@ Implemented (ported from Udith's original `/exam/*` routes):
     POST   /api/v1/papers/generate                         Generate an AI model paper (BUILD_PAPER)
     POST   /api/v1/papers/{id}/submit                      Mark answers + explanations, save attempt
 
+Old URLs of Udith's standalone exam app (no /api/v1 prefix, hidden from /docs; mounted with
+`legacy_router` in api/main.py). New code should use the /api/v1 routes above:
+    POST   /exam/generate-paper           = POST /api/v1/papers/generate
+    POST   /exam/generate-paper-by-units  = POST /api/v1/papers/generate-by-units
+    POST   /exam/evaluate                 = POST /api/v1/papers/{paper_id}/submit (paper_id in the body)
+
 Planned (details in README.md):
     GET    /api/v1/papers                                  List papers
     GET    /api/v1/papers/{id}                             One paper
@@ -23,6 +29,7 @@ from api.core.security import CurrentUserDep
 from api.modules.exams import service
 from api.modules.exams.schemas import (
     EvaluateResponse,
+    LegacyEvaluateRequest,
     ModuleStatus,
     PaperGenerateRequest,
     PaperOut,
@@ -81,3 +88,46 @@ async def submit_paper(
 ) -> EvaluateResponse:
     """Answers use letters ("A".."E"); a missing or invalid letter counts as not answered."""
     return await service.submit_paper(session, user, paper_id, req, ai)
+
+
+# --------------------------------------------------------------------------- old /exam/* URLs
+legacy_router = APIRouter(prefix="/exam", tags=["Exams (old URLs)"])
+
+
+@legacy_router.post(
+    "/generate-paper",
+    response_model=PaperOut,
+    response_model_exclude_none=True,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def legacy_generate_paper(
+    req: PaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+) -> PaperOut:
+    """Old URL of POST /api/v1/papers/generate."""
+    return await service.generate_paper(session, user, req, ai)
+
+
+@legacy_router.post(
+    "/generate-paper-by-units",
+    response_model=PaperOut,
+    response_model_exclude_none=True,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def legacy_generate_paper_by_units(
+    req: UnitPaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+) -> PaperOut:
+    """Old URL of POST /api/v1/papers/generate-by-units."""
+    return await service.generate_paper_by_units(session, user, req, ai)
+
+
+@legacy_router.post(
+    "/evaluate", response_model=EvaluateResponse, include_in_schema=False, deprecated=True
+)
+async def legacy_evaluate(
+    req: LegacyEvaluateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+) -> EvaluateResponse:
+    """Old URL of POST /api/v1/papers/{paper_id}/submit."""
+    submit = SubmitRequest(answers=req.answers, explain=req.explain)
+    return await service.submit_paper(session, user, req.paper_id, submit, ai)
