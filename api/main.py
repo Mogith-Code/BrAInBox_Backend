@@ -24,6 +24,7 @@ from api.modules.auth.router import router as auth_router
 from api.modules.community.router import router as community_router
 from api.modules.content.router import router as content_router
 from api.modules.evaluation.router import router as evaluation_router
+from api.modules.exams.router import legacy_router as exams_legacy_router
 from api.modules.exams.router import router as exams_router
 from api.modules.home.router import router as home_router
 from api.modules.jobs.router import router as jobs_router
@@ -118,6 +119,9 @@ def create_app() -> FastAPI:
 
     for router in MODULE_ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
+
+    # Old URLs of Udith's standalone exam app (/exam/*, no /api/v1): see exams/router.py
+    app.include_router(exams_legacy_router)
 
     _add_branded_docs(app)
     return app

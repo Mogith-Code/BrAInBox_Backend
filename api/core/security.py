@@ -108,6 +108,8 @@ async def get_firebase_claims(
 ) -> dict[str, Any]:
     """Verify the Firebase ID token and return its claims (uid, email, ...)."""
     token = credentials.credentials if credentials else None
+    # No token -> always 401 (no automatic login, not even for /docs): in /docs type
+    # "dev-token" or "dev-admin" in Authorize instead.
     if token in DEV_CLAIMS and dev_login_allowed(request):
         # "dev_login" marks claims that did NOT come from Firebase (see get_current_user).
         return {**DEV_CLAIMS[token], "dev_login": True}
