@@ -111,6 +111,40 @@ class TopicInsightsResponse(BaseModel):
     note: str
 
 
+# ---------------------------------------------------------------- concept insights
+class ConceptPerformance(BaseModel):
+    """Score for one concept (a syllabus sub-topic), from answers to questions linked to it."""
+
+    concept_id: uuid.UUID
+    code: str | None
+    name: str
+    topic_id: uuid.UUID
+    topic: str
+    unit_number: int
+    unit: str
+    correct: int
+    attempted: int
+    percent: float
+    grade: str
+    grade_label: str
+    status: TopicStatus
+    understanding: str
+    reliable: bool  # False while fewer than `min_questions_per_concept` were attempted
+
+
+class ConceptInsightsResponse(BaseModel):
+    concepts: list[ConceptPerformance]  # concepts with answers, weakest first
+    weak_concepts: list[str]  # reliable concepts graded S or F, weakest first
+    insufficient_data_concepts: list[str]
+    min_questions_per_concept: int
+    # How many of the student's valid answers were to questions linked to a concept. When this
+    # is 0 the list is empty because questions aren't linked yet, not because nothing is weak.
+    linked_answers: int
+    total_answers: int
+    grade_bands: list[GradeBandOut]
+    note: str
+
+
 # ---------------------------------------------------------------- unit insights
 class UnitMasteryOut(BaseModel):
     """The student's current mastery of one unit (0-100), from the newest measurement."""

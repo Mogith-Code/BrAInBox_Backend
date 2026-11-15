@@ -5,6 +5,10 @@ thresholds chosen by the team, not verified official examination regulations, so
 grade here is a practice indicator, never the student's official exam grade.
 
 Change a boundary here and every caller (topic insights, exam weak topics) follows.
+
+One scale for the whole app: other modules should call these functions instead of keeping their
+own numbers (the diagnostic's 70 / 40 and the Learn screen's 75 / 40 are still separate - see
+the performance README, "One mastery scale").
 """
 
 from dataclasses import dataclass
@@ -60,3 +64,13 @@ def grade_for(percent: float) -> GradeBand:
 def is_weak_percent(percent: float) -> bool:
     """True for grades S and F (below 55 %)."""
     return grade_for(percent).status in WEAK_STATUSES
+
+
+def mastery_percent(correct: int, asked: int) -> int:
+    """Mastery 0-100 from one measurement: (correct + 0.5) / (asked + 1).
+
+    Pulled towards 50 when there are few questions, so 1 right out of 1 is 75, not 100, and
+    0 out of 1 is 25, not 0. The same formula as the diagnostic, so every unit_mastery value
+    means the same thing whatever measured it.
+    """
+    return round((correct + 0.5) / (asked + 1) * 100)
