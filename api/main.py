@@ -121,12 +121,21 @@ def create_app() -> FastAPI:
 
     # Legacy compatibility for standalone exam app (/exam/*)
     import uuid
+
+    from fastapi import APIRouter
     from pydantic import BaseModel
-    from api.modules.exams import service as exams_service
-    from api.modules.exams.schemas import AnswerItem, EvaluateResponse, PaperGenerateRequest, PaperOut, SubmitRequest, UnitPaperGenerateRequest
+
     from api.core.ai_client import AIClientDep
     from api.core.security import CurrentUserDep
-    from fastapi import APIRouter
+    from api.modules.exams import service as exams_service
+    from api.modules.exams.schemas import (
+        AnswerItem,
+        EvaluateResponse,
+        PaperGenerateRequest,
+        PaperOut,
+        SubmitRequest,
+        UnitPaperGenerateRequest,
+    )
 
     class LegacyEvaluateRequest(BaseModel):
         paper_id: uuid.UUID
@@ -135,13 +144,23 @@ def create_app() -> FastAPI:
 
     exam_compat = APIRouter(prefix="/exam", tags=["Exams Legacy"])
 
-    @exam_compat.post("/generate-paper-by-units", response_model=PaperOut, response_model_exclude_none=True, include_in_schema=False)
+    @exam_compat.post(
+        "/generate-paper-by-units",
+        response_model=PaperOut,
+        response_model_exclude_none=True,
+        include_in_schema=False,
+    )
     async def legacy_generate_by_units(
         req: UnitPaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
     ) -> PaperOut:
         return await exams_service.generate_paper_by_units(session, user, req, ai)
 
-    @exam_compat.post("/generate-paper", response_model=PaperOut, response_model_exclude_none=True, include_in_schema=False)
+    @exam_compat.post(
+        "/generate-paper",
+        response_model=PaperOut,
+        response_model_exclude_none=True,
+        include_in_schema=False,
+    )
     async def legacy_generate(
         req: PaperGenerateRequest, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
     ) -> PaperOut:
