@@ -34,13 +34,15 @@ from api.modules.performance.grading import (
     WEAK_STATUSES,
     TopicStatus,
 )
-from api.modules.performance.repository import AnswerRow, MistakeRow
+from api.modules.performance.repository import AnswerRow, ConceptInfo, MistakeRow
 from api.modules.performance.schemas import (
     AIFeatureUsage,
     AnalyticsAIUsage,
     AnalyticsOverview,
     AnalyticsPerformance,
     CommonMisconception,
+    ConceptInsightsResponse,
+    ConceptPerformance,
     DailyCount,
     GradeBandOut,
     InsightsSummaryResponse,
@@ -65,7 +67,7 @@ from api.modules.performance.schemas import (
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.schemas import UnitOut
 from shared.db.models import Mistake, UnitMastery
-from shared.enums import MistakeType, TopicProgressStatus
+from shared.enums import MasterySource, MistakeType, TopicProgressStatus
 
 MODULE_NAME = "performance"
 GENERAL_TOPIC = "General"  # questions not linked to a syllabus topic (same name as exams)
@@ -133,17 +135,36 @@ class TopicAnalysis:
     attempts_analysed: int
 
 
-def topic_performance(
-    tally: TopicTally, min_questions: int = MIN_QUESTIONS_FOR_RELIABLE_RESULT
-) -> TopicPerformance:
-    percent = _percent(tally.correct, tally.attempted)
+@dataclass
+class Level:
+    """How well a student did on one topic or concept. One rule for both."""
+
+    percent: float | None
+    band: grading.GradeBand | None
+    status: TopicStatus
+    understanding: str
+    reliable: bool
+
+
+def score_level(correct: int, attempted: int, min_questions: int) -> Level:
+    """Percent = correct / valid attempted. Mastered / weak only from `min_questions` answers."""
+    percent = _percent(correct, attempted)
     band = grading.grade_for(percent) if percent is not None else None
     if band is None:
         status, understanding = TopicStatus.NOT_ATTEMPTED, "Not attempted yet"
-    elif tally.attempted < min_questions:
+    elif attempted < min_questions:
         status, understanding = TopicStatus.INSUFFICIENT_DATA, "Insufficient data"
     else:
         status, understanding = band.status, band.understanding
+    return Level(
+        percent, band, status, understanding, band is not None and attempted >= min_questions
+    )
+
+
+def topic_performance(
+    tally: TopicTally, min_questions: int = MIN_QUESTIONS_FOR_RELIABLE_RESULT
+) -> TopicPerformance:
+    level = score_level(tally.correct, tally.attempted, min_questions)
     return TopicPerformance(
         topic_id=tally.topic_id,
         topic=tally.topic,
@@ -152,12 +173,12 @@ def topic_performance(
         correct=tally.correct,
         attempted=tally.attempted,
         unanswered=tally.unanswered,
-        percent=percent,
-        grade=band.grade if band else None,
-        grade_label=band.label if band else None,
-        status=status,
-        understanding=understanding,
-        reliable=band is not None and tally.attempted >= min_questions,
+        percent=level.percent,
+        grade=level.band.grade if level.band else None,
+        grade_label=level.band.label if level.band else None,
+        status=level.status,
+        understanding=level.understanding,
+        reliable=level.reliable,
     )
 
 
@@ -377,7 +398,204 @@ async def get_topic_insights(
     )
 
 
-# TODO(Keshomigha): update_mastery
+# =========================================================================== after an attempt is marked
+# Exams and quizzes call ONE function after marking: after_attempt_marked(). It records the
+# mistakes, the mastery and the Learn progress, in the caller's transaction.
+
+
+async def after_attempt_marked(
+    session: AsyncSession, user_id: uuid.UUID, attempt_id: uuid.UUID, *, source: MasterySource
+) -> int:
+    """Everything the performance module keeps up to date after marking. The caller commits.
+
+        await performance_service.after_attempt_marked(
+            session, user.id, attempt.id, source=MasterySource.EXAM
+        )
+
+    Call it once per attempt, after the answers are marked. The diagnostic saves its own unit
+    mastery, so for source=DIAGNOSTIC only the unit snapshots are skipped. Returns the number
+    of mistakes recorded.
+    """
+    await session.flush()  # the attempt being submitted must be included
+    recorded = await record_mistakes(session, user_id, attempt_id)
+    await update_mastery(
+        session,
+        user_id,
+        attempt_id,
+        source=source,
+        record_units=source != MasterySource.DIAGNOSTIC,
+    )
+    await refresh_topic_progress(session, user_id)
+    return recorded
+
+
+@dataclass
+class Tally:
+    correct: int = 0
+    attempted: int = 0  # valid answers
+    asked: int = 0  # valid answers + unanswered (for unit snapshots, like the diagnostic)
+    last_at: datetime | None = None
+
+
+def unit_snapshots(rows: list[AnswerRow]) -> dict[uuid.UUID, int]:
+    """Pure: {unit_id: mastery 0-100} from ONE attempt's answers, with the shared formula.
+    Unanswered questions count as asked (wrong), like the diagnostic; unreliable answers are
+    left out. Questions without a syllabus unit are skipped."""
+    tallies: dict[uuid.UUID, Tally] = {}
+    for row in latest_answer_per_question(rows):
+        if row.unit_id is None:
+            continue
+        tally = tallies.setdefault(row.unit_id, Tally())
+        if row.selected_option_id is None:
+            tally.asked += 1
+        elif is_valid_answer(row):
+            tally.asked += 1
+            tally.correct += int(bool(row.is_correct))
+    return {
+        unit_id: grading.mastery_percent(t.correct, t.asked)
+        for unit_id, t in tallies.items()
+        if t.asked
+    }
+
+
+def concept_tallies(
+    rows: list[AnswerRow], links: dict[uuid.UUID, list[uuid.UUID]]
+) -> dict[uuid.UUID, Tally]:
+    """Pure: {concept_id: tally} over valid answers to questions linked to the concept. A question
+    linked to two concepts counts for both."""
+    tallies: dict[uuid.UUID, Tally] = {}
+    for row in latest_answer_per_question(rows):
+        if not is_valid_answer(row):
+            continue
+        for concept_id in links.get(row.question_id, []):
+            tally = tallies.setdefault(concept_id, Tally())
+            tally.attempted += 1
+            tally.correct += int(bool(row.is_correct))
+            if tally.last_at is None or row.created_at > tally.last_at:
+                tally.last_at = row.created_at
+    return tallies
+
+
+def concept_mastery_rows(
+    user_id: uuid.UUID, tallies: dict[uuid.UUID, Tally]
+) -> list[dict[str, Any]]:
+    """Pure: `concept_mastery` rows. mastery_score is 0-1 (the table's scale), same formula."""
+    return [
+        {
+            "user_id": user_id,
+            "concept_id": concept_id,
+            "mastery_score": grading.mastery_percent(t.correct, t.attempted) / 100,
+            "attempts_count": t.attempted,
+            "correct_count": t.correct,
+            "last_practiced_at": t.last_at,
+        }
+        for concept_id, t in tallies.items()
+        if t.attempted
+    ]
+
+
+async def update_mastery(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    *,
+    source: MasterySource,
+    record_units: bool = True,
+) -> None:
+    """Unit snapshots from this attempt, and concept mastery for the concepts it touched.
+
+    * unit_mastery: a new snapshot per unit in the attempt (history, like the diagnostic).
+      Not idempotent: call it once per attempt (after_attempt_marked does).
+    * concept_mastery: recomputed from ALL the student's answers for each concept this attempt
+      touched, so calling it again gives the same values. Needs question_concepts links.
+    The caller commits.
+    """
+    attempt_rows = await repository.get_mcq_answer_rows(session, user_id, attempt_id)
+    if record_units:
+        snapshots = unit_snapshots(attempt_rows)
+        if snapshots:
+            await record_unit_mastery(session, user_id, snapshots, source.value)
+
+    links = await repository.get_concept_links(session, list({r.question_id for r in attempt_rows}))
+    touched = {concept_id for concept_ids in links.values() for concept_id in concept_ids}
+    if not touched:
+        return
+    all_rows = await repository.get_mcq_answer_rows(session, user_id)
+    all_links = await repository.get_concept_links(session, list({r.question_id for r in all_rows}))
+    tallies = {c: t for c, t in concept_tallies(all_rows, all_links).items() if c in touched}
+    await repository.save_concept_mastery(session, concept_mastery_rows(user_id, tallies))
+
+
+# =========================================================================== GET /insights/concepts
+
+NO_LINKS_NOTE = (
+    "Your questions aren't linked to syllabus concepts yet, so there are no concept scores. "
+    "Topic scores are in /insights/topics."
+)
+
+
+def build_concept_insights(
+    tallies: dict[uuid.UUID, Tally],
+    concepts: list[ConceptInfo],
+    *,
+    total_answers: int,
+    linked_answers: int,
+    min_questions: int = MIN_QUESTIONS_FOR_RELIABLE_RESULT,
+) -> ConceptInsightsResponse:
+    """Pure: concepts with answers, weakest first. Same scoring rule as topics."""
+    rows = []
+    for info in concepts:
+        tally = tallies.get(info.id)
+        if tally is None or not tally.attempted:
+            continue
+        level = score_level(tally.correct, tally.attempted, min_questions)
+        assert level.percent is not None and level.band is not None  # attempted >= 1
+        rows.append(
+            ConceptPerformance(
+                concept_id=info.id,
+                code=info.code,
+                name=info.name,
+                topic_id=info.topic_id,
+                topic=info.topic,
+                unit_number=info.unit_number,
+                unit=info.unit,
+                correct=tally.correct,
+                attempted=tally.attempted,
+                percent=level.percent,
+                grade=level.band.grade,
+                grade_label=level.band.label,
+                status=level.status,
+                understanding=level.understanding,
+                reliable=level.reliable,
+            )
+        )
+    rows.sort(key=lambda c: (c.percent, c.unit_number, c.code or "", c.name))
+    return ConceptInsightsResponse(
+        concepts=rows,
+        weak_concepts=[c.name for c in rows if c.reliable and c.status in WEAK_STATUSES],
+        insufficient_data_concepts=[
+            c.name for c in rows if c.status == TopicStatus.INSUFFICIENT_DATA
+        ],
+        min_questions_per_concept=min_questions,
+        linked_answers=linked_answers,
+        total_answers=total_answers,
+        grade_bands=grade_bands_out(),
+        note=NO_LINKS_NOTE if total_answers and not linked_answers else GRADE_NOTE,
+    )
+
+
+async def get_concept_insights(session: AsyncSession, user: CurrentUser) -> ConceptInsightsResponse:
+    """GET /insights/concepts: the logged-in student's score per concept, weakest first."""
+    rows = await repository.get_mcq_answer_rows(session, user.id)
+    valid = [r for r in latest_answer_per_question(rows) if is_valid_answer(r)]
+    links = await repository.get_concept_links(session, list({r.question_id for r in valid}))
+    tallies = concept_tallies(rows, links)
+    return build_concept_insights(
+        tallies,
+        await repository.get_concepts(session, list(tallies)),
+        total_answers=len(valid),
+        linked_answers=sum(1 for r in valid if links.get(r.question_id)),
+    )
 
 
 # =========================================================================== unit mastery + streak
