@@ -91,3 +91,16 @@ Placeholder right now: `GET /api/v1/content/status` → `{"module": "content", "
 
 Models live in `shared/db/models/`. Call other modules through their `service.py`, never their `repository.py`.
 Tests: `tests/api/test_content.py`.
+
+## Admin content library (`admin/content_admin.py`)
+
+`service.admin_list_content / admin_review_content / admin_edit_content`. Notes come from `notes`; diagrams are
+visuals waiting for review, from the visuals service (`diagrams_for_review`, `review_diagram`). Only one approved
+topic-level note per topic and kind may exist, so approving a note archives the older approved one.
+Tests: `tests/api/test_admin_content.py`.
+
+## Admin RAG sources (`admin/rag_admin.py`)
+
+`service.admin_list_rag_sources / admin_upload_rag_source / admin_reindex`. The upload is stored at
+`rag_sources/{document_id}{ext}`, a `source_documents` row is added (pending) and a RAG_INGEST job is queued.
+Tests: `tests/api/test_admin_rag_sources.py`.

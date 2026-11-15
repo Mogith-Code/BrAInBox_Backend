@@ -189,3 +189,9 @@ async def get_study_settings(session: AsyncSession, user_id: uuid.UUID) -> Study
         hours_per_day=float(profile.hours_per_day) if profile.hours_per_day is not None else None,
         diagnostic_skipped=profile.diagnostic_skipped_at is not None,
     )
+
+
+async def main_batch_year(session: AsyncSession) -> int:
+    """The A/L year most students are preparing for (next year if nobody chose one yet)."""
+    year = clock.today().year
+    return await repository.most_common_exam_year(session, year) or year + 1

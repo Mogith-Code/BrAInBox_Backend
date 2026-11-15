@@ -14,33 +14,51 @@ Rules:
   * AI work goes through `api.core.ai_client` / `api.core.jobs`, never directly to a provider.
 """
 
+import hashlib
 import logging
 import uuid
+from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import jobs, storage
+from api.core import clock, jobs, storage
 from api.core.ai_client import AIClient
-from api.core.errors import AppError, ForbiddenError, NotFoundError
+from api.core.config import get_settings
+from api.core.errors import AppError, ConflictError, ForbiddenError, NotFoundError
 from api.core.security import CurrentUser
 from api.modules.content import repository
 from api.modules.content.schemas import (
     MAX_PDF_BYTES,
+    MAX_RAG_BYTES,
     PDF_MIME_TYPE,
+    RAG_EXTENSIONS,
     TEXT_MIME_TYPE,
+    ContentItemOut,
+    ContentItemType,
     ModuleStatus,
+    RagJobOut,
+    RagSourceOut,
     UploadError,
     UploadOut,
     UploadSummary,
     UploadTextRequest,
 )
 from api.modules.syllabus import service as syllabus_service
-from shared.db.models import AIJob, Summary, Upload
+from api.modules.visuals import service as visuals_service
+from shared.db.models import AIJob, Note, SourceDocument, Summary, Topic, Unit, Upload
 from shared.db.session import SessionLocal
-from shared.enums import JobStatus, JobType
+from shared.enums import (
+    ContentSource,
+    ContentStatus,
+    DocumentStatus,
+    JobStatus,
+    JobType,
+    SourceType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -294,3 +312,259 @@ async def get_upload(session: AsyncSession, user: CurrentUser, upload_id: uuid.U
 
 # TODO(Samni): list_topic_notes(topic_id) (approved only)
 # TODO(Samni): library CRUD
+
+
+# =========================================================================== admin content library
+# Used by admin/content_admin.py. Notes live here; diagrams are visuals (visuals module).
+
+NOTE_TYPES: dict[str, ContentItemType] = {"full": "note", "short": "short_note"}
+API_TO_NOTE_TYPE = {"note": "full", "short_note": "short"}
+LIBRARY_LIMIT = 200
+
+
+def _note_check(note: Note) -> str | None:
+    """A short sentence from the automatic checks (null = nothing to report)."""
+    if note.source == ContentSource.AI and not note.citations:
+        return "No syllabus sources were cited. Check the facts against the NIE syllabus."
+    if note.citations:
+        return f"Grounded in {len(note.citations)} syllabus source(s)."
+    return None
+
+
+def note_item(note: Note, topic: Topic, unit: Unit) -> ContentItemOut:
+    return ContentItemOut(
+        id=note.id,
+        title=note.title,
+        type=NOTE_TYPES.get(note.note_type, "note"),
+        syllabus_code=topic.number,
+        unit_number=unit.number,
+        status=note.status.value,  # type: ignore[arg-type]
+        is_ai_generated=note.source == ContentSource.AI,
+        model=note.model,
+        prompt_version=note.prompt_version,
+        body_markdown=note.body_md,
+        image_url=None,
+        auto_check=_note_check(note),
+        updated_at=note.updated_at,
+    )
+
+
+async def admin_list_content(
+    session: AsyncSession,
+    base_url: str,
+    *,
+    item_type: ContentItemType | None,
+    status: ContentStatus | None,
+    unit_number: int | None,
+) -> list[ContentItemOut]:
+    """Notes, short notes and diagrams, last changed first.
+
+    No `status`: notes in any status except archived, diagrams waiting for review."""
+    items: list[ContentItemOut] = []
+    if item_type != "diagram":
+        rows = await repository.list_notes(
+            session,
+            note_type=API_TO_NOTE_TYPE.get(item_type) if item_type else None,
+            status=status,
+            unit_number=unit_number,
+            limit=LIBRARY_LIMIT,
+        )
+        items += [note_item(*row) for row in rows]
+    if item_type in (None, "diagram"):
+        items += await visuals_service.diagrams_for_review(
+            session, base_url, status, unit_number, LIBRARY_LIMIT
+        )
+    items.sort(key=lambda i: i.updated_at, reverse=True)
+    return items[:LIBRARY_LIMIT]
+
+
+def _not_found(item_id: uuid.UUID) -> NotFoundError:
+    return NotFoundError(f"Content '{item_id}' not found", code="CONTENT_NOT_FOUND")
+
+
+async def admin_review_content(
+    session: AsyncSession,
+    admin_id: uuid.UUID,
+    item_id: uuid.UUID,
+    approve: bool,
+    note_text: str | None,
+    base_url: str,
+) -> ContentItemOut:
+    """Approve or reject a note or a diagram. 404 CONTENT_NOT_FOUND."""
+    row = await repository.get_note_with_topic(session, item_id)
+    if row is None:
+        item = await visuals_service.review_diagram(session, item_id, approve, admin_id, base_url)
+        if item is None:
+            raise _not_found(item_id)
+        return item
+    note, topic, unit = row
+    if approve:
+        # Only one approved topic note per kind: the older one is archived.
+        for old in await repository.other_approved_notes(session, note):
+            old.status = ContentStatus.ARCHIVED
+        await session.flush()
+    note.status = ContentStatus.APPROVED if approve else ContentStatus.REJECTED
+    note.reviewed_by = admin_id
+    note.reviewed_at = clock.now()
+    note.review_comment = (note_text or "").strip() or None
+    note.updated_at = clock.now()
+    await session.commit()
+    return note_item(note, topic, unit)
+
+
+async def admin_edit_content(
+    session: AsyncSession, item_id: uuid.UUID, body_markdown: str, base_url: str
+) -> ContentItemOut:
+    """Change a note's text (its version goes up). Diagrams can't be edited as text:
+    409 CONTENT_NOT_EDITABLE. 404 CONTENT_NOT_FOUND."""
+    row = await repository.get_note_with_topic(session, item_id)
+    if row is None:
+        if await visuals_service.get_diagram_item(session, item_id, base_url) is not None:
+            raise ConflictError(
+                "Diagrams can't be edited as text. Reject it and generate a new one.",
+                code="CONTENT_NOT_EDITABLE",
+            )
+        raise _not_found(item_id)
+    note, topic, unit = row
+    note.body_md = body_markdown
+    note.version += 1
+    note.updated_at = clock.now()
+    await session.commit()
+    return note_item(note, topic, unit)
+
+
+async def pending_review_counts(session: AsyncSession, older_than: datetime) -> tuple[int, int]:
+    """For the dashboard: (notes + diagrams waiting for review, how many are older)."""
+    notes, old_notes = await repository.pending_review_counts(session, older_than)
+    diagrams, old_diagrams = await visuals_service.waiting_for_review_counts(session, older_than)
+    return notes + diagrams, old_notes + old_diagrams
+
+
+async def notes_made_per_day(session: AsyncSession, since: datetime) -> dict[date, int]:
+    return await repository.notes_made_per_day(session, since)
+
+
+# =========================================================================== admin: RAG sources
+# Used by admin/rag_admin.py. The ai_service RAG_INGEST job chunks + embeds the file
+# (ai_service/rag/ingestion/pipeline.py). It reads files from a path on its own disk, so in dev
+# (no STORAGE_BUCKET) the upload is stored under LOCAL_STORAGE_DIR and that path is saved.
+# TODO(Samni): with a bucket, the ai_service must download the file first (pipeline.run_job).
+
+RAG_LIST_LIMIT = 200
+
+
+def _rag_out(doc: SourceDocument, unit_number: int | None) -> RagSourceOut:
+    return RagSourceOut(
+        id=doc.id,
+        title=doc.title,
+        source_type=doc.source_type.value,
+        unit_number=unit_number,
+        year=doc.year,
+        status=doc.status.value,
+        chunk_count=doc.chunk_count or 0,
+        page_count=doc.page_count,
+        error_message=doc.error_message,
+        indexed_at=doc.indexed_at,
+        updated_at=doc.updated_at,
+    )
+
+
+async def admin_list_rag_sources(session: AsyncSession) -> list[RagSourceOut]:
+    return [
+        _rag_out(d, n) for d, n in await repository.list_source_documents(session, RAG_LIST_LIMIT)
+    ]
+
+
+async def _read_rag_file(file: UploadFile) -> tuple[bytes, str]:
+    """(bytes, extension). 413 FILE_TOO_LARGE · 415 UNSUPPORTED_FILE_TYPE · 422 EMPTY_FILE."""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in RAG_EXTENSIONS:
+        raise AppError(
+            "Upload a PDF, DOCX, TXT or Markdown file",
+            code="UNSUPPORTED_FILE_TYPE",
+            status_code=415,
+        )
+    data = await file.read(MAX_RAG_BYTES + 1)
+    if len(data) > MAX_RAG_BYTES:
+        raise AppError("The file is larger than 40 MB", code="FILE_TOO_LARGE", status_code=413)
+    if not data:
+        raise AppError("The file is empty", code="EMPTY_FILE", status_code=422)
+    if suffix == ".pdf" and not data.startswith(b"%PDF-"):
+        raise AppError("The file is not a valid PDF", code="UNSUPPORTED_FILE_TYPE", status_code=415)
+    return data, suffix
+
+
+async def admin_upload_rag_source(
+    session: AsyncSession,
+    admin_id: uuid.UUID,
+    *,
+    file: UploadFile,
+    title: str,
+    source_type: SourceType,
+    unit_number: int | None,
+    year: int | None,
+    background_tasks: BackgroundTasks,
+) -> RagJobOut:
+    """Store the file, add a `source_documents` row (pending) and queue a RAG_INGEST job.
+
+    404 UNIT_NOT_FOUND when `unit_number` is not in the syllabus."""
+    data, suffix = await _read_rag_file(file)
+    unit_id = None
+    if unit_number is not None:
+        unit = next(
+            (u for u in await syllabus_service.list_units(session) if u.number == unit_number), None
+        )
+        if unit is None:
+            raise NotFoundError(f"Unit {unit_number} not found", code="UNIT_NOT_FOUND")
+        unit_id = unit.id
+
+    document_id = uuid.uuid4()
+    path = f"rag_sources/{document_id}{suffix}"
+    content_type = PDF_MIME_TYPE if suffix == ".pdf" else "application/octet-stream"
+    await run_in_threadpool(storage.upload_bytes, path, data, content_type)
+    # The ai_service opens the file by this path (see the note above).
+    file_path = (
+        (Path(get_settings().LOCAL_STORAGE_DIR) / path).as_posix()
+        if storage.uses_local_files()
+        else path
+    )
+    doc = SourceDocument(
+        id=document_id,
+        title=" ".join(title.split())[:300],
+        source_type=source_type,
+        file_path=file_path,
+        sha256=hashlib.sha256(data).hexdigest(),
+        status=DocumentStatus.PENDING,
+        unit_id=unit_id,
+        year=year,
+        chunk_count=0,
+        uploaded_by=admin_id,
+    )
+    await repository.add_row(session, doc)
+    job = await jobs.create_job(
+        session, JobType.RAG_INGEST, {"document_id": str(document_id)}, requested_by=admin_id
+    )
+    jobs.enqueue_job(job, background_tasks)
+    return RagJobOut(job_id=job.id, document_id=document_id)
+
+
+async def admin_reindex(
+    session: AsyncSession,
+    admin_id: uuid.UUID,
+    document_id: uuid.UUID | None,
+    background_tasks: BackgroundTasks,
+) -> RagJobOut:
+    """Re-ingest one document, or all of them (one job). 404 SOURCE_NOT_FOUND."""
+    if (
+        document_id is not None
+        and await repository.get_source_document(session, document_id) is None
+    ):
+        raise NotFoundError("Source document not found", code="SOURCE_NOT_FOUND")
+    payload: dict[str, Any] = (
+        {"document_id": str(document_id), "force": True}
+        if document_id is not None
+        else {"all": True, "force": True}
+    )
+    job = await jobs.create_job(session, JobType.RAG_INGEST, payload, requested_by=admin_id)
+    jobs.enqueue_job(job, background_tasks)
+    return RagJobOut(job_id=job.id, document_id=document_id)

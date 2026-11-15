@@ -10,7 +10,7 @@ python scripts/seed_dev.py --with-samples         # syllabus, groups, settings, 
 docker compose exec api python -m scripts.seed_dev --with-samples    # same, inside Docker
 ```
 
-Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation` -> `0005_learn_navigation`.
+Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_full_schema` -> `0004_visuals_generation` -> `0005_learn_navigation` -> `0006_moderation_flags` -> `0007_question_bank_codes` -> `0008_past_papers`.
 55 app tables (56 with Alembic's own `alembic_version`).
 
 ---
@@ -258,6 +258,7 @@ Only paths are stored in the database; files live in Firebase Storage.
 | `answers/{user_id}/{response_id}/page-{n}.jpg` | `responses.image_paths` | planned (evaluation) |
 | `visuals/{concept_id or topic_id or general}/{visual_id}.png` | `visuals.image_path` | ✅ visuals (Kroki PNGs + illustrations) |
 | `posts/{post_id}/{n}.jpg` | `posts.image_paths` | planned (community) |
+| `past_papers/{past_paper_id}.pdf` (+ `-scheme.pdf`) | `past_papers.file_path`, `scheme_path` | ✅ admin past papers |
 | project-relative path, e.g. `data/rag_sources/unit_06.pdf` | `source_documents.file_path` | used now (RAG ingestion) |
 
 In dev without a bucket, the same paths are used under `LOCAL_STORAGE_DIR`.
