@@ -22,6 +22,7 @@ async def test_health_with_token(ai_client):
         "llm": "fake-llm",
         "embedder": "fake-embedder",
         "image": "fake-image",
+        "llm_client": "mock-llm",
     }
 
 
