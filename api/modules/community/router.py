@@ -14,10 +14,7 @@
     DELETE /api/v1/replies/{id}               delete my reply (soft delete; admins too)
     POST   /api/v1/posts/{id}/accept/{reply}  the post's author marks the best answer
     DELETE /api/v1/posts/{id}/accept          the post's author un-marks it
-
-Planned endpoints (details in README.md):
-    POST   /api/v1/votes                      Up/down vote a post or reply
-    POST   /api/v1/posts/{id}/report          Report a post (and replies) to moderators
+    POST   /api/v1/votes                      +1 / -1 / 0 (remove) on a post or reply
 
 All need a logged-in user.
 Rule: routers only validate input, check the role and call `service`. No SQL here.
@@ -42,6 +39,8 @@ from api.modules.community.schemas import (
     ReplyCreate,
     ReplyOut,
     ReplyUpdate,
+    VoteIn,
+    VoteOut,
 )
 
 router = APIRouter(tags=["Community"])
@@ -185,3 +184,13 @@ async def unaccept_reply(
 ) -> PostDetailOut:
     """Only the post's author: 403 `NOT_POST_AUTHOR`."""
     return await service.accept_reply(session, user, post_id, None)
+
+
+# ---------------------------------------------------------------- votes
+
+
+@router.post("/votes", response_model=VoteOut, summary="Vote on a post or reply")
+async def vote(req: VoteIn, user: CurrentUserDep, session: SessionDep) -> VoteOut:
+    """Send `post_id` OR `reply_id`, and `value` 1 / -1 (0 removes my vote). Voting again
+    changes my vote. Members only (403 `NOT_A_MEMBER`); not on my own (403 `CANNOT_VOTE_OWN`)."""
+    return await service.vote(session, user, req)

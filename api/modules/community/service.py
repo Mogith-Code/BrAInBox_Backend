@@ -36,9 +36,11 @@ from api.modules.community.schemas import (
     ReplyCreate,
     ReplyOut,
     ReplyUpdate,
+    VoteIn,
+    VoteOut,
 )
 from api.modules.syllabus import service as syllabus_service
-from shared.db.models import CommunityGroup, Post, Reply
+from shared.db.models import CommunityGroup, Post, Reply, Vote
 from shared.enums import ModerationStatus
 
 MODULE_NAME = "community"
@@ -47,6 +49,9 @@ MODULE_NAME = "community"
 # moderation (MODERATE_POST) is added, change this to ModerationStatus.PENDING - and only count a
 # reply in the post's reply_count once it is approved.
 NEW_CONTENT_STATUS = ModerationStatus.APPROVED
+# Safety net while there is no review before publishing: a post / reply reported by this many
+# different people is hidden (flagged) until an admin decides. 0 turns it off.
+REPORTS_TO_HIDE = 3
 UNNAMED_AUTHOR = "Student"
 
 
@@ -360,3 +365,56 @@ async def accept_reply(
     await repository.set_accepted_reply(session, post.id, reply_id)
     await session.commit()
     return await get_post(session, user, post_id)
+
+
+# =========================================================================== votes
+
+
+async def _target(
+    session: AsyncSession,
+    user: CurrentUser,
+    *,
+    post_id: uuid.UUID | None,
+    reply_id: uuid.UUID | None,
+) -> tuple[Post | Reply, Post]:
+    """The visible post or reply being voted on, and the post it belongs to."""
+    if post_id is not None:
+        post = (await _visible_post(session, user, post_id)).post
+        return post, post
+    assert reply_id is not None
+    reply = (await _visible_reply(session, user, reply_id)).reply
+    return reply, (await _visible_post(session, user, reply.post_id)).post
+
+
+async def vote(session: AsyncSession, user: CurrentUser, req: VoteIn) -> VoteOut:
+    """POST /votes: +1 / -1 on a post or reply, 0 removes my vote. Voting again changes my vote
+    (the score moves by the difference). Members only, never on my own post or reply."""
+    target, post = await _target(session, user, post_id=req.post_id, reply_id=req.reply_id)
+    if target.author_id == user.id:
+        raise ForbiddenError("You can't vote on your own post or reply", code="CANNOT_VOTE_OWN")
+    await _require_member(session, user, post)
+    model: type[Post] | type[Reply] = Post if req.post_id else Reply
+
+    await repository.lock_target(session, model, target.id)  # one vote at a time on it
+    existing = await repository.get_vote(
+        session, user.id, post_id=req.post_id, reply_id=req.reply_id
+    )
+    old = existing.value if existing else 0
+    if req.value == 0:
+        if existing is not None:
+            await session.delete(existing)
+    elif existing is not None:
+        existing.value = req.value
+    else:
+        session.add(
+            Vote(user_id=user.id, post_id=req.post_id, reply_id=req.reply_id, value=req.value)
+        )
+    await session.flush()
+    score = await repository.add_score(session, model, target.id, req.value - old)
+    await session.commit()
+    return VoteOut(
+        target_type="post" if req.post_id else "reply",
+        target_id=target.id,
+        my_vote=req.value,
+        score=score,
+    )
