@@ -16,10 +16,11 @@ from ai_service.pipelines.questions import (
     generate_questions,
     mcq_mapping,
     paper_builder,
+    past_paper_extract,
     quality_checks,
 )
 from ai_service.pipelines.recommendations import rank_resources
-from ai_service.pipelines.summarization import summarize
+from ai_service.pipelines.summarization import learn_upload, summarize
 from ai_service.pipelines.visuals import decide_visual
 from ai_service.rag.ingestion import pipeline as rag_ingest
 from ai_service.schemas.jobs import JobRunRequest, JobRunResponse
@@ -45,6 +46,8 @@ DISPATCH: dict[JobType, PipelineFn] = {
     JobType.SUGGEST_ANSWER: suggested_answer.run,
     JobType.RANK_RESOURCES: rank_resources.run,
     JobType.RAG_INGEST: rag_ingest.run_job,
+    JobType.EXTRACT_PAST_PAPER: past_paper_extract.run,
+    JobType.LEARN_UPLOAD_SUMMARY: learn_upload.run,
 }
 
 

@@ -79,6 +79,8 @@ class ContentStatus(StrEnum):
 class ContentSource(StrEnum):
     AI = "ai"
     ADMIN = "admin"
+    MANUAL = "manual"  # written by hand (Learn tab: a student's or admin's own note)
+    UPLOAD = "upload"  # made from a student's upload summary (Learn tab "save to short notes")
 
 
 class NoteKind(StrEnum):
@@ -86,6 +88,22 @@ class NoteKind(StrEnum):
 
     FULL = "full"
     SHORT = "short"
+
+
+class NoteDepth(StrEnum):
+    """How long generated Learn notes are: quick ~300 words, standard ~900, detailed ~1800."""
+
+    QUICK = "quick"
+    STANDARD = "standard"
+    DETAILED = "detailed"
+
+
+class SummaryLength(StrEnum):
+    """How long a Learn upload summary is."""
+
+    SHORT = "short"
+    MEDIUM = "medium"
+    DETAILED = "detailed"
 
 
 class UploadStatus(StrEnum):
@@ -396,5 +414,7 @@ class JobType(StrEnum):
     SUGGEST_ANSWER = "suggest_answer"
     RANK_RESOURCES = "rank_resources"
     RAG_INGEST = "rag_ingest"
+    EXTRACT_PAST_PAPER = "extract_past_paper"  # admin past-paper upload: OCR + split
+    LEARN_UPLOAD_SUMMARY = "learn_upload_summary"  # Learn tab: PDF/DOCX/TXT/image -> summary
     # Every value needs a pipeline in ai_service/jobs (a test checks this), so add
     # tag_post / embed_concepts / next_action together with their pipeline.

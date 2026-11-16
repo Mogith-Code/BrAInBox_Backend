@@ -32,7 +32,6 @@ from api.core.security import CurrentUserDep
 from api.modules.community import service
 from api.modules.community.repository import PostSort
 from api.modules.community.schemas import (
-    GroupOut,
     ModuleStatus,
     PostCreate,
     PostDetailOut,
@@ -43,6 +42,7 @@ from api.modules.community.schemas import (
     ReplyUpdate,
     ReportIn,
     ReportOut,
+    StudyGroupOut,
     VoteIn,
     VoteOut,
 )
@@ -59,26 +59,28 @@ async def module_status(user: CurrentUserDep) -> ModuleStatus:
 # ---------------------------------------------------------------- groups
 
 
-@router.get("/groups", response_model=list[GroupOut], summary="Study groups I can see")
-async def list_groups(user: CurrentUserDep, session: SessionDep) -> list[GroupOut]:
+@router.get("/groups", response_model=list[StudyGroupOut], summary="Study groups I can see")
+async def list_groups(user: CurrentUserDep, session: SessionDep) -> list[StudyGroupOut]:
     """ "General" first, then the unit groups. Private groups only when I'm a member."""
-    return await service.list_groups(session, user)
+    return await service.list_visible_groups(session, user)
 
 
-@router.get("/groups/{group_id}", response_model=GroupOut, summary="One study group")
-async def get_group(group_id: str, user: CurrentUserDep, session: SessionDep) -> GroupOut:
+@router.get("/groups/{group_id}", response_model=StudyGroupOut, summary="One study group")
+async def get_group(group_id: str, user: CurrentUserDep, session: SessionDep) -> StudyGroupOut:
     """`group_id`: the UUID or the slug (`general`, `unit-6`). 404 `GROUP_NOT_FOUND`."""
     return await service.get_group(session, user, group_id)
 
 
-@router.post("/groups/{group_id}/join", response_model=GroupOut, summary="Join a study group")
-async def join_group(group_id: str, user: CurrentUserDep, session: SessionDep) -> GroupOut:
+@router.post("/groups/{group_id}/join", response_model=StudyGroupOut, summary="Join a study group")
+async def join_group(group_id: str, user: CurrentUserDep, session: SessionDep) -> StudyGroupOut:
     """Safe to repeat: joining a group I'm already in changes nothing."""
     return await service.join_group(session, user, group_id)
 
 
-@router.delete("/groups/{group_id}/join", response_model=GroupOut, summary="Leave a study group")
-async def leave_group(group_id: str, user: CurrentUserDep, session: SessionDep) -> GroupOut:
+@router.delete(
+    "/groups/{group_id}/join", response_model=StudyGroupOut, summary="Leave a study group"
+)
+async def leave_group(group_id: str, user: CurrentUserDep, session: SessionDep) -> StudyGroupOut:
     """Safe to repeat: leaving a group I'm not in changes nothing."""
     return await service.leave_group(session, user, group_id)
 

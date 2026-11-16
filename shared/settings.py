@@ -40,6 +40,12 @@ class SharedSettings(BaseSettings):
     # (they do when run from the repo root, and in docker compose through the `.:/app` mount).
     LOCAL_STORAGE_DIR: str = "data/local_storage"
 
+    # --- Learn tab uploads (POST /api/v1/learn/uploads). Without STORAGE_BUCKET the files are
+    # kept in UPLOAD_DIR (the api writes, the ai_service reads). With a bucket they go to
+    # Storage under uploads/learn/. Files larger than MAX_UPLOAD_MB are refused (413).
+    UPLOAD_DIR: str = "data/local_storage/learn_uploads"
+    MAX_UPLOAD_MB: int = 10
+
     # Public URL of the logo (used in docs, emails, notifications)
     LOGO_URL: str = "/static/brand/logo_horizontal_1200.png"
 

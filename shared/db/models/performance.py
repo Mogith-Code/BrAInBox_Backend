@@ -154,6 +154,8 @@ class UserTopicProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("user_id", "topic_id", name="uq_user_topic_progress_user_topic"),
         CheckConstraint("score BETWEEN 0 AND 100", name="score_range"),
+        CheckConstraint("progress_percent BETWEEN 0 AND 100", name="progress_percent_range"),
+        CheckConstraint("seconds_spent >= 0", name="seconds_spent_positive"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -167,3 +169,8 @@ class UserTopicProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     score: Mapped[int] = mapped_column(Integer, default=0)  # 0..100
     is_weak: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Learn tab reading progress (POST /learn/topics/{id}/progress). `score` stays the
+    # performance module's practice score.
+    progress_percent: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    seconds_spent: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

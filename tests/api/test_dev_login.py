@@ -71,6 +71,13 @@ async def test_no_token_is_still_401_even_with_dev_login(dev_login_on: None) -> 
     assert response.status_code == 401  # no automatic login without a token
 
 
+async def test_no_token_from_docs_is_still_401(dev_login_on: None) -> None:
+    # Coming "from /docs" (Referer header) must not log anyone in automatically.
+    async with client_from("127.0.0.1") as c:
+        response = await c.get("/api/v1/units", headers={"Referer": "http://localhost:8000/docs"})
+    assert response.status_code == 401
+
+
 async def test_dev_token_is_refused_when_off() -> None:
     async with client_from("127.0.0.1") as c:
         response = await c.get("/api/v1/auth/me", headers={"Authorization": "Bearer dev-admin"})

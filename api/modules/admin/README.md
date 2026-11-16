@@ -16,14 +16,15 @@ Everything here is mounted under **`/api/v1/admin`** and requires role **`admin`
 
 | File | Owner | Prefix | Planned endpoints |
 |---|---|---|---|
-| `content_admin.py` | Samni | `/admin/content` | notes CRUD, approve/reject, trigger note generation |
-| `rag_admin.py` | Samni | `/admin/rag` | `POST /documents` (upload + RAG_INGEST job), `GET /documents`, `POST /documents/{id}/reindex` |
-| `questions_admin.py` | Udith | `/admin/questions` | question bank, MCQ → misconception mapping, quality review queue, past papers |
-| `knowledge_admin.py` | Keshomigha | `/admin/knowledge` | model answers, answer points, keywords |
+| `dashboard_admin.py` | Samni | `/admin/dashboard` | ✅ KPIs, 14-day activity, newest reports, most missed topics (built in `service.build_dashboard`) |
+| `content_admin.py` | Samni | `/admin/content` | ✅ content library (notes, short notes, diagrams waiting for review), approve / reject / edit |
+| `rag_admin.py` | Samni | `/admin/rag` | ✅ sources list + upload (RAG_INGEST job) + reindex one or all |
+| `questions_admin.py` | Udith | `/admin/questions` | ✅ question bank + editor (publish rules, bulk actions); quality review and past papers (see below) |
+| `knowledge_admin.py` | Keshomigha | `/admin/model-answers` | ✅ model answers with marking points + keywords |
 | `syllabus_admin.py` | Keshomigha | `/admin/syllabus` | ✅ units / topics / concepts manager (details in `syllabus/README.md`) |
 | `analytics_admin.py` | Keshomigha | `/admin/analytics` | ✅ usage, performance, AI usage (details in `performance/README.md`) |
-| `moderation_admin.py` | Mogith | `/admin/moderation` | reports queue (posts, replies, visuals) |
-| `users_admin.py` | Mogith | `/admin/users` | list users, change role, disable |
+| `moderation_admin.py` | Mogith | `/admin/moderation`, `/admin/community` | ✅ reports queue (posts, replies, visuals, grouped per target), resolve keep/warn/remove, study groups |
+| `users_admin.py` | Mogith | `/admin/users` | ✅ students list (search, filters, status, avg mastery) + suspend / reinstate |
 
 Placeholders right now: `GET /api/v1/admin/<area>/status` → `{"module": "<file>", "status": "todo"}`.
 
@@ -31,5 +32,5 @@ Placeholders right now: `GET /api/v1/admin/<area>/status` → `{"module": "<file
 
 - Admin route files are routers only. They call the **service** of the module that owns the data
   (e.g. `api.modules.content.service`), never another module's repository.
-- Every admin action that changes data should write an `audit_log` row (`service.py`, TODO).
+- Every admin action that changes data writes an `audit_log` row with `service.record_audit(...)`.
 - Tests: `tests/api/test_admin.py`.

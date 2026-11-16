@@ -18,6 +18,8 @@ from shared.db.models.content import LibraryItem, Note, Summary, Upload
 from shared.db.models.evaluation import Evaluation
 from shared.db.models.exam import Attempt, Paper, PaperQuestion, Response
 from shared.db.models.knowledge import AnswerPoint, Keyword, ModelAnswer
+from shared.db.models.learn import TopicBookmark
+from shared.db.models.past_paper import PastPaper, PastPaperQuestion
 from shared.db.models.performance import (
     ConceptMastery,
     MasterySnapshot,
@@ -72,6 +74,8 @@ __all__ = [
     "Paper",
     "PaperQuestion",
     "PasswordResetToken",
+    "PastPaper",
+    "PastPaperQuestion",
     "PlanItem",
     "Post",
     "Question",
@@ -90,6 +94,7 @@ __all__ = [
     "Subject",
     "Summary",
     "Topic",
+    "TopicBookmark",
     "Unit",
     "UnitMastery",
     "Upload",

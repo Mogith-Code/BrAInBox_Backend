@@ -19,6 +19,8 @@ from sqlalchemy.orm import aliased
 from shared.db.models import (
     AIUsageLog,
     Attempt,
+    Concept,
+    ConceptMastery,
     MCQOption,
     Misconception,
     Mistake,
@@ -34,10 +36,24 @@ from shared.db.models import (
     User,
     UserTopicProgress,
 )
-from shared.enums import ContentStatus, MistakeType, QuestionType, TopicProgressStatus, UserRole
+from shared.enums import (
+    AttemptStatus,
+    ContentStatus,
+    MistakeType,
+    QuestionType,
+    TopicProgressStatus,
+    UserRole,
+)
 
-# Attempts in these states have been marked, so their responses can be analysed.
-FINISHED_ATTEMPT_STATUSES = ("submitted", "graded")
+# Attempts in these states have been marked, so their answers count everywhere in this module
+# (topic insights, mistakes, Learn progress, admin analytics). Every attempt kind counts,
+# the diagnostic included. `evaluated` = marked by written-answer evaluation; its MCQ answers
+# count too. Not counted: in_progress (not marked yet) and abandoned (never finished).
+FINISHED_ATTEMPT_STATUSES = (
+    AttemptStatus.SUBMITTED,
+    AttemptStatus.GRADED,
+    AttemptStatus.EVALUATED,
+)
 
 
 async def get_attempt(session: AsyncSession, attempt_id: uuid.UUID) -> Attempt | None:
@@ -62,6 +78,7 @@ class AnswerRow:
     misconception_id: uuid.UUID | None  # misconception behind the selected option
     is_correct: bool | None
     created_at: datetime
+    unit_id: uuid.UUID | None = None  # the topic's unit (None for questions without a topic)
 
 
 async def get_mcq_answer_rows(
@@ -84,6 +101,7 @@ async def get_mcq_answer_rows(
             MCQOption.misconception_id,
             Response.is_correct,
             Response.created_at,
+            Topic.unit_id,
         )
         .join(Attempt, Attempt.id == Response.attempt_id)
         .join(Question, Question.id == Response.question_id)
@@ -161,6 +179,75 @@ async def add_unit_mastery(session: AsyncSession, rows: list[UnitMastery]) -> No
     await session.flush()
 
 
+# ---------------------------------------------------------------- concepts
+async def get_concept_links(
+    session: AsyncSession, question_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """{question_id: [concept_id, ...]} from question_concepts. Unlinked questions are left out."""
+    if not question_ids:
+        return {}
+    result = await session.execute(
+        select(QuestionConcept.question_id, QuestionConcept.concept_id).where(
+            QuestionConcept.question_id.in_(question_ids)
+        )
+    )
+    links: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for question_id, concept_id in result.all():
+        links.setdefault(question_id, []).append(concept_id)
+    return links
+
+
+@dataclass
+class ConceptInfo:
+    id: uuid.UUID
+    code: str | None
+    name: str
+    topic_id: uuid.UUID
+    topic: str
+    unit_number: int
+    unit: str
+
+
+async def get_concepts(session: AsyncSession, concept_ids: list[uuid.UUID]) -> list[ConceptInfo]:
+    """The concepts with their topic and unit (outdated ones too: they are the student's history)."""
+    if not concept_ids:
+        return []
+    result = await session.execute(
+        select(
+            Concept.id,
+            Concept.code,
+            Concept.name,
+            Topic.id.label("topic_id"),
+            Topic.title.label("topic"),
+            Unit.number.label("unit_number"),
+            Unit.title.label("unit"),
+        )
+        .join(Topic, Topic.id == Concept.topic_id)
+        .join(Unit, Unit.id == Topic.unit_id)
+        .where(Concept.id.in_(concept_ids))
+    )
+    return [ConceptInfo(**row._asdict()) for row in result.all()]
+
+
+async def save_concept_mastery(session: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Insert or replace the student's mastery of these concepts. No commit."""
+    if not rows:
+        return
+    stmt = insert(ConceptMastery).values(rows)
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_concept_mastery_user_concept",
+            set_={
+                "mastery_score": stmt.excluded.mastery_score,
+                "attempts_count": stmt.excluded.attempts_count,
+                "correct_count": stmt.excluded.correct_count,
+                "last_practiced_at": stmt.excluded.last_practiced_at,
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+
 async def latest_unit_mastery(
     session: AsyncSession, user_id: uuid.UUID, before: datetime | None = None
 ) -> dict[uuid.UUID, int]:
@@ -189,6 +276,25 @@ async def latest_unit_mastery_rows(
         .order_by(UnitMastery.unit_id, UnitMastery.created_at.desc())
     )
     return {row.unit_id: row for row in result.scalars()}
+
+
+async def average_mastery_by_user(
+    session: AsyncSession, user_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, float]:
+    """{user_id: average of the newest mastery per unit}. Students with no mastery are left out."""
+    if not user_ids:
+        return {}
+    latest = (
+        select(UnitMastery.user_id, UnitMastery.mastery)
+        .where(UnitMastery.user_id.in_(user_ids))
+        .ext(distinct_on(UnitMastery.user_id, UnitMastery.unit_id))
+        .order_by(UnitMastery.user_id, UnitMastery.unit_id, UnitMastery.created_at.desc())
+        .subquery()
+    )
+    result = await session.execute(
+        select(latest.c.user_id, func.avg(latest.c.mastery)).group_by(latest.c.user_id)
+    )
+    return {user_id: float(avg) for user_id, avg in result.all()}
 
 
 # ---------------------------------------------------------------- study activity (streak)
@@ -326,8 +432,9 @@ class MistakeRow:
 
 def _mistakes_query(user_id: uuid.UUID) -> Select[Any]:
     selected = aliased(MCQOption)
-    return (
-        select(
+    # More than 10 columns: SQLAlchemy's typing gives up, so say "any row" explicitly.
+    stmt: Select[Any] = (
+        select(  # type: ignore[assignment]
             Mistake,
             Question.stem.label("question"),
             Question.explanation.label("explanation"),
@@ -352,6 +459,7 @@ def _mistakes_query(user_id: uuid.UUID) -> Select[Any]:
         .outerjoin(Misconception, Misconception.id == Mistake.misconception_id)
         .where(Mistake.user_id == user_id)
     )
+    return stmt
 
 
 def _mistake_row(row: Any) -> MistakeRow:
@@ -606,3 +714,39 @@ async def daily_ai_requests(session: AsyncSession, since: datetime) -> dict[date
         select(day, func.count(AIUsageLog.id)).where(AIUsageLog.created_at >= since).group_by(day)
     )
     return {row_day: count for row_day, count in result.all()}
+
+
+async def daily_finished_attempts(session: AsyncSession, since: datetime) -> dict[date, int]:
+    """{Sri Lanka date: students' quizzes / papers / diagnostics finished} - dashboard."""
+    day = func.date(func.timezone("Asia/Colombo", Attempt.submitted_at))
+    result = await session.execute(
+        select(day, func.count(Attempt.id))
+        .join(User, User.id == Attempt.user_id)
+        .where(
+            _IS_STUDENT,
+            Attempt.status.in_(FINISHED_ATTEMPT_STATUSES),
+            Attempt.submitted_at >= since,
+        )
+        .group_by(day)
+    )
+    return {d: int(n) for d, n in result.all()}
+
+
+async def top_misconception_per_topic(
+    session: AsyncSession, since: datetime, topic_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """{topic_id: the misconception students chose most often in that topic}."""
+    if not topic_ids:
+        return {}
+    chosen = func.count(Response.id)
+    stmt = (
+        _valid_answers(since, Question.topic_id, Misconception.title, chosen.label("n"))
+        .join(Misconception, Misconception.id == MCQOption.misconception_id)
+        .where(Question.topic_id.in_(topic_ids), Response.is_correct.is_(False))
+        .group_by(Question.topic_id, Misconception.id)
+        .order_by(Question.topic_id, chosen.desc(), Misconception.title)
+    )
+    top: dict[uuid.UUID, str] = {}
+    for topic_id, title, _ in (await session.execute(stmt)).all():
+        top.setdefault(topic_id, title)
+    return top
