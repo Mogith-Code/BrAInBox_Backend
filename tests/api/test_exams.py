@@ -264,3 +264,49 @@ async def test_unit_paper_labels_questions_with_their_unit(free_unit, db_session
     assert [q["topic"] for q in paper["questions"]] == [f"Unit {free_unit.number}: Genetics"] * 2
     saved = await db_session.get(Question, uuid.UUID(paper["questions"][0]["id"]))
     assert saved is not None and saved.unit_id == free_unit.id  # the unit is saved too
+
+
+# --------------------------------------------------------------------------- old /exam/* URLs
+
+
+@pytest.mark.parametrize(
+    "path", ["/exam/generate-paper", "/exam/generate-paper-by-units", "/exam/evaluate"]
+)
+async def test_old_exam_urls_need_login(anon_client, path):  # type: ignore[no-untyped-def]
+    response = await anon_client.post(path, json={})
+    assert response.status_code == 401
+
+
+async def test_old_exam_urls_are_hidden_from_docs(client):  # type: ignore[no-untyped-def]
+    paths = (await client.get("/openapi.json")).json()["paths"]
+    assert not any(p.startswith("/exam/") for p in paths)
+
+
+async def test_old_evaluate_rejects_a_bad_question_id(client):  # type: ignore[no-untyped-def]
+    body = {"paper_id": str(uuid.uuid4()), "answers": [{"question_id": "nope", "selected": "A"}]}
+    response = await client.post("/exam/evaluate", json=body)
+    assert response.status_code == 422  # a clear validation error, not a server crash
+
+
+@pytest.mark.db
+async def test_old_exam_urls_work_like_the_new_ones(exam_data):  # type: ignore[no-untyped-def]
+    async with _client(_app_with(FakeAIClient())) as c:
+        generated = await c.post(
+            "/exam/generate-paper", json={"topic_ids": [str(exam_data.id)], "num_questions": 2}
+        )
+        assert generated.status_code == 200, generated.text
+        paper = generated.json()
+        q1, q2 = paper["questions"]
+        evaluated = await c.post(
+            "/exam/evaluate",
+            json={
+                "paper_id": paper["paper_id"],
+                "answers": [
+                    {"question_id": q1["id"], "selected": "B"},
+                    {"question_id": q2["id"], "selected": "A"},
+                ],
+                "explain": False,
+            },
+        )
+    assert evaluated.status_code == 200, evaluated.text
+    assert evaluated.json()["correct"] == 1

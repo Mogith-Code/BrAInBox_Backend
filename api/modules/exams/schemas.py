@@ -83,6 +83,15 @@ class SubmitRequest(BaseModel):
     explain: bool = True  # false = skip the AI explanations (faster)
 
 
+class LegacyEvaluateRequest(BaseModel):
+    """Body of the old `POST /exam/evaluate` (Udith's standalone exam app): the paper id is in
+    the body instead of the URL. Same answers as SubmitRequest."""
+
+    paper_id: uuid.UUID
+    answers: list[AnswerItem]
+    explain: bool = True
+
+
 class QuestionResult(BaseModel):
     question_id: uuid.UUID
     topic: str
