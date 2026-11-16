@@ -26,6 +26,7 @@ from ai_service.providers.fakes import (
     FakeOCR,
     FakeStorage,
 )
+from ai_service.providers.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -165,12 +166,22 @@ def get_storage() -> StorageProvider:
     return _cache["storage"]  # type: ignore[no-any-return]
 
 
+def get_llm_client() -> "LLMClient":
+    """The Learn tab LLM wrapper (LLM_PROVIDER=mock | gemini), see providers/llm_client.py."""
+    from ai_service.providers.llm_client import build_llm_client
+
+    if "llm_client" not in _cache:
+        _cache["llm_client"] = build_llm_client()
+    return _cache["llm_client"]  # type: ignore[no-any-return]
+
+
 def provider_names() -> dict[str, str]:
     """Which provider is active for each kind (shown on /health)."""
     return {
         "llm": getattr(get_llm(), "name", "?"),
         "embedder": getattr(get_embedder(), "name", "?"),
         "image": getattr(get_image_generator(), "name", "?"),
+        "llm_client": getattr(get_llm_client(), "name", "?"),
     }
 
 
