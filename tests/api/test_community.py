@@ -567,3 +567,204 @@ async def test_accepting_an_answer(client, forum, db_session):
         assert (await other.delete(f"/api/v1/replies/{first['id']}")).status_code == 204
     after = (await client.get(f"/api/v1/posts/{mine.id}")).json()
     assert after["accepted_reply_id"] is None
+
+
+# --------------------------------------------------------------------------- votes + reports (no DB)
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/v1/votes", {"post_id": str(uuid.uuid4()), "value": 1}),
+        (f"/api/v1/posts/{uuid.uuid4()}/report", {"reason": "spam"}),
+        (f"/api/v1/replies/{uuid.uuid4()}/report", {"reason": "spam"}),
+    ],
+)
+async def test_votes_and_reports_require_login(anon_client, path, body):
+    assert (await anon_client.post(path, json=body)).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"value": 1},  # no target
+        {"post_id": str(uuid.uuid4()), "reply_id": str(uuid.uuid4()), "value": 1},  # two targets
+        {"post_id": str(uuid.uuid4()), "value": 2},
+        {"post_id": str(uuid.uuid4())},
+    ],
+)
+async def test_vote_validation(client, body):
+    assert (await client.post("/api/v1/votes", json=body)).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body", [{}, {"reason": "boring"}, {"reason": "spam", "details": "x" * 1001}]
+)
+async def test_report_validation(client, body):
+    response = await client.post(f"/api/v1/posts/{uuid.uuid4()}/report", json=body)
+    assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------- votes (DB)
+
+
+async def _vote(client, value, **target):  # type: ignore[no-untyped-def]
+    body = {key: str(value_) for key, value_ in target.items()} | {"value": value}
+    return await client.post("/api/v1/votes", json=body)
+
+
+@pytest.mark.db
+async def test_voting_on_a_post(client, forum, db_session):
+    post = await _post(db_session, forum.group, OTHER.id, "Question")
+
+    up = (await _vote(client, 1, post_id=post.id)).json()
+    assert (up["target_type"], up["my_vote"], up["score"]) == ("post", 1, 1)
+    again = (await _vote(client, 1, post_id=post.id)).json()
+    assert again["score"] == 1  # voting the same again changes nothing
+    down = (await _vote(client, -1, post_id=post.id)).json()
+    assert down["score"] == -1  # changed my vote: moves by 2
+    detail = (await client.get(f"/api/v1/posts/{post.id}")).json()
+    assert (detail["score"], detail["my_vote"]) == (-1, -1)
+
+    removed = (await _vote(client, 0, post_id=post.id)).json()
+    assert (removed["my_vote"], removed["score"]) == (0, 0)
+    assert (await _vote(client, 0, post_id=post.id)).json()["score"] == 0  # nothing to remove
+
+
+@pytest.mark.db
+async def test_voting_on_a_reply(client, forum, db_session):
+    post = await _post(db_session, forum.group, STUDENT.id, "My question")
+    async with _client_as(OTHER) as other:
+        reply = (await other.post(f"/api/v1/posts/{post.id}/replies", json={"body": "a"})).json()
+    voted = (await _vote(client, 1, reply_id=reply["id"])).json()
+    assert (voted["target_type"], voted["score"]) == ("reply", 1)
+    detail = (await client.get(f"/api/v1/posts/{post.id}")).json()
+    assert (detail["replies"][0]["score"], detail["replies"][0]["my_vote"]) == (1, 1)
+    assert detail["score"] == 0  # the post's own score is separate
+
+
+@pytest.mark.db
+async def test_vote_rules(client, forum, db_session):
+    mine = await _post(db_session, forum.group, STUDENT.id, "Mine")
+    own = await _vote(client, 1, post_id=mine.id)
+    assert own.status_code == 403
+    assert own.json()["error"]["code"] == "CANNOT_VOTE_OWN"
+
+    outside = CommunityGroup(name="Outside", slug=f"outside-{uuid.uuid4().hex[:8]}")
+    db_session.add(outside)
+    await db_session.flush()
+    not_member = await _post(db_session, outside, OTHER.id, "Not my group")
+    try:
+        blocked = await _vote(client, 1, post_id=not_member.id)
+        assert blocked.json()["error"]["code"] == "NOT_A_MEMBER"
+        missing = await _vote(client, 1, post_id=uuid.uuid4())
+        assert missing.json()["error"]["code"] == "POST_NOT_FOUND"
+    finally:
+        await db_session.execute(delete(CommunityGroup).where(CommunityGroup.id == outside.id))
+        await db_session.commit()
+
+
+@pytest.mark.db
+async def test_votes_at_the_same_moment_count_right(client, forum, db_session):
+    post = await _post(db_session, forum.group, OTHER.id, "Popular")
+    reply = Reply(post_id=post.id, author_id=OTHER.id, body="r",
+                  moderation_status=ModerationStatus.APPROVED)  # fmt: skip
+    db_session.add(reply)
+    await db_session.commit()
+    third = User(firebase_uid=f"voter-{uuid.uuid4().hex[:8]}", role=UserRole.STUDENT)
+    db_session.add(third)
+    await db_session.flush()
+    db_session.add(GroupMember(group_id=forum.group.id, user_id=third.id))
+    await db_session.commit()
+    third_user = CurrentUser(id=third.id, firebase_uid=third.firebase_uid, email=None,
+                             role=UserRole.STUDENT)  # fmt: skip
+    try:
+        # the same student taps twice at once: counted once
+        await asyncio.gather(_vote(client, 1, post_id=post.id), _vote(client, 1, post_id=post.id))
+        # two students at once: both counted
+        async with _client_as(third_user) as other:
+            await asyncio.gather(
+                _vote(client, -1, reply_id=reply.id), _vote(other, -1, reply_id=reply.id)
+            )
+            await _vote(other, 1, post_id=post.id)
+        detail = (await client.get(f"/api/v1/posts/{post.id}")).json()
+        assert detail["score"] == 2
+        assert detail["replies"][0]["score"] == -2
+    finally:
+        await db_session.execute(delete(User).where(User.id == third.id))
+        await db_session.commit()
+
+
+# --------------------------------------------------------------------------- reports (DB)
+
+
+@pytest.fixture
+async def reporters(db_session):
+    """Two more students to reach the 3-reporter limit (with the test student)."""
+    users = [User(firebase_uid=f"reporter-{uuid.uuid4().hex[:8]}", role=UserRole.STUDENT)
+             for _ in range(2)]  # fmt: skip
+    db_session.add_all(users)
+    await db_session.commit()
+    yield [
+        CurrentUser(id=u.id, firebase_uid=u.firebase_uid, email=None, role=UserRole.STUDENT)
+        for u in users
+    ]
+    await db_session.execute(delete(User).where(User.id.in_([u.id for u in users])))
+    await db_session.commit()
+
+
+@pytest.mark.db
+async def test_reporting_a_post(client, forum, db_session):
+    post = await _post(db_session, forum.group, OTHER.id, "Rude post")
+    mine = await _post(db_session, forum.group, STUDENT.id, "My post")
+
+    response = await client.post(
+        f"/api/v1/posts/{post.id}/report", json={"reason": "offensive", "details": "  rude  "}
+    )
+    assert response.status_code == 201, response.text
+    report = response.json()
+    assert (report["target_type"], report["reason"], report["status"]) == (
+        "post",
+        "offensive",
+        "pending",
+    )
+    again = await client.post(f"/api/v1/posts/{post.id}/report", json={"reason": "spam"})
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "ALREADY_REPORTED"
+    own = await client.post(f"/api/v1/posts/{mine.id}/report", json={"reason": "spam"})
+    assert own.json()["error"]["code"] == "CANNOT_REPORT_OWN"
+    # one report doesn't hide anything
+    assert (await client.get(f"/api/v1/posts/{post.id}")).status_code == 200
+
+
+@pytest.mark.db
+async def test_three_reports_hide_a_post(client, forum, db_session, reporters):
+    post = await _post(db_session, forum.group, OTHER.id, "Spam")
+    await client.post(f"/api/v1/posts/{post.id}/report", json={"reason": "spam"})
+    async with _client_as(reporters[0]) as second:
+        await second.post(f"/api/v1/posts/{post.id}/report", json={"reason": "spam"})
+    assert (await client.get(f"/api/v1/posts/{post.id}")).status_code == 200  # 2 of 3
+
+    async with _client_as(reporters[1]) as third:
+        await third.post(f"/api/v1/posts/{post.id}/report", json={"reason": "spam"})
+    hidden = await client.get(f"/api/v1/posts/{post.id}")
+    assert hidden.json()["error"]["code"] == "POST_NOT_FOUND"  # hidden from everyone else
+    async with _client_as(OTHER) as author:
+        own = (await author.get(f"/api/v1/posts/{post.id}")).json()
+    assert own["moderation_status"] == "flagged"  # the author sees it is under review
+
+
+@pytest.mark.db
+async def test_three_reports_hide_a_reply_and_uncount_it(client, forum, db_session, reporters):
+    post = await _post(db_session, forum.group, STUDENT.id, "Question")
+    async with _client_as(OTHER) as other:
+        reply = (await other.post(f"/api/v1/posts/{post.id}/replies", json={"body": "bad"})).json()
+    assert await _reply_count(client, post.id) == 1
+
+    await client.post(f"/api/v1/replies/{reply['id']}/report", json={"reason": "offensive"})
+    for reporter in reporters:
+        async with _client_as(reporter) as c:
+            await c.post(f"/api/v1/replies/{reply['id']}/report", json={"reason": "offensive"})
+
+    detail = (await client.get(f"/api/v1/posts/{post.id}")).json()
+    assert detail["replies"] == [] and detail["reply_count"] == 0
