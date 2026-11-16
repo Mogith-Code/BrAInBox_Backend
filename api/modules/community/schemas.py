@@ -2,8 +2,9 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from shared.enums import ModerationStatus
 
@@ -131,3 +132,25 @@ class ReplyCreate(BaseModel):
 
 class ReplyUpdate(BaseModel):
     body: str = Field(min_length=1, max_length=5_000)
+
+
+# ---------------------------------------------------------------- votes
+class VoteIn(BaseModel):
+    """Vote on exactly one post or one reply. value 0 removes my vote."""
+
+    post_id: uuid.UUID | None = None
+    reply_id: uuid.UUID | None = None
+    value: Literal[1, -1, 0]
+
+    @model_validator(mode="after")
+    def one_target(self) -> "VoteIn":
+        if (self.post_id is None) == (self.reply_id is None):
+            raise ValueError("send exactly one of post_id or reply_id")
+        return self
+
+
+class VoteOut(BaseModel):
+    target_type: Literal["post", "reply"]
+    target_id: uuid.UUID
+    my_vote: int  # 1, -1 or 0
+    score: int  # the new total
