@@ -99,6 +99,7 @@ class PostOut(BaseModel):
     # The author sees "pending" / "flagged" on their own post; others only see approved posts.
     moderation_status: ModerationStatus
     score: int
+    my_vote: int  # my vote on it: 1, -1 or 0 (none)
     reply_count: int
     accepted_reply_id: uuid.UUID | None
     created_at: datetime
@@ -113,6 +114,7 @@ class ReplyOut(BaseModel):
     is_accepted: bool
     moderation_status: ModerationStatus
     score: int
+    my_vote: int  # my vote on it: 1, -1 or 0 (none)
     created_at: datetime
 
 

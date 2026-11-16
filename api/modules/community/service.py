@@ -142,6 +142,7 @@ def post_out(row: PostRow, user: CurrentUser) -> PostOut:
         is_mine=post.author_id == user.id,
         moderation_status=post.moderation_status,
         score=post.score,
+        my_vote=row.my_vote,
         reply_count=post.reply_count,
         accepted_reply_id=post.accepted_reply_id,
         created_at=post.created_at,
@@ -159,6 +160,7 @@ def reply_out(row: ReplyRow, user: CurrentUser) -> ReplyOut:
         is_accepted=reply.is_accepted,
         moderation_status=reply.moderation_status,
         score=reply.score,
+        my_vote=row.my_vote,
         created_at=reply.created_at,
     )
 

@@ -12,7 +12,16 @@ from sqlalchemy import ColumnElement, and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import CommunityGroup, GroupMember, Post, Reply, Topic, Unit, User
+from shared.db.models import (
+    CommunityGroup,
+    GroupMember,
+    Post,
+    Reply,
+    Topic,
+    Unit,
+    User,
+    Vote,
+)
 from shared.enums import ModerationStatus
 
 GroupRef = uuid.UUID | str  # a group's UUID or its slug ("unit-6")
@@ -122,13 +131,16 @@ class PostRow:
     post: Post
     author_name: str | None
     topic: str | None
+    my_vote: int = 0  # the user's vote: 1, -1 or 0
 
 
 def _post_query(user_id: uuid.UUID) -> Any:
     return (
-        select(Post, User.display_name, Topic.title)
+        select(Post, User.display_name, Topic.title, func.coalesce(Vote.value, 0))
         .outerjoin(User, User.id == Post.author_id)
         .outerjoin(Topic, Topic.id == Post.topic_id)
+        # at most one row: uq_votes_user_post
+        .outerjoin(Vote, and_(Vote.post_id == Post.id, Vote.user_id == user_id))
         .where(_visible(Post, user_id))
     )
 
@@ -172,6 +184,17 @@ async def add_post(session: AsyncSession, post: Post) -> None:
 class ReplyRow:
     reply: Reply
     author_name: str | None
+    my_vote: int = 0  # the user's vote: 1, -1 or 0
+
+
+def _reply_query(user_id: uuid.UUID) -> Any:
+    return (
+        select(Reply, User.display_name, func.coalesce(Vote.value, 0))
+        .outerjoin(User, User.id == Reply.author_id)
+        # at most one row: uq_votes_user_reply
+        .outerjoin(Vote, and_(Vote.reply_id == Reply.id, Vote.user_id == user_id))
+        .where(_visible(Reply, user_id))
+    )
 
 
 async def list_replies(
@@ -179,9 +202,8 @@ async def list_replies(
 ) -> list[ReplyRow]:
     """A post's visible replies: the accepted answer first, then the highest score, then oldest."""
     result = await session.execute(
-        select(Reply, User.display_name)
-        .outerjoin(User, User.id == Reply.author_id)
-        .where(Reply.post_id == post_id, _visible(Reply, user_id))
+        _reply_query(user_id)
+        .where(Reply.post_id == post_id)
         .order_by(Reply.is_accepted.desc(), Reply.score.desc(), Reply.created_at, Reply.id)
         .execution_options(populate_existing=True)  # is_accepted / score change in SQL
     )
@@ -193,10 +215,7 @@ async def get_reply(
 ) -> ReplyRow | None:
     """A reply the user may see, or None. Fresh values (is_accepted / score change in SQL)."""
     result = await session.execute(
-        select(Reply, User.display_name)
-        .outerjoin(User, User.id == Reply.author_id)
-        .where(Reply.id == reply_id, _visible(Reply, user_id))
-        .execution_options(populate_existing=True)
+        _reply_query(user_id).where(Reply.id == reply_id).execution_options(populate_existing=True)
     )
     row = result.first()
     return ReplyRow(*row) if row else None
