@@ -123,6 +123,7 @@ async def list_notes(
         select(Note, Topic, Unit)
         .join(Topic, Topic.id == Note.topic_id)
         .join(Unit, Unit.id == Topic.unit_id)
+        .where(Note.user_id.is_(None))  # students' own Learn notes are private
         .order_by(Note.updated_at.desc(), Note.id)
         .limit(limit)
     )
@@ -145,7 +146,7 @@ async def get_note_with_topic(
             select(Note, Topic, Unit)
             .join(Topic, Topic.id == Note.topic_id)
             .join(Unit, Unit.id == Topic.unit_id)
-            .where(Note.id == note_id)
+            .where(Note.id == note_id, Note.user_id.is_(None))
         )
     ).first()
     return (row[0], row[1], row[2]) if row else None
@@ -158,6 +159,7 @@ async def other_approved_notes(session: AsyncSession, note: Note) -> list[Note]:
             Note.topic_id == note.topic_id,
             Note.note_type == note.note_type,
             Note.concept_id.is_(None),
+            Note.user_id.is_(None),
             Note.status == ContentStatus.APPROVED,
             Note.id != note.id,
         )
@@ -169,7 +171,7 @@ async def pending_review_counts(session: AsyncSession, older_than: datetime) -> 
     """For the dashboard: (notes waiting for review, how many of them are older)."""
     result = await session.execute(
         select(func.count(), func.count().filter(Note.created_at < older_than)).where(
-            Note.status == ContentStatus.PENDING_REVIEW
+            Note.status == ContentStatus.PENDING_REVIEW, Note.user_id.is_(None)
         )
     )
     total, old = result.one()
