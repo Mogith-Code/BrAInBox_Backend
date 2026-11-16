@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import (
     CommunityGroup,
+    ContentReport,
     GroupMember,
     Post,
     Reply,
@@ -280,3 +281,48 @@ async def add_score(session: AsyncSession, model: Target, target_id: uuid.UUID, 
         .returning(model.score)
     )
     return int(score or 0)
+
+
+# ---------------------------------------------------------------- reports
+async def has_open_report(
+    session: AsyncSession, reporter_id: uuid.UUID, target_type: str, target_id: uuid.UUID
+) -> bool:
+    found = await session.scalar(
+        select(ContentReport.id).where(
+            ContentReport.reporter_id == reporter_id,
+            ContentReport.target_type == target_type,
+            ContentReport.target_id == target_id,
+            ContentReport.status == ModerationStatus.PENDING,
+        )
+    )
+    return found is not None
+
+
+async def add_report(session: AsyncSession, report: ContentReport) -> None:
+    session.add(report)
+    await session.flush()
+
+
+async def count_open_reporters(
+    session: AsyncSession, target_type: str, target_id: uuid.UUID
+) -> int:
+    """How many different people have an open report on this post / reply."""
+    result = await session.scalar(
+        select(func.count(func.distinct(ContentReport.reporter_id))).where(
+            ContentReport.target_type == target_type,
+            ContentReport.target_id == target_id,
+            ContentReport.status == ModerationStatus.PENDING,
+        )
+    )
+    return result or 0
+
+
+async def flag_if_approved(session: AsyncSession, model: Target, target_id: uuid.UUID) -> bool:
+    """Hide an approved post / reply for review (flagged). Returns True if it was approved."""
+    flagged = await session.scalar(
+        update(model)
+        .where(model.id == target_id, model.moderation_status == ModerationStatus.APPROVED)
+        .values(moderation_status=ModerationStatus.FLAGGED)
+        .returning(model.id)
+    )
+    return flagged is not None

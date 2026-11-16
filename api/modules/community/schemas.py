@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from shared.enums import ModerationStatus
+from shared.enums import ContentReportReason, ModerationStatus
 
 MAX_TAGS = 5
 
@@ -154,3 +154,18 @@ class VoteOut(BaseModel):
     target_id: uuid.UUID
     my_vote: int  # 1, -1 or 0
     score: int  # the new total
+
+
+# ---------------------------------------------------------------- reports
+class ReportIn(BaseModel):
+    reason: ContentReportReason
+    details: str | None = Field(default=None, max_length=1_000)
+
+
+class ReportOut(BaseModel):
+    id: uuid.UUID
+    target_type: Literal["post", "reply"]
+    target_id: uuid.UUID
+    reason: ContentReportReason
+    status: ModerationStatus  # pending until an admin looks at it
+    created_at: datetime
