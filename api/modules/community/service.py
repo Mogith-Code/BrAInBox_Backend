@@ -20,7 +20,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core import clock
-from api.core.errors import AppError, ForbiddenError, NotFoundError
+from api.core.errors import AppError, ConflictError, ForbiddenError, NotFoundError
 from api.core.pagination import Page, PageParams
 from api.core.security import CurrentUser
 from api.modules.community import repository
@@ -36,11 +36,13 @@ from api.modules.community.schemas import (
     ReplyCreate,
     ReplyOut,
     ReplyUpdate,
+    ReportIn,
+    ReportOut,
     VoteIn,
     VoteOut,
 )
 from api.modules.syllabus import service as syllabus_service
-from shared.db.models import CommunityGroup, Post, Reply, Vote
+from shared.db.models import CommunityGroup, ContentReport, Post, Reply, Vote
 from shared.enums import ModerationStatus
 
 MODULE_NAME = "community"
@@ -377,7 +379,7 @@ async def _target(
     post_id: uuid.UUID | None,
     reply_id: uuid.UUID | None,
 ) -> tuple[Post | Reply, Post]:
-    """The visible post or reply being voted on, and the post it belongs to."""
+    """The visible post or reply being voted on / reported, and the post it belongs to."""
     if post_id is not None:
         post = (await _visible_post(session, user, post_id)).post
         return post, post
@@ -417,4 +419,53 @@ async def vote(session: AsyncSession, user: CurrentUser, req: VoteIn) -> VoteOut
         target_id=target.id,
         my_vote=req.value,
         score=score,
+    )
+
+
+# =========================================================================== reports
+
+
+async def report(
+    session: AsyncSession,
+    user: CurrentUser,
+    req: ReportIn,
+    *,
+    post_id: uuid.UUID | None = None,
+    reply_id: uuid.UUID | None = None,
+) -> ReportOut:
+    """POST /posts/{id}/report or /replies/{id}/report. One open report per person per post or
+    reply (409 ALREADY_REPORTED); not on my own content (400 CANNOT_REPORT_OWN). When
+    REPORTS_TO_HIDE different people have reported it, it is hidden (flagged) for review."""
+    target, _ = await _target(session, user, post_id=post_id, reply_id=reply_id)
+    if target.author_id == user.id:
+        raise AppError("You can't report your own post or reply", code="CANNOT_REPORT_OWN")
+    target_type = "post" if post_id else "reply"
+    if await repository.has_open_report(session, user.id, target_type, target.id):
+        raise ConflictError(
+            "You already reported this. A moderator will look at it soon.",
+            code="ALREADY_REPORTED",
+        )
+    report_row = ContentReport(
+        reporter_id=user.id,
+        target_type=target_type,
+        target_id=target.id,
+        reason=req.reason.value,
+        details=(req.details or "").strip() or None,
+    )
+    await repository.add_report(session, report_row)
+
+    reporters = await repository.count_open_reporters(session, target_type, target.id)
+    if REPORTS_TO_HIDE and reporters >= REPORTS_TO_HIDE:
+        model: type[Post] | type[Reply] = Post if post_id else Reply
+        hidden = await repository.flag_if_approved(session, model, target.id)
+        if hidden and isinstance(target, Reply):  # a hidden reply no longer counts
+            await repository.change_reply_count(session, target.post_id, -1)
+    await session.commit()
+    return ReportOut(
+        id=report_row.id,
+        target_type=target_type,
+        target_id=target.id,
+        reason=req.reason,
+        status=report_row.status,
+        created_at=report_row.created_at,
     )
