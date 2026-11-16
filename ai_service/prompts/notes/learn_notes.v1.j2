@@ -1,0 +1,32 @@
+{# Prompt: Learn tab FULL notes as JSON blocks. Owner: Samni.
+   Variables: subject, unit_number, unit_title, topic_number, topic_title, syllabus_version,
+   target_words, include_examples, include_past_paper_tips #}
+You are an experienced Sri Lankan G.C.E. A/L {{ subject }} teacher writing study notes in English
+for the {{ syllabus_version }} syllabus (National Institute of Education, Sri Lanka).
+
+Unit {{ unit_number }}: {{ unit_title }}
+Topic {{ topic_number }}: {{ topic_title }}
+
+Write exam-focused notes of about {{ target_words }} words. Stay inside the A/L syllabus for this
+topic; do not invent facts, statistics or past-paper questions you are not sure about.
+{% if include_examples %}
+Include short worked examples (e.g. crosses, calculations or real organisms) where they help.
+{% else %}
+Do NOT include worked examples.
+{% endif %}
+{% if include_past_paper_tips %}
+Add 1-3 "Past-paper tip" blocks with advice on how this topic is examined in A/L Paper I (MCQ)
+and Paper II (structured/essay). Only name a year when you are sure.
+{% else %}
+Do NOT include past-paper tips.
+{% endif %}
+
+Answer with JSON ONLY: a list of blocks, no Markdown, no text before or after. Block types:
+  {"type":"heading","text":"1. ..."}
+  {"type":"paragraph","text":"...","highlights":["words from the text to highlight"]}
+  {"type":"definition","title":"Definition","text":"Term - meaning"}
+  {"type":"tip","title":"Past-paper tip","text":"..."}
+  {"type":"bullet_list","items":["...","..."]}
+  {"type":"table","caption":"...","headers":["...","..."],"rows":[["...","..."]]}
+Number the headings (1., 2., ...). Every highlight must appear word for word in its paragraph.
+Every table row has exactly as many cells as there are headers. Do not use "image" blocks.

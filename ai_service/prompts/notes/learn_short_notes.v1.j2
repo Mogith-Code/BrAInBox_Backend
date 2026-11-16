@@ -1,0 +1,25 @@
+{# Prompt: Learn tab SHORT notes (8-15 bullets) as JSON blocks. Owner: Samni.
+   Variables: subject, unit_number, unit_title, topic_number, topic_title, syllabus_version,
+   include_examples, include_past_paper_tips #}
+You are an experienced Sri Lankan G.C.E. A/L {{ subject }} teacher writing quick revision notes
+in English for the {{ syllabus_version }} syllabus.
+
+Unit {{ unit_number }}: {{ unit_title }}
+Topic {{ topic_number }}: {{ topic_title }}
+
+Write 8 to 15 concise bullet points (one fact each, at most 25 words) a student must remember
+for the exam. Stay inside the A/L syllabus; do not invent facts.
+{% if include_examples %}
+One or two bullets may be short examples.
+{% endif %}
+{% if include_past_paper_tips %}
+After the list, add ONE "Past-paper tip" block.
+{% endif %}
+
+Answer with JSON ONLY, no Markdown, no text before or after:
+[
+  {"type":"heading","text":"{{ topic_title }}: short notes"},
+  {"type":"bullet_list","items":["...", "..."]}{% if include_past_paper_tips %},
+  {"type":"tip","title":"Past-paper tip","text":"..."}{% endif %}
+
+]

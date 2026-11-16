@@ -16,6 +16,13 @@ class AISettings(SharedSettings):
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIM: int = 768  # must match vector(768) in the database
 
+    # --- llm_client (Learn tab notes + upload summaries, ai_service/providers/llm_client.py)
+    # "mock" = deterministic valid answers (no key, offline, tests) | "gemini".
+    # Empty = "mock" when the fakes are on (USE_FAKE_AI / no key), otherwise "gemini".
+    LLM_PROVIDER: str = ""
+    LLM_API_KEY: str = ""  # empty = GEMINI_API_KEY
+    LLM_MODEL: str = ""  # empty = GEMINI_MODEL
+
     # --- Images (visuals module)
     # Who draws illustrations: "cloudflare" (Workers AI FLUX, has a FREE daily allowance) or
     # "gemini" (IMAGE_MODEL below; Google lists NO free tier for its image models).

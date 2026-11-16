@@ -104,6 +104,61 @@ and only lets users with role `admin` in. All its endpoints are listed in
 - Without Firebase you can still try the endpoints with curl: set `DEV_LOGIN_ENABLED=true` (dev only) and send
   `Authorization: Bearer dev-admin` from this computer.
 
+## Learn tab (`/api/v1/learn`)
+
+Subjects → units → topics, notes in block format, AI notes, diagrams, videos, practice summary,
+reading progress, bookmarks, search and file uploads that are summarised into short notes.
+Code: `api/modules/learn/` (mastery rules in `mastery.py`), block schema in `shared/learn_blocks.py`,
+AI pipelines in `ai_service/pipelines/notes/learn_notes.py` and `ai_service/pipelines/summarization/learn_upload.py`.
+
+**Run and seed**
+
+```bash
+docker compose up -d db
+alembic upgrade head                 # migration 0009 adds the Learn columns/tables
+python scripts/seed_learn.py         # 3 subjects, 10 units, 98 topics, Mendelian inheritance sample; safe to re-run
+uvicorn ai_service.main:app --port 8001
+uvicorn api.main:app --reload --port 8000
+```
+
+- `LLM_PROVIDER=mock` (the default without a key) gives deterministic notes and summaries, so everything works offline.
+  Set `LLM_PROVIDER=gemini` + `LLM_API_KEY` for real output.
+- Uploads: PDF, DOCX, TXT, PNG, JPG up to `MAX_UPLOAD_MB` (10). Without a bucket they are stored in `UPLOAD_DIR`.
+  Images need Tesseract on the ai_service machine, otherwise the job fails with `OCR_NOT_AVAILABLE`.
+- `scripts/seed_syllabus.py` still loads the older 64-topic list with sub-topics. Run `seed_learn.py` after it so the
+  2025 Learn titles win.
+
+**Try it with curl** (dev login: `DEV_LOGIN_ENABLED=true` in `.env`, requests from this computer only)
+
+```bash
+curl -H "Authorization: Bearer dev-token" localhost:8000/api/v1/learn/subjects
+curl -H "Authorization: Bearer dev-token" "localhost:8000/api/v1/learn/subjects/biology/units?q=gene"
+curl -H "Authorization: Bearer dev-token" localhost:8000/api/v1/learn/units/u6
+curl -H "Authorization: Bearer dev-token" "localhost:8000/api/v1/learn/topics/bio-6.1/notes?type=full"
+curl -H "Authorization: Bearer dev-token" -H "Content-Type: application/json" -d '{"type":"full","depth":"quick","include_examples":true,"include_past_paper_tips":true}' localhost:8000/api/v1/learn/topics/bio-6.2/notes/generate
+curl -H "Authorization: Bearer dev-token" localhost:8000/api/v1/learn/jobs/<job_id>
+curl -H "Authorization: Bearer dev-token" -H "Content-Type: application/json" -d '{"event":"read","seconds":120,"completed":true}' localhost:8000/api/v1/learn/topics/bio-6.1/progress
+curl -X POST -H "Authorization: Bearer dev-token" localhost:8000/api/v1/learn/bookmarks/bio-6.1
+curl -H "Authorization: Bearer dev-token" "localhost:8000/api/v1/learn/search?q=mendel"
+curl -H "Authorization: Bearer dev-token" -F "file=@notes.pdf;type=application/pdf" -F topic_id=bio-2.8 -F summary_length=medium localhost:8000/api/v1/learn/uploads
+curl -X POST -H "Authorization: Bearer dev-token" localhost:8000/api/v1/learn/uploads/<upload_id>/save-to-short-notes
+```
+
+**For the Flutter app**
+
+- Base URL `http://<host>:8000/api/v1/learn` (Android emulator: `http://10.0.2.2:8000/api/v1/learn`).
+  Every route needs `Authorization: Bearer <Firebase ID token>`.
+- Path ids can be the UUID or the public code: `biology`, `u6`, `bio-6.1`.
+- Lists are `{"items": [...], "total": n}`; `GET /uploads` also has `page` and `size` (`?page=1&size=20`).
+- Errors: `{"detail": "...", "code": "TOPIC_NOT_FOUND", "error": {"code": ..., "message": ...}}`.
+  Another student's job, upload or note answers **404**, not 403.
+- AI notes and uploads return **202** with a `job_id`. Poll `GET /jobs/{job_id}` until `status` is `done`
+  (then `result_id` is the note or upload id) or `failed` (`error`, `error_code`).
+- An `image` block's `url` may be relative (`/api/v1/files/...` in dev): prefix it with the server address.
+
+**Tests:** `pytest tests/api/test_learn*.py tests/ai_service/test_learn_pipelines.py`. The endpoint tests create their own
+scratch database (migrated from zero and seeded twice), so they need `TEST_DATABASE_URL` and a user that may create databases.
+
 ## Tests
 
 ```bash

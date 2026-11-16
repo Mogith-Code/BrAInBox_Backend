@@ -30,14 +30,17 @@ class Note(UUIDPrimaryKeyMixin, TimestampMixin, AIGeneratedMixin, Base):
 
     __tablename__ = "notes"
     __table_args__ = (
-        # One approved topic-level note per topic and kind, cached for every student.
+        # One approved OFFICIAL topic-level note per topic and kind, cached for every student.
+        # A student's own notes (user_id set, Learn tab) are not limited.
         Index(
             "uq_notes_topic_kind_approved",
             "topic_id",
             "note_type",
             unique=True,
-            postgresql_where=text("status = 'approved' AND concept_id IS NULL"),
+            postgresql_where=text("status = 'approved' AND concept_id IS NULL AND user_id IS NULL"),
         ),
+        # Learn tab: "my newest note of this kind for this topic" and the 24h generation cache.
+        Index("ix_notes_user_topic_type_created", "user_id", "topic_id", "note_type", "created_at"),
         CheckConstraint("note_type IN ('full', 'short')", name="note_type"),
     )
 
@@ -50,6 +53,16 @@ class Note(UUIDPrimaryKeyMixin, TimestampMixin, AIGeneratedMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     note_type: Mapped[str] = mapped_column(String(20), default="full")  # NoteKind: full | short
     body_md: Mapped[str] = mapped_column(Text)
+    # Learn tab: null = official/shared note, set = this student's own note (private).
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # Learn tab block format (shared/learn_blocks.py). body_md holds the same text as Markdown.
+    blocks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
+    depth: Mapped[str | None] = mapped_column(String(20))  # NoteDepth value
+    read_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # sha256 of the generation options, for the 24h "same request -> same note" cache.
+    params_hash: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[ContentStatus] = mapped_column(
         str_enum(ContentStatus), default=ContentStatus.DRAFT, index=True
     )
@@ -104,6 +117,8 @@ class Upload(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         str_enum(JobStatus), default=JobStatus.QUEUED
     )
     error: Mapped[str | None] = mapped_column(Text)
+    # Learn tab uploads only (null for /uploads/text and /uploads/pdf): short | medium | detailed
+    summary_length: Mapped[str | None] = mapped_column(String(20))
 
 
 class Summary(UUIDPrimaryKeyMixin, TimestampMixin, AIGeneratedMixin, Base):

@@ -15,3 +15,13 @@ class UserInputError(ValueError):
         self.message = message
         if code:
             self.code = code
+
+
+class AIOutputError(UserInputError):
+    """The LLM's answer stayed invalid after the retry (e.g. not JSON, no valid blocks).
+
+    Not the student's fault, but it goes through the same 422 path so the api keeps the code
+    and the clear message on the failed job instead of a generic "AI service unavailable".
+    """
+
+    code = "INVALID_AI_OUTPUT"

@@ -6,6 +6,10 @@ Validation errors also include "details" (the list of invalid fields), and an Ap
 add extra fields with `extra=`, e.g. {"error": {"code": "RESEND_TOO_SOON", ..., "retry_after": 42}}.
 
 Raise `AppError` (or a subclass) anywhere in a service; the handlers below turn it into JSON.
+
+Learn tab routes (/api/v1/learn/...) ALSO get the agreed top-level keys, so both parsers work:
+
+    {"detail": "Human readable text", "code": "SOME_CODE", "error": {"code": ..., "message": ...}}
 """
 
 import logging
@@ -88,6 +92,16 @@ _HTTP_CODES = {
 }
 
 
+LEARN_PREFIX = "/api/v1/learn"
+
+
+def _shaped(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    """Add the Learn tab's top-level `detail` and `code` keys on /api/v1/learn routes."""
+    if request.url.path.startswith(LEARN_PREFIX):
+        return {"detail": body["error"]["message"], "code": body["error"]["code"], **body}
+    return body
+
+
 def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
     error: dict[str, Any] = {"code": code, "message": message}
     if details is not None:
@@ -102,7 +116,9 @@ async def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     headers = {}
     if "retry_after" in exc.extra:  # standard HTTP header for "try again in N seconds"
         headers["Retry-After"] = str(exc.extra["retry_after"])
-    return JSONResponse(status_code=exc.status_code, content=body, headers=headers or None)
+    return JSONResponse(
+        status_code=exc.status_code, content=_shaped(request, body), headers=headers or None
+    )
 
 
 async def http_error_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -110,7 +126,7 @@ async def http_error_handler(request: Request, exc: Exception) -> JSONResponse:
     code = _HTTP_CODES.get(exc.status_code, "HTTP_ERROR")
     return JSONResponse(
         status_code=exc.status_code,
-        content=error_body(code, str(exc.detail)),
+        content=_shaped(request, error_body(code, str(exc.detail))),
         headers=getattr(exc, "headers", None),
     )
 
@@ -123,14 +139,17 @@ async def validation_error_handler(request: Request, exc: Exception) -> JSONResp
     ]
     return JSONResponse(
         status_code=422,
-        content=error_body("VALIDATION_ERROR", "Request data is invalid", details),
+        content=_shaped(
+            request, error_body("VALIDATION_ERROR", "Request data is invalid", details)
+        ),
     )
 
 
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
-        status_code=500, content=error_body("INTERNAL_ERROR", "Something went wrong")
+        status_code=500,
+        content=_shaped(request, error_body("INTERNAL_ERROR", "Something went wrong")),
     )
 
 

@@ -29,6 +29,7 @@ from api.modules.exams.router import router as exams_router
 from api.modules.home.router import router as home_router
 from api.modules.jobs.router import router as jobs_router
 from api.modules.knowledge_base.router import router as knowledge_base_router
+from api.modules.learn.router import router as learn_router
 from api.modules.performance.router import router as performance_router
 from api.modules.profiles.router import router as profiles_router
 from api.modules.quality.router import router as quality_router
@@ -48,6 +49,7 @@ MODULE_ROUTERS = [
     profiles_router,
     home_router,
     syllabus_router,
+    learn_router,
     content_router,
     visuals_router,
     questions_router,

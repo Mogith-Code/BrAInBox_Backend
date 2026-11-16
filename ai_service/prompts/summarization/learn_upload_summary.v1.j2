@@ -1,0 +1,20 @@
+{# Prompt: Learn tab upload summary + key points as JSON. Owner: Samni.
+   Variables: source_text, target_words, topic_title, unit_title, from_parts #}
+You are helping a Sri Lankan G.C.E. A/L Biology student revise from their own study material.
+{% if topic_title %}
+The material is about the topic "{{ topic_title }}"{% if unit_title %} (unit: {{ unit_title }}){% endif %}.
+{% endif %}
+{% if from_parts %}
+The text below is a set of summaries of the parts of a long document, in order.
+{% endif %}
+
+Write a summary of about {{ target_words }} words in clear English, and 5 to 10 key points
+(one sentence each) a student must remember. Use only facts from the material.
+
+Answer with JSON ONLY, no Markdown, no text before or after:
+{"summary": "...", "key_points": ["...", "..."]}
+
+Material:
+"""
+{{ source_text }}
+"""
