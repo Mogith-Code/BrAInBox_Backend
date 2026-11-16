@@ -1,0 +1,225 @@
+{
+  "topic_code": "bio-6.1",
+  "topic_title": "Mendelian inheritance",
+  "notes": {
+    "full": {
+      "title": "Mendelian inheritance",
+      "depth": "standard",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "1. Mendel and his experiments"
+        },
+        {
+          "type": "paragraph",
+          "text": "Gregor Mendel (1822-1884) studied inheritance in the garden pea, Pisum sativum. Peas were a good choice: they have many clearly contrasting characters (tall/dwarf, round/wrinkled seeds), a short generation time, many offspring, and their flowers normally self-pollinate, so Mendel could start with true-breeding lines and control every cross by hand.",
+          "highlights": [
+            "Pisum sativum",
+            "true-breeding"
+          ]
+        },
+        {
+          "type": "definition",
+          "title": "Definition",
+          "text": "Gene - a unit of inheritance found at a fixed position (locus) on a chromosome. Allele - one of the alternative forms of a gene, e.g. T (tall) and t (dwarf)."
+        },
+        {
+          "type": "heading",
+          "text": "2. Mendel's law of segregation"
+        },
+        {
+          "type": "paragraph",
+          "text": "Each organism carries two alleles for a character, one from each parent. The two alleles separate (segregate) during gamete formation, so each gamete receives only one allele. At fertilisation the gametes fuse at random, restoring the pair.",
+          "highlights": [
+            "alleles",
+            "gamete formation"
+          ]
+        },
+        {
+          "type": "definition",
+          "title": "Definition",
+          "text": "Genotype - the alleles an organism carries for a character, e.g. TT, Tt or tt. Phenotype - the observable characteristic produced by the genotype together with the environment, e.g. tall or dwarf."
+        },
+        {
+          "type": "definition",
+          "title": "Definition",
+          "text": "Homozygous - both alleles are the same (TT or tt). Heterozygous - the two alleles are different (Tt). A dominant allele (T) is expressed in the heterozygote; a recessive allele (t) is expressed only when homozygous."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "P generation: tall TT x dwarf tt",
+            "Gametes: T from one parent, t from the other",
+            "F1: all Tt, all tall (tall is dominant)",
+            "F1 x F1: Tt x Tt gives 1 TT : 2 Tt : 1 tt",
+            "F2 phenotypic ratio 3 tall : 1 dwarf; genotypic ratio 1 : 2 : 1"
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "3. Mendel's law of independent assortment"
+        },
+        {
+          "type": "paragraph",
+          "text": "When two characters are followed together, the alleles of one gene separate into gametes independently of the alleles of the other gene. This happens because homologous chromosome pairs line up randomly at metaphase I of meiosis, so it applies to genes on different chromosomes (unlinked genes).",
+          "highlights": [
+            "independent assortment",
+            "metaphase I",
+            "unlinked genes"
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "A plant heterozygous for seed shape (R round, r wrinkled) and seed colour (Y yellow, y green) makes four kinds of gametes in equal numbers: RY, Ry, rY and ry. Crossing two such plants gives 16 equally likely combinations.",
+          "highlights": [
+            "four kinds of gametes"
+          ]
+        },
+        {
+          "type": "table",
+          "caption": "Punnett square: RrYy x RrYy",
+          "headers": [
+            "Gametes",
+            "RY",
+            "Ry",
+            "rY",
+            "ry"
+          ],
+          "rows": [
+            [
+              "RY",
+              "RRYY",
+              "RRYy",
+              "RrYY",
+              "RrYy"
+            ],
+            [
+              "Ry",
+              "RRYy",
+              "RRyy",
+              "RrYy",
+              "Rryy"
+            ],
+            [
+              "rY",
+              "RrYY",
+              "RrYy",
+              "rrYY",
+              "rrYy"
+            ],
+            [
+              "ry",
+              "RrYy",
+              "Rryy",
+              "rrYy",
+              "rryy"
+            ]
+          ]
+        },
+        {
+          "type": "image",
+          "url": "{diagram_url}",
+          "caption": "Dihybrid cross RrYy x RrYy and the 9:3:3:1 ratio"
+        },
+        {
+          "type": "table",
+          "caption": "F2 phenotypes of RrYy x RrYy",
+          "headers": [
+            "Phenotype",
+            "Genotypes",
+            "Ratio"
+          ],
+          "rows": [
+            [
+              "Round, yellow",
+              "RRYY, RRYy, RrYY, RrYy",
+              "9"
+            ],
+            [
+              "Round, green",
+              "RRyy, Rryy",
+              "3"
+            ],
+            [
+              "Wrinkled, yellow",
+              "rrYY, rrYy",
+              "3"
+            ],
+            [
+              "Wrinkled, green",
+              "rryy",
+              "1"
+            ]
+          ]
+        },
+        {
+          "type": "tip",
+          "title": "Past-paper tip",
+          "text": "2021 Paper II: in structured questions on a dihybrid cross, marks are given for each step - parental genotypes, all four gamete types, a complete Punnett square and the 9:3:3:1 phenotypic ratio. Name the law (independent assortment) that explains the result."
+        },
+        {
+          "type": "tip",
+          "title": "Common mistake",
+          "text": "Do not write the gametes of RrYy as Rr and Yy. A gamete carries ONE allele of each gene, e.g. RY."
+        }
+      ]
+    },
+    "short": {
+      "title": "Mendelian inheritance (short notes)",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "Mendelian inheritance: short notes"
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Mendel used the garden pea, Pisum sativum: contrasting characters, self-pollination, many offspring.",
+            "Gene = unit of inheritance at a locus; alleles = alternative forms of a gene (T, t).",
+            "Genotype = alleles carried (TT, Tt, tt); phenotype = observable trait (tall, dwarf).",
+            "Homozygous = same alleles (TT, tt); heterozygous = different alleles (Tt).",
+            "A dominant allele shows in the heterozygote; a recessive allele only when homozygous.",
+            "Law of segregation: the two alleles separate during gamete formation, one per gamete.",
+            "Monohybrid F2 (Tt x Tt): 3 dominant : 1 recessive phenotype; 1 : 2 : 1 genotype.",
+            "Law of independent assortment: alleles of different genes assort independently (unlinked genes).",
+            "Cause: random orientation of homologous pairs at metaphase I of meiosis.",
+            "RrYy makes four gametes in equal numbers: RY, Ry, rY, ry.",
+            "Dihybrid F2 (RrYy x RrYy): 9 : 3 : 3 : 1 phenotypic ratio."
+          ]
+        },
+        {
+          "type": "tip",
+          "title": "Past-paper tip",
+          "text": "2021 Paper II: show every step of a cross (parents, gametes, Punnett square, ratio) - each step earns marks."
+        }
+      ]
+    }
+  },
+  "diagram": {
+    "file": "data/seed/learn/dihybrid_punnett.png",
+    "storage_name": "seed-dihybrid-punnett.png",
+    "title": "Dihybrid cross Punnett square",
+    "caption": "Dihybrid cross RrYy x RrYy: Punnett square and the 9:3:3:1 ratio",
+    "order": 1
+  },
+  "videos": [
+    {
+      "external_id": "brainbox-sample-mendel-1",
+      "title": "Mendel's law of segregation (sample)",
+      "url": "https://example.com/brainbox/videos/mendel-law-of-segregation.mp4",
+      "thumbnail_url": "https://example.com/brainbox/videos/mendel-law-of-segregation.jpg",
+      "duration_seconds": 540,
+      "channel": "BrAInBox (sample)",
+      "order": 1
+    },
+    {
+      "external_id": "brainbox-sample-mendel-2",
+      "title": "Dihybrid crosses and the 9:3:3:1 ratio (sample)",
+      "url": "https://example.com/brainbox/videos/dihybrid-cross-9331.mp4",
+      "thumbnail_url": "https://example.com/brainbox/videos/dihybrid-cross-9331.jpg",
+      "duration_seconds": 720,
+      "channel": "BrAInBox (sample)",
+      "order": 2
+    }
+  ]
+}
