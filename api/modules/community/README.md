@@ -29,8 +29,9 @@ posts live under their group (`/groups/{id}/posts`).
 | DELETE | `/api/v1/replies/{id}` | ✅ done | Delete my reply (or any reply as admin). Soft delete |
 | POST | `/api/v1/posts/{id}/accept/{reply_id}` | ✅ done | The post's author marks the best answer (replaces the old one). Returns the post with replies |
 | DELETE | `/api/v1/posts/{id}/accept` | ✅ done | The post's author un-marks it |
-| POST | `/api/v1/votes` | planned | +1 / -1 on a post or reply |
-| POST | `/api/v1/posts/{id}/report` | planned | Report a post (and `/replies/{id}/report` for a reply) |
+| POST | `/api/v1/votes` | ✅ done | `{post_id}` or `{reply_id}` + `value` 1 / -1 (0 removes my vote). Members only; not on my own → 403 `CANNOT_VOTE_OWN` |
+| POST | `/api/v1/posts/{id}/report` | ✅ done | Report a post: `{reason, details?}`. Again while open → 409 `ALREADY_REPORTED`; my own → 400 `CANNOT_REPORT_OWN` |
+| POST | `/api/v1/replies/{id}/report` | ✅ done | Report a reply (same rules) |
 
 Placeholder: `GET /api/v1/community/status` → `{"module": "community", "status": "todo"}` (needs login).
 
@@ -63,6 +64,25 @@ Placeholder: `GET /api/v1/community/status` → `{"module": "community", "status
 - The **post's author** picks one accepted answer (`accepted_reply_id` on the post, `is_accepted` on the
   reply). Accepting another reply replaces it; `DELETE /posts/{id}/accept` removes it. Deleting the accepted
   reply removes the acceptance. A reply from another post → 404 `REPLY_NOT_FOUND`.
+
+### Votes
+
+- One vote per person per post or reply (`uq_votes_user_post` / `uq_votes_user_reply`). Voting again **changes**
+  the vote and the score moves by the difference; `value: 0` removes it.
+- Members only; never on your own post or reply.
+- The post / reply row is **locked** while a vote is saved, so votes on it are handled one at a time: the
+  score can't miscount (two students at once, or one student tapping twice).
+- Posts and replies return `my_vote` (1, -1 or 0) so the app can highlight the arrow.
+
+### Reports
+
+- Anyone who can see a post or reply can report it, with a reason (`spam`, `offensive`, `wrong_info`,
+  `off_topic`, `other`) and optional details. Saved in `content_reports` with status `pending` - the admin
+  moderation queue reads it from there.
+- One **open** report per person per post or reply; you can't report your own.
+- **Safety net:** when `REPORTS_TO_HIDE` (3) different people have an open report on a post or reply, it is
+  hidden (`flagged`) until an admin decides; a hidden reply stops counting in `reply_count`. Set it to 0 to
+  turn this off. *(When an admin approves it again, `reply_count` must go back up - admin moderation, Mogith.)*
 
 ### Moderation (decision)
 

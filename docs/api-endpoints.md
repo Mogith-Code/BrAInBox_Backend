@@ -328,8 +328,9 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | PATCH / DELETE | `/api/v1/replies/{id}` | ✅ Edit my reply / delete my reply (admins can delete any) |
 | POST | `/api/v1/posts/{id}/accept/{reply_id}` | ✅ Mark the best answer (post author) |
 | DELETE | `/api/v1/posts/{id}/accept` | ✅ Un-mark the best answer (post author) |
-| POST | `/api/v1/votes` | Up/down vote a post or reply |
-| POST | `/api/v1/posts/{id}/report` | Report a post (and `/replies/{id}/report`) |
+| POST | `/api/v1/votes` | ✅ `{post_id \| reply_id, value: 1 \| -1 \| 0}` → my vote + new score (members; not my own) |
+| POST | `/api/v1/posts/{id}/report` | ✅ `{reason, details?}` → 201 (`ALREADY_REPORTED` 409; hidden after 3 reporters) |
+| POST | `/api/v1/replies/{id}/report` | ✅ Same, for a reply |
 
 ## jobs — shared
 
