@@ -342,15 +342,21 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/groups` | List groups |
-| POST | `/api/v1/groups` | Create a group |
-| POST | `/api/v1/groups/{id}/join` | Join a group |
-| GET | `/api/v1/posts` | Feed (filter by group/topic/tag) |
-| POST | `/api/v1/posts` | Create a post -> MODERATE_POST + SUGGEST_ANSWER jobs |
-| GET | `/api/v1/posts/{id}` | Post with replies |
-| POST | `/api/v1/posts/{id}/replies` | Reply |
-| POST | `/api/v1/votes` | Up/down vote a post or reply |
-| POST | `/api/v1/reports` | Report a post or reply |
+| GET | `/api/v1/groups` | ✅ Groups I can see (General first, then units), with `is_member` and `member_count` |
+| GET | `/api/v1/groups/{id}` | ✅ One group (UUID or slug, e.g. `unit-6`) |
+| POST | `/api/v1/groups/{id}/join` | ✅ Join a group (safe to repeat) |
+| DELETE | `/api/v1/groups/{id}/join` | ✅ Leave a group (safe to repeat) |
+| GET | `/api/v1/groups/{id}/posts` | ✅ Feed of a group (`?sort=new\|top`, paged) |
+| POST | `/api/v1/groups/{id}/posts` | ✅ Create a post (members; published straight away for now; AI moderation later) |
+| GET | `/api/v1/posts/{id}` | ✅ Post with its replies |
+| PATCH / DELETE | `/api/v1/posts/{id}` | ✅ Edit my post / delete my post (admins can delete any) |
+| POST | `/api/v1/posts/{id}/replies` | ✅ Reply (members of the post's group) |
+| PATCH / DELETE | `/api/v1/replies/{id}` | ✅ Edit my reply / delete my reply (admins can delete any) |
+| POST | `/api/v1/posts/{id}/accept/{reply_id}` | ✅ Mark the best answer (post author) |
+| DELETE | `/api/v1/posts/{id}/accept` | ✅ Un-mark the best answer (post author) |
+| POST | `/api/v1/votes` | ✅ `{post_id \| reply_id, value: 1 \| -1 \| 0}` → my vote + new score (members; not my own) |
+| POST | `/api/v1/posts/{id}/report` | ✅ `{reason, details?}` → 201 (`ALREADY_REPORTED` 409; hidden after 3 reporters) |
+| POST | `/api/v1/replies/{id}/report` | ✅ Same, for a reply |
 
 ## jobs — shared
 

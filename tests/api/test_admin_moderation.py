@@ -215,6 +215,48 @@ async def test_remove_hides_post_and_visual(admin_client, queue, db_session) -> 
     ]
 
 
+async def _set_reply(db_session, ids: dict, status: ModerationStatus, reply_count: int) -> None:  # type: ignore[no-untyped-def]
+    reply = await db_session.get(Reply, ids["reply"])
+    post = await db_session.get(Post, ids["post"])
+    reply.moderation_status = status
+    post.reply_count = reply_count
+    await db_session.commit()
+
+
+async def _reply_and_count(db_session, ids: dict) -> tuple[ModerationStatus, int]:  # type: ignore[no-untyped-def]
+    await db_session.rollback()
+    reply = await db_session.get(Reply, ids["reply"], populate_existing=True)
+    post = await db_session.get(Post, ids["post"], populate_existing=True)
+    return reply.moderation_status, post.reply_count
+
+
+@pytest.mark.db
+async def test_keep_shows_a_reply_hidden_by_reports_again(admin_client, queue, db_session) -> None:  # type: ignore[no-untyped-def]
+    # Hidden by the "3 reports" safety net: flagged and not counted in reply_count.
+    await _set_reply(db_session, queue, ModerationStatus.FLAGGED, reply_count=0)
+
+    response = await admin_client.post(
+        f"{REPORTS}/{queue['on_reply']}/resolve", json={"action": "keep"}
+    )
+
+    assert response.status_code == 204
+    assert await _reply_and_count(db_session, queue) == (ModerationStatus.APPROVED, 1)
+
+
+@pytest.mark.db
+async def test_remove_of_a_visible_reply_lowers_reply_count(
+    admin_client, queue, db_session
+) -> None:  # type: ignore[no-untyped-def]
+    await _set_reply(db_session, queue, ModerationStatus.APPROVED, reply_count=1)
+
+    response = await admin_client.post(
+        f"{REPORTS}/{queue['on_reply']}/resolve", json={"action": "remove"}
+    )
+
+    assert response.status_code == 204
+    assert await _reply_and_count(db_session, queue) == (ModerationStatus.REMOVED, 0)
+
+
 @pytest.mark.db
 async def test_unknown_report_is_404(admin_client, admin_in_db) -> None:  # type: ignore[no-untyped-def]
     response = await admin_client.post(f"{REPORTS}/{uuid.uuid4()}/resolve", json={"action": "keep"})
