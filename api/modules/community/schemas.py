@@ -224,3 +224,19 @@ class GroupCreate(BaseModel):
         if len(value) < 2:
             raise ValueError("Name must have at least 2 characters")
         return value
+
+
+class TopicSuggestIn(BaseModel):
+    """The draft of a post, to suggest its topic tag before posting."""
+
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(default="", max_length=10_000)
+    group_id: str | None = None  # a unit group limits the choice to that unit's topics
+
+
+class TopicSuggestOut(BaseModel):
+    topic_id: uuid.UUID | None  # null = no topic fits (the student can still pick one)
+    topic: str | None
+    unit_number: int | None
+    confidence: float
+    ai_generated: bool = True

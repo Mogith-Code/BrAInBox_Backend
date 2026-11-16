@@ -23,13 +23,16 @@ Rules:
   * AI work goes through `api.core.ai_client` / `api.core.jobs`, never directly to a provider.
 """
 
+import logging
 import re
 import uuid
 from datetime import date, datetime
 
+from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import clock
+from api.core import clock, jobs
+from api.core.ai_client import AIClient
 from api.core.errors import AppError, ConflictError, ForbiddenError, NotFoundError
 from api.core.pagination import Page, PageParams
 from api.core.security import CurrentUser
@@ -52,13 +55,25 @@ from api.modules.community.schemas import (
     ReportIn,
     ReportOut,
     StudyGroupOut,
+    TopicSuggestIn,
+    TopicSuggestOut,
     VoteIn,
     VoteOut,
 )
 from api.modules.syllabus import service as syllabus_service
 from api.modules.visuals import service as visuals_service
-from shared.db.models import CommunityGroup, ContentReport, Notification, Post, Reply, Vote
-from shared.enums import ModerationStatus, NotificationType
+from shared.db.models import (
+    AIJob,
+    CommunityGroup,
+    ContentReport,
+    Notification,
+    Post,
+    Reply,
+    Vote,
+)
+from shared.enums import JobType, ModerationStatus, NotificationType
+
+logger = logging.getLogger(__name__)
 
 MODULE_NAME = "community"
 TEXT_PREVIEW_CHARS = 500
@@ -225,9 +240,18 @@ async def list_posts(
 
 
 async def create_post(
-    session: AsyncSession, user: CurrentUser, group_ref: str, req: PostCreate
+    session: AsyncSession,
+    user: CurrentUser,
+    group_ref: str,
+    req: PostCreate,
+    ai: AIClient | None = None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> PostOut:
-    """POST /groups/{id}/posts. Members only (403 NOT_A_MEMBER)."""
+    """POST /groups/{id}/posts. Members only (403 NOT_A_MEMBER).
+
+    With `ai`: the post is classified first; anything that is not OK is saved as flagged
+    (hidden from everyone but its author) until an admin decides. An approved question also
+    gets an AI-suggested answer in the background, written only from approved notes."""
     group, role = await _visible_group(session, user, group_ref)
     if role is None:
         raise ForbiddenError("Join the group to post in it", code="NOT_A_MEMBER")
@@ -245,8 +269,27 @@ async def create_post(
         is_question=req.is_question,
         moderation_status=NEW_CONTENT_STATUS,
     )
+    post.moderation_status, post.moderation_reason = await _moderate(ai, post.title, post.body)
     await repository.add_post(session, post)
     await session.commit()
+    if (
+        ai is not None
+        and background_tasks is not None
+        and post.is_question
+        and post.moderation_status == ModerationStatus.APPROVED
+    ):
+        job = await jobs.create_job(
+            session,
+            JobType.SUGGEST_ANSWER,
+            {
+                "post_id": str(post.id),
+                "title": post.title,
+                "body": post.body,
+                "topic_id": str(post.topic_id) if post.topic_id else None,
+            },
+            requested_by=user.id,
+        )
+        jobs.enqueue_job(job, background_tasks, ai)
     return post_out(await _visible_post(session, user, post.id), user)
 
 
@@ -325,7 +368,11 @@ async def _visible_reply(session: AsyncSession, user: CurrentUser, reply_id: uui
 
 
 async def create_reply(
-    session: AsyncSession, user: CurrentUser, post_id: uuid.UUID, req: ReplyCreate
+    session: AsyncSession,
+    user: CurrentUser,
+    post_id: uuid.UUID,
+    req: ReplyCreate,
+    ai: AIClient | None = None,
 ) -> ReplyOut:
     """POST /posts/{id}/replies. Members of the post's group only."""
     post = (await _visible_post(session, user, post_id)).post
@@ -336,6 +383,7 @@ async def create_reply(
         body=req.body.strip(),
         moderation_status=NEW_CONTENT_STATUS,
     )
+    reply.moderation_status, reply.moderation_reason = await _moderate(ai, "", reply.body)
     await repository.add_reply(session, reply)
     if reply.moderation_status == ModerationStatus.APPROVED:  # only visible replies are counted
         await repository.change_reply_count(session, post.id, +1)
@@ -489,9 +537,94 @@ async def report(
     )
 
 
+# =========================================================================== AI help
+MODERATION_LABELS = {"off_topic": "Off-topic", "inappropriate": "Inappropriate"}
+
+
+async def _moderate(
+    ai: AIClient | None, title: str, body: str
+) -> tuple[ModerationStatus, str | None]:
+    """(status, reason) for new content. OK -> published; off-topic / inappropriate -> flagged
+    and hidden until an admin decides. Without an AI client (or when the ai_service cannot be
+    reached) the content is published and students can still report it."""
+    if ai is None:
+        return NEW_CONTENT_STATUS, None
+    try:
+        result = (await ai.sync("moderate", {"title": title, "body": body})).get("result", {})
+    except AppError as exc:
+        logger.warning("Moderation was not available: %s", exc.message)
+        return NEW_CONTENT_STATUS, None
+    label = str(result.get("label") or "ok")
+    if label == "ok":
+        return ModerationStatus.APPROVED, None
+    reason = str(result.get("reason") or "").strip()
+    name = MODERATION_LABELS.get(label, "Flagged")
+    return ModerationStatus.FLAGGED, f"{name}: {reason}" if reason else name
+
+
+async def suggest_topic(
+    session: AsyncSession, user: CurrentUser, req: TopicSuggestIn, ai: AIClient
+) -> TopicSuggestOut:
+    """POST /posts/suggest-topic: the topic tag the AI suggests for a draft. The student can
+    change it. Never fails the screen: without a suggestion the fields are null."""
+    nothing = TopicSuggestOut(topic_id=None, topic=None, unit_number=None, confidence=0.0)
+    units = await syllabus_service.list_units(session)
+    unit_ids = [u.id for u in units]
+    if req.group_id:
+        group, _ = await _visible_group(session, user, req.group_id)
+        if group.unit_id is not None:
+            unit_ids = [group.unit_id]
+    numbers = {u.id: u.number for u in units}
+    topics = await syllabus_service.list_topics_by_unit(session, unit_ids)
+    choices = [
+        {"id": str(t.id), "title": t.title, "unit_number": numbers.get(unit_id)}
+        for unit_id, unit_topics in topics.items()
+        for t in unit_topics
+    ]
+    if not choices:
+        return nothing
+    try:
+        response = await ai.sync(
+            "tag-post", {"title": req.title, "body": req.body, "topics": choices[:300]}
+        )
+    except AppError as exc:
+        logger.warning("Topic suggestion was not available: %s", exc.message)
+        return nothing
+    result = response.get("result", {})
+    if not result.get("topic_id"):
+        return nothing
+    return TopicSuggestOut(
+        topic_id=uuid.UUID(str(result["topic_id"])),
+        topic=result.get("topic_title"),
+        unit_number=result.get("unit_number"),
+        confidence=float(result.get("confidence") or 0),
+    )
+
+
+async def on_answer_suggested(session: AsyncSession, job: AIJob) -> None:
+    """SUGGEST_ANSWER finished: save the answer as an AI reply (no author, shown first with
+    the AI badge). No reply is made when the approved notes did not cover the question."""
+    body = ((job.result or {}).get("result", {}) or {}).get("body")
+    if not body:
+        return
+    post = await session.get(Post, uuid.UUID(str(job.input["post_id"])))
+    if post is None or post.moderation_status != ModerationStatus.APPROVED:
+        return
+    reply = Reply(
+        post_id=post.id,
+        author_id=None,
+        body=str(body).strip(),
+        is_ai_suggested=True,
+        moderation_status=ModerationStatus.APPROVED,
+    )
+    await repository.add_reply(session, reply)
+    await repository.change_reply_count(session, post.id, +1)
+
+
+jobs.register_job_handler(JobType.SUGGEST_ANSWER, on_answer_suggested)
+
+
 # =========================================================================== admin side
-# TODO(Mogith): auto-tag via ai_client.sync('tag-post'); MODERATE_POST fills
-#   moderation_reason / _score.
 
 
 def _score(value: object) -> float | None:

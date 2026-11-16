@@ -24,6 +24,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core import clock
+from api.core.errors import ConflictError, NotFoundError
+from api.core.security import CurrentUser
 from api.modules.quality import repository
 from api.modules.quality.schemas import (
     CheckName,
@@ -32,10 +34,14 @@ from api.modules.quality.schemas import (
     QualityCheckOut,
     QualityItemOut,
     QualityQueueOut,
+    QuestionReportIn,
+    QuestionReportOut,
     StudentReportOut,
 )
 from api.modules.questions import service as questions_service
-from shared.db.models import Question, QuestionReview
+from shared.db.models import Question, QuestionReport, QuestionReview
+from shared.enums import ContentStatus as _ContentStatus
+from shared.enums import ModerationStatus as _ModerationStatus
 
 MODULE_NAME = "quality"
 REVIEW_TIME_DAYS = 30
@@ -202,3 +208,65 @@ async def pending_counts(session: AsyncSession, older_than: Any) -> tuple[int, i
 
 async def ai_questions_per_day(session: AsyncSession, since: Any) -> dict[Any, int]:
     return await repository.ai_questions_per_day(session, since)
+
+
+# =========================================================================== ongoing quality
+# A question goes back to review when students keep reporting it, or when its statistics say
+# it is far too easy or far too hard (often a sign of a wrong key or a giveaway option).
+
+REPORTS_TO_REVIEW = 3  # different students with an open report
+MIN_ATTEMPTS_FOR_STATS = 30
+TOO_EASY_RATE = 0.95
+TOO_HARD_RATE = 0.10
+
+
+def needs_review(attempts: int, correct_rate: float | None) -> bool:
+    """Pure: after 30 answers, a correct rate above 95 % or below 10 % is suspicious."""
+    if attempts < MIN_ATTEMPTS_FOR_STATS or correct_rate is None:
+        return False
+    return correct_rate > TOO_EASY_RATE or correct_rate < TOO_HARD_RATE
+
+
+def _send_to_review(question: Question) -> bool:
+    if question.status != _ContentStatus.APPROVED:
+        return False
+    question.status = _ContentStatus.PENDING_REVIEW
+    return True
+
+
+async def report_question(
+    session: AsyncSession, user: CurrentUser, question_id: uuid.UUID, req: QuestionReportIn
+) -> QuestionReportOut:
+    """POST /questions/{id}/report. 404 QUESTION_NOT_FOUND, 409 ALREADY_REPORTED."""
+    question = await repository.get_question(session, question_id)
+    if question is None:
+        raise NotFoundError("Question not found", code="QUESTION_NOT_FOUND")
+    if await repository.open_report_by(session, question_id, user.id) is not None:
+        raise ConflictError("You already reported this question", code="ALREADY_REPORTED")
+    await repository.add_report(
+        session,
+        QuestionReport(
+            question_id=question_id,
+            user_id=user.id,
+            reason=req.reason,
+            details=(req.details or "").strip() or None,
+            status=_ModerationStatus.PENDING,
+        ),
+    )
+    sent = False
+    if await repository.count_open_reporters(session, question_id) >= REPORTS_TO_REVIEW:
+        sent = _send_to_review(question)
+    await session.commit()
+    return QuestionReportOut(sent_to_review=sent)
+
+
+async def record_answer(
+    session: AsyncSession, question_id: uuid.UUID, *, correct: bool, label: str | None
+) -> None:
+    """Count one answer in the question's statistics (called by quizzes). The caller commits."""
+    stats = await repository.upsert_stats(session, question_id, correct, label)
+    rate = float(stats.correct_rate) if stats.correct_rate is not None else None
+    if needs_review(stats.attempts_count, rate):
+        question = await repository.get_question(session, question_id)
+        if question is not None:
+            _send_to_review(question)

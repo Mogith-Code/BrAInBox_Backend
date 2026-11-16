@@ -8,6 +8,8 @@ Rules:
 """
 
 import uuid
+from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +35,56 @@ async def get_status() -> ModuleStatus:
     return ModuleStatus(module=MODULE_NAME, status="todo")
 
 
-# TODO(Keshomigha): get_marking_scheme(question_id) -> model answer + points + keywords
+# =========================================================================== marking scheme
+# Used by the evaluation module (never its own repository): what a written answer is marked
+# against.
+
+
+@dataclass
+class MarkingPoint:
+    id: uuid.UUID
+    text: str
+    marks: float
+    is_required: bool
+    keywords: list[dict[str, Any]] = field(default_factory=list)  # [{"keyword", "synonyms"}]
+
+
+@dataclass
+class MarkingScheme:
+    model_answer_id: uuid.UUID
+    answer_text: str
+    total_marks: float
+    points: list[MarkingPoint]
+
+
+async def get_marking_scheme(session: AsyncSession, question_id: uuid.UUID) -> MarkingScheme | None:
+    """The APPROVED model answer of a question with its marking points and keywords, or None
+    (no model answer, not approved yet, or no marking points)."""
+    answer = await repository.approved_answer_for_question(session, question_id)
+    if answer is None:
+        return None
+    points = await repository.answer_points(session, answer.id)
+    if not points:
+        return None
+    keywords = await repository.keyword_rows(session, [p.id for p in points])
+    return MarkingScheme(
+        model_answer_id=answer.id,
+        answer_text=answer.answer_text,
+        total_marks=float(answer.total_marks or sum(p.marks for p in points)),
+        points=[
+            MarkingPoint(
+                id=p.id,
+                text=p.point_text,
+                marks=float(p.marks),
+                is_required=bool(p.is_required),
+                keywords=[
+                    {"keyword": k.keyword, "synonyms": list(k.synonyms or [])}
+                    for k in keywords[p.id]
+                ],
+            )
+            for p in points
+        ],
+    )
 
 
 # =========================================================================== admin: model answers

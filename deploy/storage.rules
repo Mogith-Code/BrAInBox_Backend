@@ -1,0 +1,63 @@
+// Firebase Storage security rules for BrAInBox.
+// Deploy:  firebase deploy --only storage   (firebase.json points at this file)
+//
+// The backend uses the Admin SDK, which is not limited by these rules. They only decide what
+// the app can do directly with a student's Firebase login.
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+    // Notes: PDF, DOCX or a photo, at most 10 MB.
+    function validNote() {
+      return request.resource.size <= 10 * 1024 * 1024
+        && (request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          || request.resource.contentType.matches('image/(jpeg|png|webp)'));
+    }
+    // Answer photos: an image, at most 8 MB.
+    function validAnswerPage() {
+      return request.resource.size <= 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    // A student's own notes: only they can read or write them.
+    match /uploads/{userId}/{allPaths=**} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validNote();
+    }
+
+    // Photos of a student's handwritten answers: private to that student.
+    match /answers/{userId}/{allPaths=**} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validAnswerPage();
+    }
+
+    // Generated visuals and past papers: any signed-in student may read, nobody may write
+    // (only the backend does).
+    match /visuals/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /past-papers/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Community images are written by the backend after moderation.
+    match /community/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Everything else is closed.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

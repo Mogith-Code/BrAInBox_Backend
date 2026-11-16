@@ -26,10 +26,13 @@ from api.core.security import CurrentUserDep
 from api.modules.performance import service
 from api.modules.performance.schemas import (
     ConceptInsightsResponse,
+    HeatmapResponse,
+    InsightsOverview,
     InsightsSummaryResponse,
     MistakeOut,
     MistakeUpdate,
     ModuleStatus,
+    RecurringResponse,
     TopicInsightsResponse,
     TopicProgressOut,
     UnitInsightsResponse,
@@ -91,6 +94,34 @@ async def insights_summary(user: CurrentUserDep, session: SessionDep) -> Insight
     """The same numbers as `/insights/units` and `/insights/topics`, one per card, plus the
     streak and study days. A new student gets nulls and zeros, never made-up values."""
     return await service.get_insights_summary(session, user)
+
+
+@router.get(
+    "/insights/overview",
+    response_model=InsightsOverview,
+    summary="Overall mastery, weekly change, study time and accuracy trend",
+)
+async def insights_overview(user: CurrentUserDep, session: SessionDep) -> InsightsOverview:
+    return await service.get_overview(session, user)
+
+
+@router.get(
+    "/insights/heatmap",
+    response_model=HeatmapResponse,
+    summary="Mastery of every topic, grouped by unit",
+)
+async def insights_heatmap(user: CurrentUserDep, session: SessionDep) -> HeatmapResponse:
+    """Topic mastery is the average of the concepts I practised in it; `null` = not practised."""
+    return await service.get_heatmap(session, user)
+
+
+@router.get(
+    "/mistakes/recurring",
+    response_model=RecurringResponse,
+    summary="Misconceptions I keep hitting (3+ times in 14 days), with a trend",
+)
+async def recurring_mistakes(user: CurrentUserDep, session: SessionDep) -> RecurringResponse:
+    return await service.get_recurring(session, user)
 
 
 @router.post(

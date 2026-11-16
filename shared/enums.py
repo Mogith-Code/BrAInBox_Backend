@@ -311,6 +311,7 @@ class RecommendationAction(StrEnum):
     VIEW_VISUAL = "view_visual"
     REASSESS = "reassess"
     ASK_COMMUNITY = "ask_community"
+    RETRY_ANSWER = "retry_answer"  # compare with the model answer, then re-attempt
 
 
 class RecommendationStatus(StrEnum):

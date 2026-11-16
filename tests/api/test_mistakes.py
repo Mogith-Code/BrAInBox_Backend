@@ -133,9 +133,7 @@ async def test_mistake_journal_after_submitting_a_paper(exam_data, db_session): 
             assert submitted.status_code == 200, submitted.text
             attempt_id = uuid.UUID(submitted.json()["attempt_id"])
 
-            # ---- recording: wrong answers only, and only once
-            assert await service.record_mistakes(db_session, STUDENT.id, attempt_id) == 3
-            await db_session.commit()
+            # ---- recording: submitting the paper recorded the wrong answers, and only once
             assert await service.record_mistakes(db_session, STUDENT.id, attempt_id) == 0
             # someone else can't record from this student's attempt
             assert await service.record_mistakes(db_session, OTHER_STUDENT.id, attempt_id) == 0

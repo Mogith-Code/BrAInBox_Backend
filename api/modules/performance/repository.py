@@ -21,6 +21,7 @@ from shared.db.models import (
     Attempt,
     Concept,
     ConceptMastery,
+    MasterySnapshot,
     MCQOption,
     Misconception,
     Mistake,
@@ -750,3 +751,291 @@ async def top_misconception_per_topic(
     for topic_id, title, _ in (await session.execute(stmt)).all():
         top.setdefault(topic_id, title)
     return top
+
+
+# ---------------------------------------------------------------- per-answer mastery (quizzes,
+# written-answer evaluation) and the data the recommendations are built from
+async def get_concept_mastery_rows(
+    session: AsyncSession, user_id: uuid.UUID, concept_ids: list[uuid.UUID] | None = None
+) -> dict[uuid.UUID, ConceptMastery]:
+    """{concept_id: row} for this student (all concepts when `concept_ids` is None)."""
+    stmt = select(ConceptMastery).where(ConceptMastery.user_id == user_id)
+    if concept_ids is not None:
+        if not concept_ids:
+            return {}
+        stmt = stmt.where(ConceptMastery.concept_id.in_(concept_ids))
+    return {row.concept_id: row for row in (await session.execute(stmt)).scalars()}
+
+
+async def upsert_concept_mastery(session: AsyncSession, row: dict[str, Any]) -> None:
+    """Insert or update ONE concept's mastery (already computed by the service). No commit.
+
+    `row["correct_count"]` is 1 or 0 for this answer; the counters are added to."""
+    stmt = insert(ConceptMastery).values([row])
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_concept_mastery_user_concept",
+            set_={
+                "mastery_score": stmt.excluded.mastery_score,
+                "attempts_count": ConceptMastery.attempts_count + 1,
+                "correct_count": ConceptMastery.correct_count + stmt.excluded.correct_count,
+                "last_practiced_at": stmt.excluded.last_practiced_at,
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+
+async def count_misconception_mistakes(
+    session: AsyncSession, user_id: uuid.UUID, misconception_id: uuid.UUID, since: datetime
+) -> int:
+    result = await session.execute(
+        select(func.count())
+        .select_from(Mistake)
+        .where(
+            Mistake.user_id == user_id,
+            Mistake.misconception_id == misconception_id,
+            Mistake.created_at >= since,
+        )
+    )
+    return int(result.scalar_one())
+
+
+@dataclass
+class RecurringRow:
+    misconception: Misconception
+    count: int
+    last_at: datetime
+    previous_count: int  # the same-length window before `since`, for the trend
+
+
+async def recurring_misconceptions(
+    session: AsyncSession, user_id: uuid.UUID, since: datetime, before: datetime, min_count: int
+) -> list[RecurringRow]:
+    """Misconceptions this student hit `min_count`+ times since `since`, most frequent first.
+    `before`..`since` is the previous window, used for the trend."""
+    counts = (
+        select(
+            Mistake.misconception_id,
+            func.count().label("n"),
+            func.max(Mistake.created_at).label("last_at"),
+        )
+        .where(
+            Mistake.user_id == user_id,
+            Mistake.misconception_id.is_not(None),
+            Mistake.created_at >= since,
+        )
+        .group_by(Mistake.misconception_id)
+        .having(func.count() >= min_count)
+        .subquery()
+    )
+    rows = (
+        await session.execute(
+            select(Misconception, counts.c.n, counts.c.last_at)
+            .join(counts, counts.c.misconception_id == Misconception.id)
+            .order_by(counts.c.n.desc(), counts.c.last_at.desc())
+        )
+    ).all()
+    if not rows:
+        return []
+    previous_rows = (
+        await session.execute(
+            select(Mistake.misconception_id, func.count())
+            .where(
+                Mistake.user_id == user_id,
+                Mistake.misconception_id.in_([m.id for m, _, _ in rows]),
+                Mistake.created_at >= before,
+                Mistake.created_at < since,
+            )
+            .group_by(Mistake.misconception_id)
+        )
+    ).all()
+    previous = {misconception_id: int(n) for misconception_id, n in previous_rows}
+    return [
+        RecurringRow(
+            misconception=m, count=int(n), last_at=last_at, previous_count=previous.get(m.id, 0)
+        )
+        for m, n, last_at in rows
+    ]
+
+
+async def open_mistake_counts(
+    session: AsyncSession, user_id: uuid.UUID, since: datetime, *, written_only: bool = False
+) -> dict[uuid.UUID, int]:
+    """{concept_id: open mistakes since `since`}. `written_only`: mistakes from written-answer
+    evaluation (they have no MCQ response)."""
+    stmt = (
+        select(Mistake.concept_id, func.count())
+        .where(
+            Mistake.user_id == user_id,
+            Mistake.concept_id.is_not(None),
+            Mistake.resolved_at.is_(None),
+            Mistake.created_at >= since,
+        )
+        .group_by(Mistake.concept_id)
+    )
+    if written_only:
+        stmt = stmt.join(Question, Question.id == Mistake.question_id).where(
+            Question.question_type != QuestionType.MCQ
+        )
+    return {concept_id: int(n) for concept_id, n in (await session.execute(stmt)).all()}
+
+
+async def open_mistake_question_ids(
+    session: AsyncSession, user_id: uuid.UUID, limit: int
+) -> list[uuid.UUID]:
+    """Questions behind the student's open mistakes, newest mistake first (no repeats)."""
+    result = await session.execute(
+        select(Mistake.question_id, func.max(Mistake.created_at).label("last_at"))
+        .where(
+            Mistake.user_id == user_id,
+            Mistake.question_id.is_not(None),
+            Mistake.resolved_at.is_(None),
+        )
+        .group_by(Mistake.question_id)
+        .order_by(func.max(Mistake.created_at).desc())
+        .limit(limit)
+    )
+    return [question_id for question_id, _ in result.all()]
+
+
+async def get_mistake_by_response(session: AsyncSession, response_id: uuid.UUID) -> Mistake | None:
+    result = await session.execute(
+        select(Mistake).where(Mistake.response_id == response_id).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_mistake(session: AsyncSession, mistake: Mistake) -> None:
+    await session.delete(mistake)
+    await session.flush()
+
+
+async def study_minutes_by_day(
+    session: AsyncSession, user_id: uuid.UUID, since: date
+) -> dict[date, int]:
+    result = await session.execute(
+        select(StudyActivity.activity_date, StudyActivity.minutes).where(
+            StudyActivity.user_id == user_id, StudyActivity.activity_date >= since
+        )
+    )
+    return {day: int(minutes or 0) for day, minutes in result.all()}
+
+
+async def add_study_minutes(
+    session: AsyncSession, user_id: uuid.UUID, day: date, minutes: int, actions: int
+) -> None:
+    """Add minutes / actions to that day's study_activity row (created if missing). No commit."""
+    stmt = insert(StudyActivity).values(
+        user_id=user_id, activity_date=day, minutes=minutes, actions_count=actions
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_study_activity_user_date",
+            set_={
+                "minutes": StudyActivity.minutes + minutes,
+                "actions_count": StudyActivity.actions_count + actions,
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+
+async def daily_accuracy(
+    session: AsyncSession, user_id: uuid.UUID, since: datetime
+) -> list[tuple[date, int, int]]:
+    """[(day, correct, answered)] of the student's marked MCQ answers per day since `since`."""
+    day = func.date(Response.created_at)
+    result = await session.execute(
+        select(day, func.count().filter(Response.is_correct.is_(True)), func.count())
+        .join(Attempt, Attempt.id == Response.attempt_id)
+        .where(
+            Attempt.user_id == user_id,
+            Response.selected_option_id.is_not(None),
+            Response.is_correct.is_not(None),
+            Response.created_at >= since,
+        )
+        .group_by(day)
+        .order_by(day)
+    )
+    return [(d, int(c), int(n)) for d, c, n in result.all()]
+
+
+async def save_snapshot(
+    session: AsyncSession, user_id: uuid.UUID, day: date, overall: float, breakdown: dict[str, int]
+) -> None:
+    """One mastery snapshot per student per day (the newest value of the day wins). No commit."""
+    stmt = insert(MasterySnapshot).values(
+        user_id=user_id, snapshot_date=day, overall_mastery=overall, unit_breakdown=breakdown
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_mastery_snapshots_user_date",
+            set_={
+                "overall_mastery": stmt.excluded.overall_mastery,
+                "unit_breakdown": stmt.excluded.unit_breakdown,
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+
+async def snapshots_since(
+    session: AsyncSession, user_id: uuid.UUID, since: date
+) -> list[MasterySnapshot]:
+    result = await session.execute(
+        select(MasterySnapshot)
+        .where(MasterySnapshot.user_id == user_id, MasterySnapshot.snapshot_date >= since)
+        .order_by(MasterySnapshot.snapshot_date)
+    )
+    return list(result.scalars())
+
+
+@dataclass
+class ConceptRow:
+    """A concept with its place in the syllabus (for recommendations and the heatmap)."""
+
+    id: uuid.UUID
+    name: str
+    code: str | None
+    topic_id: uuid.UUID
+    topic_title: str
+    topic_number: str
+    topic_code: str | None
+    unit_id: uuid.UUID
+    unit_number: int
+    unit_title: str
+    exam_weight: float
+
+
+async def concept_rows(
+    session: AsyncSession, concept_ids: list[uuid.UUID] | None = None
+) -> list[ConceptRow]:
+    """Current (not outdated) concepts in syllabus order."""
+    stmt = (
+        select(
+            Concept.id,
+            Concept.name,
+            Concept.code,
+            Topic.id.label("topic_id"),
+            Topic.title.label("topic_title"),
+            Topic.number.label("topic_number"),
+            Topic.code.label("topic_code"),
+            Unit.id.label("unit_id"),
+            Unit.number.label("unit_number"),
+            Unit.title.label("unit_title"),
+            Unit.exam_weight,
+        )
+        .join(Topic, Topic.id == Concept.topic_id)
+        .join(Unit, Unit.id == Topic.unit_id)
+        .where(Concept.is_outdated.is_(False), Topic.is_outdated.is_(False))
+        .order_by(Unit.number, Topic.order_index, Topic.number, Concept.order_index, Concept.name)
+    )
+    if concept_ids is not None:
+        if not concept_ids:
+            return []
+        stmt = stmt.where(Concept.id.in_(concept_ids))
+    return [
+        ConceptRow(**{**row._asdict(), "exam_weight": float(row.exam_weight or 1.0)})
+        for row in (await session.execute(stmt)).all()
+    ]

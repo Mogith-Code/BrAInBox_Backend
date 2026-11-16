@@ -21,8 +21,12 @@ from pydantic import BaseModel
 
 from ai_service.config import get_settings
 from ai_service.daily_limits import DailyLimitReached, use_quota
+from ai_service.usage import record_usage
 
 logger = logging.getLogger(__name__)
+
+# Keeps the background usage-log tasks alive until they finish.
+_usage_tasks: set[asyncio.Task[None]] = set()
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -91,7 +95,20 @@ class GeminiLLM:
             getattr(usage, "candidates_token_count", None),
             latency_ms,
         )
-        # TODO(Mogith): also insert a row into ai_usage_log (provider, model, tokens, latency).
+        # Fire and forget: the usage row must never slow down or fail the AI call itself.
+        task = asyncio.get_running_loop().create_task(
+            record_usage(
+                provider="gemini",
+                model=model,
+                operation="generate",
+                prompt_name=prompt_name,
+                input_tokens=getattr(usage, "prompt_token_count", None),
+                output_tokens=getattr(usage, "candidates_token_count", None),
+                latency_ms=latency_ms,
+            )
+        )
+        _usage_tasks.add(task)
+        task.add_done_callback(_usage_tasks.discard)
 
     async def generate(
         self,

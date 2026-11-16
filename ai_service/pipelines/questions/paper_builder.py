@@ -12,6 +12,7 @@ import logging
 import uuid
 from typing import Any
 
+from ai_service.pipelines.questions import quality_checks
 from ai_service.pipelines.questions.generate_questions import PROMPT_ID, generate_for_topic
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,36 @@ def batch_sizes(n: int) -> list[int]:
     """Split `n` into batches of at most BATCH_SIZE."""
     full, rest = divmod(n, BATCH_SIZE)
     return [BATCH_SIZE] * full + ([rest] if rest else [])
+
+
+async def apply_quality_gates(
+    questions: list[dict[str, Any]], existing: list[str], warnings: list[str]
+) -> list[dict[str, Any]]:
+    """Keep only the questions that pass every gate (rules, blind review, duplicates).
+
+    Rejected ones are dropped with a warning; the api then fills the paper with what is left.
+    The reviews stay on each kept question (`quality`) so the api can store them.
+    """
+    if not questions:
+        return questions
+    try:
+        reviews = await quality_checks.review_questions(questions, existing)
+    except Exception as exc:  # never lose a whole paper because the reviewer is down
+        logger.warning("Quality gates failed: %s", exc)
+        warnings.append("Automatic quality checks were not available for this paper.")
+        return questions
+    kept = []
+    for question, review in zip(questions, reviews, strict=True):
+        if review["passed"]:
+            kept.append({**question, "quality": review["checks"]})
+        else:
+            logger.info("Rejected generated question: %s", review["issues"])
+    rejected = len(questions) - len(kept)
+    if rejected:
+        warnings.append(
+            f"{rejected} generated question(s) failed the quality checks and were left out."
+        )
+    return kept
 
 
 async def _build_from_units(payload: dict[str, Any]) -> dict[str, Any]:
@@ -80,6 +111,7 @@ async def _build_from_units(payload: dict[str, Any]) -> dict[str, Any]:
         if 0 < len(unit_generated) < count:
             warnings.append(f"{unit_title}: only {len(unit_generated)} of {count} questions")
 
+    questions = await apply_quality_gates(questions, list(payload.get("existing") or []), warnings)
     return {"questions": questions, "warnings": warnings, "prompt_version": PROMPT_ID}
 
 
@@ -129,4 +161,5 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
         if len(generated) < count:
             warnings.append(f"{topic['title']}: only {len(generated)} of {count} questions")
 
+    questions = await apply_quality_gates(questions, list(payload.get("existing") or []), warnings)
     return {"questions": questions, "warnings": warnings, "prompt_version": PROMPT_ID}

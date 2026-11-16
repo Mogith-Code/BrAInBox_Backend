@@ -79,3 +79,42 @@ async def replace_keywords(session: AsyncSession, point_id: uuid.UUID, keywords:
     await session.execute(delete(Keyword).where(Keyword.answer_point_id == point_id))
     session.add_all(Keyword(answer_point_id=point_id, keyword=k) for k in keywords)
     await session.flush()
+
+
+async def approved_answer_for_question(
+    session: AsyncSession, question_id: uuid.UUID
+) -> ModelAnswer | None:
+    """The approved model answer of a question (the newest one if there are several)."""
+    result = await session.execute(
+        select(ModelAnswer)
+        .where(ModelAnswer.question_id == question_id, ModelAnswer.status == "approved")
+        .order_by(ModelAnswer.updated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def answer_points(session: AsyncSession, answer_id: uuid.UUID) -> list[AnswerPoint]:
+    result = await session.execute(
+        select(AnswerPoint)
+        .where(AnswerPoint.model_answer_id == answer_id)
+        .order_by(AnswerPoint.order_index, AnswerPoint.id)
+    )
+    return list(result.scalars())
+
+
+async def keyword_rows(
+    session: AsyncSession, point_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[Keyword]]:
+    """{answer_point_id: keywords with their synonyms}."""
+    rows: dict[uuid.UUID, list[Keyword]] = {p: [] for p in point_ids}
+    if not point_ids:
+        return rows
+    result = await session.execute(
+        select(Keyword)
+        .where(Keyword.answer_point_id.in_(point_ids))
+        .order_by(Keyword.answer_point_id, func.lower(Keyword.keyword))
+    )
+    for keyword in result.scalars():
+        rows[keyword.answer_point_id].append(keyword)
+    return rows

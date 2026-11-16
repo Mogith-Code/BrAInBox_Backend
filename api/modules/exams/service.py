@@ -40,7 +40,7 @@ from api.modules.exams.schemas import (
 from api.modules.performance import service as performance_service
 from api.modules.questions import service as questions_service
 from api.modules.syllabus import service as syllabus_service
-from shared.enums import JobStatus, JobType
+from shared.enums import JobStatus, JobType, MasterySource
 
 logger = logging.getLogger(__name__)
 
@@ -357,12 +357,13 @@ async def submit_paper(
         score=float(result.marks_obtained),
         responses=responses,
     )
-    await performance_service.refresh_topic_progress(session, user.id)
+    # Mistakes, unit + concept mastery and Learn progress, in this same commit.
+    await performance_service.after_attempt_marked(
+        session, user.id, attempt.id, source=MasterySource.EXAM
+    )
+    await performance_service.record_study_activity(session, user.id)
     await session.commit()
     result.attempt_id = attempt.id
-
-    # TODO(Udith + Keshomigha): call performance.service.record_mistake(...) for wrong answers
-    #   and update concept mastery once the performance module exists.
     return result
 
 

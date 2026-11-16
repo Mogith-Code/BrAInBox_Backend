@@ -62,6 +62,14 @@ class AISettings(SharedSettings):
     MAX_INPUT_CHARS: int = 60_000
     EMBEDDING_BATCH_SIZE: int = 100
 
+    # --- Written-answer evaluation (pipelines/evaluation/scorer.py). Starting values, tuned
+    # with scripts/eval_accuracy.py against manually marked answers.
+    EVAL_COVERED_SIMILARITY: float = 0.80  # a marking point is covered from here
+    EVAL_PARTIAL_SIMILARITY: float = 0.65  # partly covered from here (or covered with a keyword)
+    # --- Question bank
+    MISCONCEPTION_REUSE_SIMILARITY: float = 0.88  # reuse an existing misconception from here
+    QUESTION_DUPLICATE_SIMILARITY: float = 0.92  # a generated question is a duplicate from here
+
     # --- RAG
     RAG_CHUNK_TOKENS: int = 500
     RAG_CHUNK_OVERLAP: int = 50

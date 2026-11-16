@@ -7,7 +7,7 @@ apps/admin/lib/features/quality_review/domain/quality_review_models.dart.
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModuleStatus(BaseModel):
@@ -55,3 +55,15 @@ class QualityQueueOut(BaseModel):
 
 class ReviewDecisionIn(BaseModel):
     approve: bool
+
+
+class QuestionReportIn(BaseModel):
+    reason: Literal["wrong_answer", "unclear", "typo", "out_of_syllabus", "duplicate", "other"]
+    details: str | None = Field(default=None, max_length=1000)
+
+
+class QuestionReportOut(BaseModel):
+    reported: bool = True
+    # True once enough students reported it: the question is out of quizzes until an admin
+    # has looked at it.
+    sent_to_review: bool

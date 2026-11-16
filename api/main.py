@@ -68,6 +68,31 @@ MODULE_ROUTERS = [
 logger = logging.getLogger(__name__)
 
 
+def check_production_settings(settings: Any) -> None:
+    """Refuse to start in production with settings that are only safe on a laptop."""
+    problems = []
+    if settings.AI_SERVICE_TOKEN in ("", "dev-service-token"):
+        problems.append("AI_SERVICE_TOKEN must be a long random secret")
+    if settings.AUTH_CODE_SECRET in ("", "dev-only-change-me"):
+        problems.append("AUTH_CODE_SECRET must be a long random secret")
+    if not settings.FIREBASE_PROJECT_ID:
+        problems.append("FIREBASE_PROJECT_ID is empty (logins cannot be checked)")
+    if not settings.STORAGE_BUCKET:
+        problems.append("STORAGE_BUCKET is empty (uploads have nowhere to go)")
+    if settings.EMAIL_BACKEND == "console":
+        problems.append(
+            "EMAIL_BACKEND=console would print verification codes instead of sending them"
+        )
+    if settings.DEV_EXPOSE_CODES or settings.DEBUG_SHOW_ANSWERS:
+        problems.append("DEV_EXPOSE_CODES and DEBUG_SHOW_ANSWERS must be false")
+    if "*" in settings.CORS_ORIGINS and "localhost" not in settings.CORS_ORIGINS:
+        problems.append("CORS_ORIGINS must list the real origins, not a wildcard")
+    if settings.JOB_RUNNER == "cloudtasks" and not settings.JOBS_TARGET_URL:
+        problems.append("JOBS_TARGET_URL is needed with JOB_RUNNER=cloudtasks")
+    if problems:
+        raise RuntimeError("Unsafe production settings: " + "; ".join(problems))
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.LOG_LEVEL)
@@ -162,5 +187,9 @@ def _add_branded_docs(app: FastAPI) -> None:
             redoc_favicon_url=FAVICON_32_PATH,
         )
 
+
+# Checked once when the server starts (uvicorn api.main:app), not for every test app.
+if get_settings().ENVIRONMENT == "prod":
+    check_production_settings(get_settings())
 
 app = create_app()

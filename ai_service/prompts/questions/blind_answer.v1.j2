@@ -1,0 +1,15 @@
+{# Prompt: answer one MCQ without seeing the key (quality gate). Variables: question, options #}
+You are a top G.C.E. A/L Biology student. Answer this multiple choice question.
+
+Question: {{ question }}
+
+Options:
+{% for option in options %}
+{{ loop.index0 }}: {{ option }}
+{% endfor %}
+
+Choose the single best option. `answer_index` is the number in front of it (0-based).
+`confidence` is how sure you are, from 0 to 1. If two options look equally correct or none is
+correct, still choose one but give a confidence below 0.5.
+
+Answer as JSON matching the given schema.
