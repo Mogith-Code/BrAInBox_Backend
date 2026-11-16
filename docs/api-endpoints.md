@@ -207,6 +207,32 @@ Errors: 401 `UNAUTHORIZED` · 404 `SUBJECT_NOT_FOUND` / `UNIT_NOT_FOUND` / `TOPI
 {"error": {"code": "UNIT_NOT_FOUND", "message": "Unit 'u99' not found"}}
 ```
 
+## learn — Samni (`/api/v1/learn`)
+
+snake_case JSON, lists `{"items", "total"}`, ids = UUID or code (`biology`, `u6`, `bio-6.1`). Errors also carry top-level
+`detail` + `code`. Another student's job / upload / note = 404. Run, seed and curl examples: [README → Learn tab](../README.md#learn-tab-apiv1learn).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/learn/subjects` | Subjects with `available`, `syllabus_version`, `unit_count` |
+| GET | `/learn/subjects/{id}/units?q=` | Units + `topic_count`, `mastery_percent`, `mastery_level` |
+| GET | `/learn/units/{id}` | Unit + ordered topics (status, progress, is_weak) + mastered/weak counts |
+| GET | `/learn/topics/{id}` | Detail, breadcrumb, mastery, is_bookmarked, has_full/short_notes |
+| GET | `/learn/topics/{id}/notes?type=full\|short` | My note, else the official one, else 404 `NOTES_NOT_FOUND` |
+| POST | `/learn/topics/{id}/notes/generate` | AI notes job (202 `{job_id, status}`; 24 h cache) |
+| GET | `/learn/jobs/{id}` | Job status: queued / running / done / failed |
+| GET | `/learn/topics/{id}/diagrams` | Ordered approved images |
+| GET | `/learn/topics/{id}/videos` | Ordered approved videos |
+| GET | `/learn/topics/{id}/practice-summary` | `question_count`, `accuracy_percent`, `last_attempt_at` |
+| POST | `/learn/topics/{id}/progress` | `{event: opened\|read, seconds, completed, progress_percent?}` |
+| GET | `/learn/bookmarks` | My bookmarked topics with unit |
+| POST / DELETE | `/learn/bookmarks/{topic_id}` | Idempotent add / remove |
+| GET | `/learn/search?q=` | `{units, topics}`, min 2 characters |
+| POST | `/learn/uploads` | Multipart `file`, `topic_id?`, `summary_length` → 202 + summary job |
+| GET | `/learn/uploads`, `/learn/uploads/{id}` | My uploads (paginated) / one with summary |
+| POST | `/learn/uploads/{id}/save-to-short-notes` | Summary + key points → my short note (201) |
+| DELETE | `/learn/uploads/{id}` | Delete record + stored file (204) |
+
 ## content — Samni
 
 | Method | Path | Description |
