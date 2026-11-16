@@ -247,3 +247,36 @@ async def set_accepted_reply(
     if reply_id is not None:
         await session.execute(update(Reply).where(Reply.id == reply_id).values(is_accepted=True))
     await session.execute(update(Post).where(Post.id == post_id).values(accepted_reply_id=reply_id))
+
+
+# ---------------------------------------------------------------- votes
+Target = type[Post] | type[Reply]
+
+
+async def lock_target(session: AsyncSession, model: Target, target_id: uuid.UUID) -> None:
+    """Lock the post / reply row until commit, so votes on it are handled one at a time and
+    its score can't miscount (two taps at the same moment)."""
+    await session.execute(select(model.id).where(model.id == target_id).with_for_update())
+
+
+async def get_vote(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    post_id: uuid.UUID | None,
+    reply_id: uuid.UUID | None,
+) -> Vote | None:
+    stmt = select(Vote).where(Vote.user_id == user_id)
+    stmt = stmt.where(Vote.post_id == post_id) if post_id else stmt.where(Vote.reply_id == reply_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def add_score(session: AsyncSession, model: Target, target_id: uuid.UUID, delta: int) -> int:
+    """Add delta to the score inside the database and return the new score."""
+    score = await session.scalar(
+        update(model)
+        .where(model.id == target_id)
+        .values(score=model.score + delta)
+        .returning(model.score)
+    )
+    return int(score or 0)
