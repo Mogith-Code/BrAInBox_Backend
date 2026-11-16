@@ -28,6 +28,9 @@ class Subject(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(50), unique=True)  # e.g. "biology"
     name: Mapped[str] = mapped_column(String(100))
     level: Mapped[str] = mapped_column(String(50))  # e.g. "G.C.E. A/L"
+    # Learn tab: false = shown as "coming soon" (Chemistry, Physics)
+    available: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    syllabus_version: Mapped[str | None] = mapped_column(String(20))  # e.g. "2025"
 
 
 class Unit(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -64,6 +67,7 @@ class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+    syllabus_version: Mapped[str | None] = mapped_column(String(20))  # e.g. "2025"
     # Topics removed from the current syllabus: kept for old data, skipped by the diagnostic.
     is_outdated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 

@@ -71,6 +71,8 @@ class Resource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[ContentStatus] = mapped_column(
         str_enum(ContentStatus), default=ContentStatus.PENDING_REVIEW
     )
+    # Display order on the Learn tab "Videos" list (smallest first).
+    order_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):

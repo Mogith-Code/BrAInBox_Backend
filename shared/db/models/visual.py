@@ -45,6 +45,8 @@ class Visual(UUIDPrimaryKeyMixin, TimestampMixin, AIGeneratedMixin, Base):
         str_enum(ContentStatus), default=ContentStatus.DRAFT
     )
     safety_passed: Mapped[bool | None] = mapped_column(Boolean)
+    # Display order on the Learn tab "Diagrams" list (smallest first).
+    order_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Who asked for it (the spec's `requested_by`).
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
