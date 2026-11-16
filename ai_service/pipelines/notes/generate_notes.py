@@ -2,13 +2,14 @@
 
 Job type: GENERATE_NOTES (dispatched by ai_service/routes/jobs.py)
 
-Grounded with RAG: uses rag.retrieval.retriever + rag.context_builder,
-never document_chunks directly.
+Learn tab: block-format notes from llm_client (learn_notes.py). `gather_context` (RAG
+grounding) is kept for the admin-reviewed notes flow.
 """
 
 import uuid
 from typing import Any
 
+from ai_service.pipelines.notes import learn_notes
 from ai_service.rag.context_builder import BuiltContext, build_context
 from ai_service.rag.retrieval.retriever import retrieve
 from shared.enums import SourceType
@@ -27,10 +28,5 @@ async def gather_context(query: str, topic_id: uuid.UUID | None = None, k: int =
 
 
 async def run(payload: dict[str, Any]) -> dict[str, Any]:
-    """Generate full notes for a topic."""
-    # TODO(Samni):
-    #   1. context = await gather_context(topic_title, topic_id)
-    #   2. prompt = render_prompt(PROMPT_NAME, PROMPT_VERSION, unit_title=..., topic_title=..., context=context.text)
-    #   3. notes = await get_llm().generate_json(prompt, GeneratedNotes)
-    #   4. return notes + context.citations (the api stores them in notes.citations for admin review)
-    return {"status": "todo", "pipeline": "notes.generate_notes"}
+    """Learn tab full notes as JSON blocks (see learn_notes.py for the payload)."""
+    return await learn_notes.generate(payload, short=False)
