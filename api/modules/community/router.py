@@ -15,6 +15,8 @@
     POST   /api/v1/posts/{id}/accept/{reply}  the post's author marks the best answer
     DELETE /api/v1/posts/{id}/accept          the post's author un-marks it
     POST   /api/v1/votes                      +1 / -1 / 0 (remove) on a post or reply
+    POST   /api/v1/posts/{id}/report          report a post to the moderators
+    POST   /api/v1/replies/{id}/report        report a reply to the moderators
 
 All need a logged-in user.
 Rule: routers only validate input, check the role and call `service`. No SQL here.
@@ -39,6 +41,8 @@ from api.modules.community.schemas import (
     ReplyCreate,
     ReplyOut,
     ReplyUpdate,
+    ReportIn,
+    ReportOut,
     VoteIn,
     VoteOut,
 )
@@ -186,7 +190,7 @@ async def unaccept_reply(
     return await service.accept_reply(session, user, post_id, None)
 
 
-# ---------------------------------------------------------------- votes
+# ---------------------------------------------------------------- votes + reports
 
 
 @router.post("/votes", response_model=VoteOut, summary="Vote on a post or reply")
@@ -194,3 +198,29 @@ async def vote(req: VoteIn, user: CurrentUserDep, session: SessionDep) -> VoteOu
     """Send `post_id` OR `reply_id`, and `value` 1 / -1 (0 removes my vote). Voting again
     changes my vote. Members only (403 `NOT_A_MEMBER`); not on my own (403 `CANNOT_VOTE_OWN`)."""
     return await service.vote(session, user, req)
+
+
+@router.post(
+    "/posts/{post_id}/report",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Report a post to the moderators",
+)
+async def report_post(
+    post_id: uuid.UUID, req: ReportIn, user: CurrentUserDep, session: SessionDep
+) -> ReportOut:
+    """409 `ALREADY_REPORTED` while my last report is open; 400 `CANNOT_REPORT_OWN`."""
+    return await service.report(session, user, req, post_id=post_id)
+
+
+@router.post(
+    "/replies/{reply_id}/report",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Report a reply to the moderators",
+)
+async def report_reply(
+    reply_id: uuid.UUID, req: ReportIn, user: CurrentUserDep, session: SessionDep
+) -> ReportOut:
+    """409 `ALREADY_REPORTED` while my last report is open; 400 `CANNOT_REPORT_OWN`."""
+    return await service.report(session, user, req, reply_id=reply_id)
