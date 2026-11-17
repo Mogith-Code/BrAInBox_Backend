@@ -10,17 +10,17 @@ async def test_unknown_route_uses_error_format(anon_client):
 
 
 async def test_missing_token_uses_error_format(anon_client):
-    response = await anon_client.get("/api/v1/auth/status")
+    response = await anon_client.get("/api/v1/auth/me")
     assert response.status_code == 401
     assert response.json() == {"error": {"code": "UNAUTHORIZED", "message": "Missing bearer token"}}
 
 
 async def test_validation_error_uses_error_format(admin_client):
-    response = await admin_client.post("/api/v1/admin/rag/documents/not-a-uuid/reindex")
+    response = await admin_client.get("/api/v1/admin/questions/not-a-uuid")
     assert response.status_code == 422
     error = response.json()["error"]
     assert error["code"] == "VALIDATION_ERROR"
-    assert error["details"][0]["field"] == "path.document_id"
+    assert error["details"][0]["field"] == "path.question_id"
 
 
 def test_admin_origins_are_added_to_cors():

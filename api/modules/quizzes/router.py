@@ -34,7 +34,6 @@ from api.modules.quizzes.schemas import (
     DiagnosticResult,
     DiagnosticStartOut,
     FlagIn,
-    ModuleStatus,
     PracticeHub,
     QuizAnswerIn,
     QuizCreate,
@@ -45,12 +44,6 @@ from api.modules.quizzes.schemas import (
 
 router = APIRouter(tags=["Quizzes"])
 diagnostic = APIRouter(prefix="/diagnostic", tags=["Diagnostic"])
-
-
-@router.get("/quizzes/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    return await service.get_status()
 
 
 # ---------------------------------------------------------------- diagnostic

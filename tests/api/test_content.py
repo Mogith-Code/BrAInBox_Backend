@@ -190,21 +190,6 @@ def real_ai_client(monkeypatch) -> AIClient:  # type: ignore[no-untyped-def]
     return AIClient("http://ai-service", SERVICE_TOKEN)
 
 
-# --------------------------------------------------------------------------- placeholders
-
-
-async def test_content_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/content/status")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "UNAUTHORIZED"
-
-
-async def test_content_status_placeholder(client):
-    response = await client.get("/api/v1/content/status")
-    assert response.status_code == 200
-    assert response.json() == {"module": "content", "status": "todo"}
-
-
 # --------------------------------------------------------------------------- text: schema
 
 

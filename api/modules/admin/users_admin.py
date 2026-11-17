@@ -18,16 +18,10 @@ from fastapi import APIRouter, Query
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.admin import service as admin_service
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.auth import service as auth_service
 from api.modules.auth.schemas import AdminStudentOut, AdminStudentPage, AdminStudentUpdate
 
 router = APIRouter(prefix="/users", tags=["Admin: users"])
-
-
-@router.get("/status", response_model=ModuleStatus, summary="Placeholder: admin area status")
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="users_admin", status="todo")
 
 
 @router.get("", response_model=AdminStudentPage, summary="Students, filtered and paged")

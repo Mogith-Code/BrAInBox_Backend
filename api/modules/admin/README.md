@@ -26,8 +26,6 @@ Everything here is mounted under **`/api/v1/admin`** and requires role **`admin`
 | `moderation_admin.py` | Mogith | `/admin/moderation`, `/admin/community` | ✅ reports queue (posts, replies, visuals, grouped per target), resolve keep/warn/remove, study groups |
 | `users_admin.py` | Mogith | `/admin/users` | ✅ students list (search, filters, status, avg mastery) + suspend / reinstate |
 
-Placeholders right now: `GET /api/v1/admin/<area>/status` → `{"module": "<file>", "status": "todo"}`.
-
 ## Rules
 
 - Admin route files are routers only. They call the **service** of the module that owns the data

@@ -25,7 +25,6 @@ from fastapi import APIRouter, Response, status
 
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.schemas import (
     AdminConceptOut,
@@ -40,11 +39,6 @@ from api.modules.syllabus.schemas import (
 )
 
 router = APIRouter(prefix="/syllabus", tags=["Admin: syllabus"])
-
-
-@router.get("/status", response_model=ModuleStatus, summary="Placeholder: admin area status")
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="syllabus_admin", status="todo")
 
 
 # ---------------------------------------------------------------- units

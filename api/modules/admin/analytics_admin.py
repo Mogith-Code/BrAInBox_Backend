@@ -20,7 +20,6 @@ from fastapi import APIRouter, Query
 
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.performance import service as performance_service
 from api.modules.performance.schemas import (
     AnalyticsAIUsage,
@@ -31,11 +30,6 @@ from api.modules.performance.schemas import (
 router = APIRouter(prefix="/analytics", tags=["Admin: analytics"])
 
 DaysQuery = Annotated[int, Query(ge=1, le=365, description="Period in days, ending today")]
-
-
-@router.get("/status", response_model=ModuleStatus, summary="Placeholder: admin area status")
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="analytics_admin", status="todo")
 
 
 @router.get("/overview", response_model=AnalyticsOverview, summary="Students and activity")

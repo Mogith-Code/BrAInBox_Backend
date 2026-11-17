@@ -35,8 +35,6 @@ New tables in migration `0002`: `unit_mastery`, `study_activity`.
 | - | (service) `after_attempt_marked()` | ✅ built, ⚠️ **not called yet** | ONE call after marking: mistakes + unit and concept mastery + Learn progress. Exams and quizzes must call it, or the journal stays empty |
 | - | (service) `record_mistakes()`, `update_mastery()` | ✅ built | The parts `after_attempt_marked()` runs |
 
-Placeholder: `GET /api/v1/performance/status` → `{"module": "performance", "status": "todo"}` (needs login).
-
 ### How topic progress is calculated (Learn screens)
 
 `user_topic_progress` comes from the same topic score as `GET /insights/topics`, so the two screens agree:

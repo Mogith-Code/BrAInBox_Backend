@@ -19,18 +19,10 @@ from fastapi import APIRouter, status
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.admin import service as admin_service
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.knowledge_base import service as knowledge_service
 from api.modules.knowledge_base.schemas import ModelAnswerIn, ModelAnswerKeywordsIn, ModelAnswerOut
 
 router = APIRouter(tags=["Admin: knowledge base"])
-
-
-@router.get(
-    "/knowledge/status", response_model=ModuleStatus, summary="Placeholder: admin area status"
-)
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="knowledge_admin", status="todo")
 
 
 @router.get("/model-answers", response_model=list[ModelAnswerOut], summary="Model answers")

@@ -15,8 +15,6 @@
 | POST | `/api/v1/questions/{id}/report` | Report a wrong question |
 | - | (service) | Review-queue logic used by admin/questions_admin.py |
 
-Placeholder right now: `GET /api/v1/quality/status` → `{"module": "quality", "status": "todo"}` (needs login).
-
 ## Files
 
 | File | What goes in it |

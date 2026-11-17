@@ -38,21 +38,6 @@ from shared.enums import AttemptKind, QuestionType, TopicProgressStatus, UserRol
 from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
 from tests.conftest import STUDENT, _client
 
-# --------------------------------------------------------------------------- placeholders
-
-
-async def test_performance_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/performance/status")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "UNAUTHORIZED"
-
-
-async def test_performance_status_placeholder(client):
-    response = await client.get("/api/v1/performance/status")
-    assert response.status_code == 200
-    assert response.json() == {"module": "performance", "status": "todo"}
-
-
 # --------------------------------------------------------------------------- grade bands
 
 

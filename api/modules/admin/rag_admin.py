@@ -9,11 +9,8 @@ Mounted under /api/v1/admin/rag (admin role required by admin/router.py).
     GET  /admin/rag/sources      the source documents with their ingestion status
     POST /admin/rag/sources      multipart upload -> 202 {job_id, document_id} (RAG_INGEST job)
     POST /admin/rag/reindex      {document_id?} -> 202 {job_id}; no id = every document
-
-The /documents routes below are older placeholders, kept until the app stops calling them.
 """
 
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, Form, UploadFile, status
@@ -21,51 +18,11 @@ from fastapi import APIRouter, BackgroundTasks, Body, File, Form, UploadFile, st
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.admin import service as admin_service
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.content import service as content_service
 from api.modules.content.schemas import RagJobOut, RagReindexIn, RagSourceOut
 from shared.enums import SourceType
 
 router = APIRouter(prefix="/rag", tags=["Admin: RAG documents"])
-
-
-@router.get("/status", response_model=ModuleStatus, summary="Placeholder: admin area status")
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="rag_admin", status="todo")
-
-
-@router.post("/documents", response_model=ModuleStatus, summary="Upload a source document")
-async def upload_document(
-    admin: CurrentUserDep,
-    file: Annotated[UploadFile, File(description="PDF, DOCX, TXT or Markdown")],
-    title: Annotated[str, Form()],
-    source_type: Annotated[SourceType, Form()],
-    unit_number: Annotated[int | None, Form(ge=1, le=10)] = None,
-    year: Annotated[int | None, Form()] = None,
-) -> ModuleStatus:
-    # TODO(Samni):
-    #   1. storage.upload_bytes(f"rag_sources/{source_type}/{file.filename}", ...)
-    #   2. create the source_documents row (status=pending, sha256 of the bytes)
-    #   3. jobs.create_job(session, JobType.RAG_INGEST, {"document_id": ...}) + enqueue_job
-    #   4. return the document + job id
-    return ModuleStatus(module="rag_admin", status="todo")
-
-
-@router.get("/documents", response_model=ModuleStatus, summary="List source documents")
-async def list_documents(admin: CurrentUserDep) -> ModuleStatus:
-    # TODO(Samni): paginated list with status, chunk_count, error_message (use Page[T]).
-    return ModuleStatus(module="rag_admin", status="todo")
-
-
-@router.post(
-    "/documents/{document_id}/reindex", response_model=ModuleStatus, summary="Re-ingest a document"
-)
-async def reindex_document(document_id: uuid.UUID, admin: CurrentUserDep) -> ModuleStatus:
-    # TODO(Samni): create a RAG_INGEST job with {"document_id": ..., "force": true}.
-    return ModuleStatus(module="rag_admin", status="todo")
-
-
-# ---------------------------------------------------------------- sources (built)
 
 
 @router.get("/sources", response_model=list[RagSourceOut], summary="RAG source documents")

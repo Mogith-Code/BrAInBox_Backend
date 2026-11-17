@@ -17,8 +17,6 @@
 | POST | `/api/v1/questions/{id}/explain` | ✅ done | Explain an MCQ answer (sync AI call) |
 
 
-Placeholder right now: `GET /api/v1/questions/status` → `{"module": "questions", "status": "todo"}` (needs login).
-
 ## Files
 
 | File | What goes in it |

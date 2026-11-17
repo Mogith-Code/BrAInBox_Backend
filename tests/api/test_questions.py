@@ -15,18 +15,6 @@ OTHER = CurrentUser(
 )
 
 
-async def test_questions_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/questions/status")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "UNAUTHORIZED"
-
-
-async def test_questions_status_placeholder(client):
-    response = await client.get("/api/v1/questions/status")
-    assert response.status_code == 200
-    assert response.json() == {"module": "questions", "status": "todo"}
-
-
 async def test_get_question_not_found(client):
     response = await client.get(f"/api/v1/questions/{uuid.uuid4()}")
     assert response.status_code == 404

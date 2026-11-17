@@ -20,18 +20,11 @@ from api.modules.questions import service
 from api.modules.questions.schemas import (
     ExplainQuestionRequest,
     ExplainQuestionResponse,
-    ModuleStatus,
     QuestionDetailOut,
     TopicPracticeQuestionsOut,
 )
 
 router = APIRouter(tags=["Questions"])
-
-
-@router.get("/questions/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    return await service.get_status()
 
 
 @router.get(

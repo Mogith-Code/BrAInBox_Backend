@@ -96,10 +96,10 @@ async def test_dev_tokens_log_in_test_users(dev_login_on: None, db_session) -> N
         async with client_from("127.0.0.1") as c:
             # An admin-only route: the test admin gets in, the test student does not.
             admin = await c.get(
-                "/api/v1/admin/moderation/status", headers={"Authorization": "Bearer dev-admin"}
+                "/api/v1/admin/moderation/reports", headers={"Authorization": "Bearer dev-admin"}
             )
             student = await c.get(
-                "/api/v1/admin/moderation/status", headers={"Authorization": "Bearer dev-token"}
+                "/api/v1/admin/moderation/reports", headers={"Authorization": "Bearer dev-token"}
             )
         assert admin.status_code == 200, admin.text
         assert student.status_code == 403, student.text

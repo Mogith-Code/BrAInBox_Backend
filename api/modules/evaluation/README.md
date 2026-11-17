@@ -16,8 +16,6 @@
 | POST | `/api/v1/evaluations/ocr` | Upload a handwritten answer photo -> OCR_ANSWER job |
 | GET | `/api/v1/evaluations/{id}` | Result: estimated marks, matched points, feedback |
 
-Placeholder right now: `GET /api/v1/evaluation/status` → `{"module": "evaluation", "status": "todo"}` (needs login).
-
 ## Files
 
 | File | What goes in it |
