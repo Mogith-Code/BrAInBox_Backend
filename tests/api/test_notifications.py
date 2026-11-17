@@ -98,9 +98,8 @@ def test_preview_is_one_short_line():
 
 
 async def _add(db_session, **extra) -> Notification:  # type: ignore[no-untyped-def]
-    row = Notification(
-        user_id=STUDENT.id, type=NotificationType.SYSTEM, title="t", body="b", **extra
-    )
+    fields = {"type": NotificationType.SYSTEM, "title": "t", "body": "b", **extra}
+    row = Notification(user_id=STUDENT.id, **fields)
     db_session.add(row)
     await db_session.commit()
     return row

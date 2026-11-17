@@ -428,7 +428,7 @@ async def unseen_bank_question_ids(
     else:
         stmt = stmt.where(Unit.id.in_(unit_ids))
     if exclude:
-        stmt = stmt.where(Question.id.not_in(exclude))
+        stmt = stmt.where(Question.id.not_in(list(exclude)))
     if question_type == QuestionType.MCQ:
         stmt = stmt.where(
             exists().where(MCQOption.question_id == Question.id, MCQOption.is_correct.is_(True))

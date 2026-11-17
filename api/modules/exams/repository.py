@@ -14,7 +14,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, false, func, or_, select
+from sqlalchemy import (
+    ARRAY,
+    ColumnElement,
+    String,
+    cast,
+    distinct,
+    exists,
+    false,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import (
@@ -257,7 +268,10 @@ async def list_past_papers(
             PaperQuestion.paper_id.label("paper_id"),
             func.count().label("n"),
             func.count().filter(outdated_expr()).label("outdated"),
-            func.array_agg(func.distinct(Question.question_type)).label("types"),
+            # Plain strings: a typed array of the enum made `type` filters bind wrongly.
+            func.array_agg(
+                distinct(cast(Question.question_type, String)), type_=ARRAY(String)
+            ).label("types"),
         )
         .join(Question, Question.id == PaperQuestion.question_id)
         .outerjoin(Topic, Topic.id == Question.topic_id)
@@ -272,7 +286,13 @@ async def list_past_papers(
     if year is not None:
         filters.append(Paper.year == year)
     if question_type is not None:
-        filters.append(stats.c.types.any(question_type.value))
+        filters.append(
+            exists().where(
+                PaperQuestion.paper_id == Paper.id,
+                PaperQuestion.question_id == Question.id,
+                Question.question_type == question_type,
+            )
+        )
     joined = select(Paper).join(stats, stats.c.paper_id == Paper.id).where(*filters)
     total = await session.scalar(select(func.count()).select_from(joined.subquery()))
     rows = await session.execute(

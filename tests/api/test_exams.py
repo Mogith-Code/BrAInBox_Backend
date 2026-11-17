@@ -269,16 +269,17 @@ async def exam_data(db_session):
     topic = Topic(unit_id=unit.id, number="T.1", title="Test topic")
     db_session.add(topic)
     await db_session.commit()
+    topic_id, unit_id = topic.id, unit.id  # a rollback expires the rows (MissingGreenlet)
     yield topic
     await db_session.rollback()
     for stmt in (
         delete(Paper).where(Paper.title.like(f"{TAG}%")),
         delete(Question).where(Question.created_by == STUDENT.id),
-        delete(Question).where(Question.topic_id == topic.id),
+        delete(Question).where(Question.topic_id == topic_id),
         delete(Paper).where(Paper.created_by == STUDENT.id),
         delete(AIJob).where(AIJob.requested_by == STUDENT.id),
         delete(User).where(User.id == STUDENT.id),
-        delete(Unit).where(Unit.id == unit.id),
+        delete(Unit).where(Unit.id == unit_id),
     ):
         await db_session.execute(stmt)
     await db_session.commit()

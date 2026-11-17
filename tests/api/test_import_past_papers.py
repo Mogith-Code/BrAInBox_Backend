@@ -99,14 +99,15 @@ async def topic(db_session):  # type: ignore[no-untyped-def]
     db_session.add(row)
     await db_session.commit()
     year = random.randint(1990, 2100)
+    topic_id, unit_id = row.id, unit.id  # a rollback expires the rows (MissingGreenlet)
     yield row, year
     await db_session.rollback()
     await db_session.execute(
         delete(Paper).where(Paper.paper_type == "past_paper", Paper.title.like("Import test%"))
     )
-    await db_session.execute(delete(Question).where(Question.topic_id == row.id))
-    await db_session.execute(delete(Topic).where(Topic.id == row.id))
-    await db_session.execute(delete(Unit).where(Unit.id == unit.id))
+    await db_session.execute(delete(Question).where(Question.topic_id == topic_id))
+    await db_session.execute(delete(Topic).where(Topic.id == topic_id))
+    await db_session.execute(delete(Unit).where(Unit.id == unit_id))
     await db_session.commit()
 
 
@@ -155,11 +156,14 @@ async def test_import_creates_paper_questions_and_links(db_session, topic):
 @pytest.mark.db
 async def test_unknown_topic_writes_nothing(db_session, topic):
     row, year = topic
+    topic_id = row.id
     data = paper(year=year, title=f"Import test {year}",
                  questions=[mcq("1", topic=row.title), mcq("2", topic="No such topic zzz")])  # fmt: skip
     with pytest.raises(PaperFileError) as err:
         await import_paper(db_session, parse_paper(data))
     await db_session.rollback()
     assert "No such topic zzz" in err.value.problems[0]
-    count = (await db_session.execute(select(Question.id).where(Question.topic_id == row.id))).all()
+    count = (
+        await db_session.execute(select(Question.id).where(Question.topic_id == topic_id))
+    ).all()
     assert count == []

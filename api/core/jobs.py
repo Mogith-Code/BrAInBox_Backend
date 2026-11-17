@@ -136,6 +136,9 @@ async def run_job_inline(
         logger.exception("Job %s failed", job.id)
         # The handler may have left the session in a failed transaction.
         await session.rollback()
+        # The rollback expired the row; load it again so listeners / callers can read it
+        # (an expired attribute can't be loaded lazily in async code: MissingGreenlet).
+        await session.refresh(job)
         # AppErrors keep their code, e.g. "EMPTY_NOTES: The notes are empty...", so the module
         # that owns the job can tell the student what went wrong.
         job.error = f"{exc.code}: {exc.message}" if isinstance(exc, AppError) else str(exc)
