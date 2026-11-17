@@ -6,8 +6,9 @@ or leave them. A private group is only visible to its members and can't be joine
 
 Posts and replies: anyone who can see a group can read them; only members can post or reply.
 Only the author can edit; the author or an admin can delete (soft delete). The post's author
-picks the accepted answer. New posts and replies are published straight away for now
-(NEW_CONTENT_STATUS); AI moderation will switch that to "pending".
+picks the accepted answer. New posts and replies are checked by the AI moderator first: OK ->
+published, off-topic / inappropriate -> flagged. When the moderator can't be reached they are
+held as "pending" (only the author sees them), because the users are minors.
 
 Admin side (admin/moderation_admin.py):
   * Moderation queue: open reports of posts and replies (`content_reports`) and of visuals
@@ -60,6 +61,7 @@ from api.modules.community.schemas import (
     VoteIn,
     VoteOut,
 )
+from api.modules.notifications import service as notifications_service
 from api.modules.syllabus import service as syllabus_service
 from api.modules.visuals import service as visuals_service
 from shared.db.models import (
@@ -78,10 +80,11 @@ logger = logging.getLogger(__name__)
 MODULE_NAME = "community"
 TEXT_PREVIEW_CHARS = 500
 
-# Decision (option A): publish new posts and replies straight away and rely on reports. When AI
-# moderation (MODERATE_POST) is added, change this to ModerationStatus.PENDING - and only count a
-# reply in the post's reply_count once it is approved.
-NEW_CONTENT_STATUS = ModerationStatus.APPROVED
+# Status of new posts / replies before (or without) an AI moderation verdict. Our users are
+# minors, so nothing unchecked is published: it is held (author-only) until it is approved. Only
+# approved replies count in the post's reply_count.
+NEW_CONTENT_STATUS = ModerationStatus.PENDING
+HELD_REASON = "Held: AI moderation was unavailable"
 # Safety net while there is no review before publishing: a post / reply reported by this many
 # different people is hidden (flagged) until an admin decides. 0 turns it off.
 REPORTS_TO_HIDE = 3
@@ -387,6 +390,8 @@ async def create_reply(
     await repository.add_reply(session, reply)
     if reply.moderation_status == ModerationStatus.APPROVED:  # only visible replies are counted
         await repository.change_reply_count(session, post.id, +1)
+        if post.author_id is not None and post.author_id != user.id:
+            _notify_reply(session, post, reply)
     await session.commit()
     return reply_out(await _visible_reply(session, user, reply.id), user)
 
@@ -545,15 +550,16 @@ async def _moderate(
     ai: AIClient | None, title: str, body: str
 ) -> tuple[ModerationStatus, str | None]:
     """(status, reason) for new content. OK -> published; off-topic / inappropriate -> flagged
-    and hidden until an admin decides. Without an AI client (or when the ai_service cannot be
-    reached) the content is published and students can still report it."""
+    and hidden until an admin decides. Without an AI client, or when the ai_service cannot be
+    reached, the content is held as pending (only its author sees it): never published unchecked.
+    """
     if ai is None:
-        return NEW_CONTENT_STATUS, None
+        return NEW_CONTENT_STATUS, HELD_REASON
     try:
         result = (await ai.sync("moderate", {"title": title, "body": body})).get("result", {})
     except AppError as exc:
-        logger.warning("Moderation was not available: %s", exc.message)
-        return NEW_CONTENT_STATUS, None
+        logger.warning("Moderation was not available, holding the content: %s", exc.message)
+        return NEW_CONTENT_STATUS, HELD_REASON
     label = str(result.get("label") or "ok")
     if label == "ok":
         return ModerationStatus.APPROVED, None
@@ -619,6 +625,26 @@ async def on_answer_suggested(session: AsyncSession, job: AIJob) -> None:
     )
     await repository.add_reply(session, reply)
     await repository.change_reply_count(session, post.id, +1)
+    if post.author_id is not None:
+        _notify_reply(session, post, reply)
+
+
+def _notify_reply(session: AsyncSession, post: Post, reply: Reply) -> None:
+    """COMMUNITY_REPLY notification for the post's author (saved with the caller's commit)."""
+    assert post.author_id is not None
+    notifications_service.notify(
+        session,
+        post.author_id,
+        NotificationType.COMMUNITY_REPLY,
+        (
+            "BrAInBox AI answered your question"
+            if reply.is_ai_suggested
+            else f'New reply on "{notifications_service.preview(post.title, 60)}"'
+        ),
+        notifications_service.preview(reply.body),
+        {"screen": "post", "post_id": str(post.id), "reply_id": str(reply.id)},
+        ai_generated=bool(reply.is_ai_suggested),
+    )
 
 
 jobs.register_job_handler(JobType.SUGGEST_ANSWER, on_answer_suggested)

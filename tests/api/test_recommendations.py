@@ -287,6 +287,11 @@ async def test_study_plan_generate_tick_and_reorder(learner):
         bad = await c.put("/api/v1/study-plan/order", json={"item_ids": [str(uuid.uuid4())]})
         recs = (await c.get("/api/v1/recommendations")).json()["items"]
         new = (await c.post("/api/v1/study-plan/regenerate")).json()
+        notes = (await c.get("/api/v1/notifications")).json()["items"]
+    # one "plan ready" notification per new plan (the first one and the regenerated one)
+    ready = [n for n in notes if n["event"] == "plan_ready"]
+    assert {n["data"]["plan_id"] for n in ready} == {plan["id"], new["id"]}
+    assert ready[0]["type"] == "reminder" and ready[0]["ai_generated"] is True
     assert plan["total"] == 3 and len(plan["days"]) == 7 and plan["done"] == 0
     assert same["id"] == plan["id"]
     assert day["minutes_planned"] == 40 and day["minutes_available"] == 60

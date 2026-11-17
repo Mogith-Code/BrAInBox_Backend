@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import delete
 
+from api.core.ai_client import AIClient
+from api.core.errors import ServiceUnavailableError
 from api.core.security import CurrentUser, get_current_user
 from api.main import create_app
 from api.modules.community import repository
@@ -15,19 +17,24 @@ from shared.db.models import CommunityGroup, GroupMember, Post, Reply, Topic, Un
 from shared.enums import ModerationStatus, UserRole
 from tests.conftest import STUDENT, _client
 
-# --------------------------------------------------------------------------- placeholders
 
+@pytest.fixture(autouse=True)
+def moderator(monkeypatch):  # type: ignore[no-untyped-def]
+    """No ai_service in tests: the AI moderator answers `label` ("ok" = publish), or is
+    unreachable when `down` is True. Every other sync call still goes to the real client."""
+    state = SimpleNamespace(label="ok", down=False, calls=0)
+    real_sync = AIClient.sync
 
-async def test_community_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/community/status")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+    async def sync(self, name, payload):  # type: ignore[no-untyped-def]
+        if name != "moderate":
+            return await real_sync(self, name, payload)
+        state.calls += 1
+        if state.down:
+            raise ServiceUnavailableError("down", code="AI_SERVICE_UNAVAILABLE")
+        return {"result": {"label": state.label, "reason": "test"}}
 
-
-async def test_community_status_placeholder(client):
-    response = await client.get("/api/v1/community/status")
-    assert response.status_code == 200
-    assert response.json() == {"module": "community", "status": "todo"}
+    monkeypatch.setattr(AIClient, "sync", sync)
+    return state
 
 
 # --------------------------------------------------------------------------- groups (no DB)
@@ -278,7 +285,7 @@ async def test_only_members_can_post(client, forum, db_session):
 
 
 @pytest.mark.db
-async def test_create_post_is_published_straight_away(client, forum):
+async def test_create_post_is_published_once_moderation_says_ok(client, forum):
     response = await client.post(
         f"/api/v1/groups/{forum.group.slug}/posts",
         json={
@@ -293,9 +300,50 @@ async def test_create_post_is_published_straight_away(client, forum):
     assert post["title"] == "How does linkage work?"
     assert post["tags"] == ["genetics", "linkage"]  # cleaned: trimmed, lower-case, no duplicates
     assert (post["topic"], post["unit_id"]) == ("Forum topic", str(forum.unit.id))
-    assert post["moderation_status"] == "approved"  # option A: no review queue yet
+    assert post["moderation_status"] == "approved"  # the (fake) AI moderator said OK
     assert (post["is_mine"], post["author"]["name"]) == (True, "Nethmi Perera")
     assert (post["score"], post["reply_count"], post["accepted_reply_id"]) == (0, 0, None)
+
+
+@pytest.mark.db
+async def test_post_is_held_when_moderation_is_down(client, forum, db_session, moderator):
+    moderator.down = True
+    response = await client.post(
+        f"/api/v1/groups/{forum.group.slug}/posts", json={"title": "Held post", "body": "Hi"}
+    )
+    assert response.status_code == 201, response.text
+    post = response.json()
+    assert post["moderation_status"] == "pending"  # minors: nothing unchecked is published
+    assert (await client.get(f"/api/v1/posts/{post['id']}")).status_code == 200  # the author
+    async with _client_as(OTHER) as other:
+        hidden = await other.get(f"/api/v1/posts/{post['id']}")
+        feed = (await other.get(f"/api/v1/groups/{forum.group.slug}/posts")).json()
+    assert hidden.json()["error"]["code"] == "POST_NOT_FOUND"
+    assert post["id"] not in [p["id"] for p in feed["items"]]
+    row = await db_session.get(Post, uuid.UUID(post["id"]))
+    assert row.moderation_reason == "Held: AI moderation was unavailable"
+
+
+@pytest.mark.db
+async def test_reply_is_held_and_not_counted_when_moderation_is_down(
+    client, forum, db_session, moderator
+):
+    post = await _post(db_session, forum.group, OTHER.id, "Question")
+    moderator.down = True
+    reply = (await client.post(f"/api/v1/posts/{post.id}/replies", json={"body": "x"})).json()
+    assert reply["moderation_status"] == "pending"
+    async with _client_as(OTHER) as other:
+        detail = (await other.get(f"/api/v1/posts/{post.id}")).json()
+    assert (detail["replies"], detail["reply_count"]) == ([], 0)
+
+
+@pytest.mark.db
+async def test_flagged_by_the_ai_moderator(client, forum, moderator):
+    moderator.label = "off_topic"
+    response = await client.post(
+        f"/api/v1/groups/{forum.group.slug}/posts", json={"title": "Cricket", "body": "Score?"}
+    )
+    assert response.json()["moderation_status"] == "flagged"
 
 
 @pytest.mark.db
@@ -481,6 +529,25 @@ async def test_reply_and_reply_count(client, forum, db_session):
             other.post(f"/api/v1/posts/{post.id}/replies", json={"body": "b"}),
         )
     assert await _reply_count(client, post.id) == 3
+
+
+@pytest.mark.db
+async def test_a_reply_notifies_the_author_but_not_for_own_replies(
+    client, forum, db_session, moderator
+):
+    mine = await _post(db_session, forum.group, STUDENT.id, "Why ATP?")
+    async with _client_as(OTHER) as other:
+        await other.post(f"/api/v1/posts/{mine.id}/replies", json={"body": "Energy currency"})
+    await client.post(f"/api/v1/posts/{mine.id}/replies", json={"body": "Thanks"})  # own post
+    moderator.down = True  # a held reply is not shown yet, so it doesn't notify either
+    async with _client_as(OTHER) as other:
+        await other.post(f"/api/v1/posts/{mine.id}/replies", json={"body": "Held"})
+
+    items = (await client.get("/api/v1/notifications")).json()["items"]
+    replies = [n for n in items if n["data"].get("post_id") == str(mine.id)]
+    assert [(n["type"], n["title"], n["body"]) for n in replies] == [
+        ("community", 'New reply on "Why ATP?"', "Energy currency")
+    ]
 
 
 @pytest.mark.db
