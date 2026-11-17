@@ -194,3 +194,25 @@ class OptionMisconceptionOut(BaseModel):
     text: str
     is_correct: bool
     misconception: str | None = None
+
+
+class MisconceptionSuggestJobOut(BaseModel):
+    """202 of POST /admin/questions/{id}/misconception-suggestions: poll GET /jobs/{job_id}."""
+
+    job_id: uuid.UUID
+    question_id: uuid.UUID
+
+
+class MisconceptionSuggestion(BaseModel):
+    """One AI proposal for one wrong option. Nothing is saved: the admin confirms it with
+    PUT /admin/options/{option_id}/misconception {"misconception": suggested_misconception}."""
+
+    option_id: uuid.UUID
+    label: str
+    option_text: str
+    current_misconception: str | None = None  # what is linked now (if anything)
+    suggested_misconception: str
+    # Set when the proposal reuses a misconception that is already in the bank.
+    misconception_id: uuid.UUID | None = None
+    is_new: bool
+    similarity: float | None = None  # how close a reused one is (0-1)
