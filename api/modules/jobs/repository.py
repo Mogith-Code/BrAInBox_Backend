@@ -5,11 +5,32 @@ Only this module's `service.py` may import this file.
 """
 
 import uuid
+from datetime import datetime
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import AIJob
+from shared.enums import JobStatus, JobType
 
 
 async def get_job(session: AsyncSession, job_id: uuid.UUID) -> AIJob | None:
     return await session.get(AIJob, job_id)
+
+
+async def count_jobs_since(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    job_type: JobType,
+    since: datetime,
+    *,
+    exclude_failed: bool = True,
+) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(AIJob)
+        .where(AIJob.requested_by == user_id, AIJob.job_type == job_type, AIJob.created_at >= since)
+    )
+    if exclude_failed:
+        stmt = stmt.where(AIJob.status != JobStatus.FAILED)
+    return int(await session.scalar(stmt) or 0)

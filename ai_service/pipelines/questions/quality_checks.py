@@ -162,6 +162,65 @@ async def review_questions(
     return reviews
 
 
+# --------------------------------------------------------------------------- written questions
+MAX_WRITTEN_STEM_CHARS = 1500
+WRITTEN_MARKS = {"structured": (1, 10), "essay": (5, 20)}
+
+
+def written_rule_issues(question: dict[str, Any]) -> list[str]:
+    """Pure: everything wrong with the shape of one structured / essay question."""
+    issues = []
+    stem = str(question.get("question") or "").strip()
+    kind = str(question.get("question_type") or "structured")
+    marks = question.get("marks")
+    points = [p for p in (question.get("points") or []) if isinstance(p, dict)]
+    if not stem:
+        issues.append("The question text is empty.")
+    if len(stem) > MAX_WRITTEN_STEM_CHARS:
+        issues.append(f"The question is longer than {MAX_WRITTEN_STEM_CHARS} characters.")
+    if not str(question.get("model_answer") or "").strip():
+        issues.append("It has no model answer.")
+    low, high = WRITTEN_MARKS.get(kind, (1, 20))
+    if not isinstance(marks, int) or not low <= marks <= high:
+        issues.append(f"A {kind} question should be worth {low}-{high} marks.")
+    if len(points) < 2:
+        issues.append("The marking scheme needs at least 2 points.")
+    if any(not str(p.get("text") or "").strip() for p in points):
+        issues.append("A marking point is empty.")
+    if any(not [k for k in p.get("keywords") or [] if str(k).strip()] for p in points):
+        issues.append("Every marking point needs at least one keyword.")
+    if isinstance(marks, int) and sum(int(p.get("marks") or 0) for p in points) != marks:
+        issues.append("The marking points don't add up to the question's marks.")
+    return issues
+
+
+async def review_written(
+    questions: list[dict[str, Any]], existing: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Rule checks + the duplicate check for written questions (no blind review: there is no
+    single answer to guess). Same review shape as `review_questions`."""
+    duplicates = await duplicate_checks(
+        [str(q.get("question") or "") for q in questions], existing or []
+    )
+    reviews = []
+    for index, (question, duplicate) in enumerate(zip(questions, duplicates, strict=True)):
+        rules = written_rule_issues(question)
+        issues = list(rules)
+        if not duplicate["passed"]:
+            issues.append("It is almost the same as an existing question.")
+        reviews.append(
+            {
+                "index": index,
+                "question_id": question.get("id"),
+                "passed": not issues,
+                "verdict": "accept" if not issues else "reject",
+                "issues": issues,
+                "checks": {"rules": {"passed": not rules, "issues": rules}, "duplicate": duplicate},
+            }
+        )
+    return reviews
+
+
 async def run(payload: dict[str, Any]) -> dict[str, Any]:
     reviews = await review_questions(
         list(payload.get("questions") or []), list(payload.get("existing") or [])

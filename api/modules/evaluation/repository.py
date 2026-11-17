@@ -195,3 +195,22 @@ async def manual_pairs(session: AsyncSession) -> list[tuple[float, float]]:
         )
     )
     return [(float(e), float(m)) for e, m in result.all()]
+
+
+async def count_open_for_responses(
+    session: AsyncSession, response_ids: list[uuid.UUID], exclude_id: uuid.UUID | None
+) -> int:
+    """Evaluations of these responses that are still queued / running."""
+    if not response_ids:
+        return 0
+    stmt = (
+        select(func.count())
+        .select_from(Evaluation)
+        .where(
+            Evaluation.response_id.in_(response_ids),
+            Evaluation.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+        )
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Evaluation.id != exclude_id)
+    return int(await session.scalar(stmt) or 0)

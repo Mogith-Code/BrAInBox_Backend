@@ -9,6 +9,7 @@ Rules:
 
 import re
 import uuid
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,7 @@ from api.core.security import CurrentUser
 from api.modules.jobs import repository
 from api.modules.jobs.schemas import JobOut
 from shared.db.models import AIJob
-from shared.enums import JobStatus
+from shared.enums import JobStatus, JobType
 
 GENERIC_ERROR = "Something went wrong while making this. Please try again."
 BUSY_ERROR = "The AI is busy right now. Please try again in a few minutes."
@@ -69,3 +70,11 @@ async def get_job(session: AsyncSession, user: CurrentUser, job_id: uuid.UUID) -
     if job is None or (job.requested_by != user.id and not user.is_admin):
         raise NotFoundError(f"Job '{job_id}' not found", code="JOB_NOT_FOUND")
     return job_out(job)
+
+
+async def count_recent_jobs(
+    session: AsyncSession, user_id: uuid.UUID, job_type: JobType, since: datetime
+) -> int:
+    """How many jobs of this type the user started since `since` (failed ones don't count).
+    Used for daily limits, e.g. PAPERS_DAILY_LIMIT in the exams module."""
+    return await repository.count_jobs_since(session, user_id, job_type, since)
