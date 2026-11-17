@@ -13,9 +13,11 @@ Rules:
 """
 
 import logging
+import math
 import random
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,21 +26,37 @@ from api.core.ai_client import AIClient
 from api.core.errors import AppError, ConflictError, NotFoundError
 from api.modules.performance import service as performance_service
 from api.modules.profiles import service as profiles_service
+from api.modules.quality import service as quality_service
 from api.modules.quizzes import repository
-from api.modules.quizzes.repository import McqRow
+from api.modules.quizzes.repository import McqRow, QuizRow
 from api.modules.quizzes.schemas import (
+    AnswerFeedback,
     AnswerSavedOut,
+    ConceptRef,
     DiagnosticQuestionOut,
     DiagnosticResult,
     DiagnosticStartOut,
+    MasteryChange,
+    MisconceptionCard,
+    MisconceptionCount,
     ModuleStatus,
     OptionOut,
+    PracticeHub,
+    QuizAnswerIn,
+    QuizBrief,
+    QuizCreate,
+    QuizOut,
+    QuizQuestionOut,
+    QuizResult,
+    ReviewItem,
+    TopicAccuracy,
     UnitRef,
     UnitResult,
 )
 from api.modules.syllabus import service as syllabus_service
 from api.modules.syllabus.service import UnitInfo
-from shared.db.models import Attempt, Response
+from shared.db.models import Attempt, MCQOption, Response
+from shared.enums import MasterySource
 
 logger = logging.getLogger(__name__)
 
@@ -345,5 +363,441 @@ async def skip_diagnostic(session: AsyncSession, user_id: uuid.UUID) -> None:
     await profiles_service.mark_diagnostic_skipped(session, user_id)
 
 
-# TODO(Udith): start_quiz / submit_responses / get_results (regular quizzes)
-# TODO(Udith + Keshomigha): record mistakes per concept after quizzes and diagnostics
+# =========================================================================== quizzes (practice)
+# Flow: POST /quizzes -> POST /quizzes/{id}/responses (instant feedback, one per question)
+#       -> POST /quizzes/{id}/submit -> GET /quizzes/{id}/result
+#
+# Every answer goes through performance_service.record_answer(): it updates the concept's
+# mastery, records a typed mistake and checks for a recurring misconception. The feedback
+# card is built from the MCQ mapping (option -> misconception), so no AI is called here.
+
+SECONDS_PER_QUESTION = 90  # timed quizzes: 1.5 minutes per MCQ
+RECENT_QUIZZES = 5
+MISTAKE_POOL = 200
+
+
+def quiz_minutes(count: int) -> int:
+    return max(1, math.ceil(count * SECONDS_PER_QUESTION / 60))
+
+
+def _resolve_unit(units: list[UnitInfo], ref: str) -> UnitInfo:
+    """A unit by UUID, code ("u6") or number ("6"). 404 UNIT_NOT_FOUND."""
+    wanted = ref.strip().lower()
+    for unit in units:
+        if wanted in (str(unit.id), f"u{unit.number}", str(unit.number)):
+            return unit
+    raise NotFoundError(f"Unit '{ref}' not found", code="UNIT_NOT_FOUND")
+
+
+def pick_questions(
+    candidates: list[QuizRow],
+    count: int,
+    *,
+    seen: set[uuid.UUID],
+    weakness: dict[uuid.UUID, float] | None = None,
+    rng: random.Random | None = None,
+) -> list[QuizRow]:
+    """Pure: choose `count` questions. Unseen questions come first; with `weakness`
+    ({question_id: mastery of its weakest concept}) the weakest concepts come first of all."""
+    rng = rng or random.Random()
+    pool = list(candidates)
+    rng.shuffle(pool)  # random order inside each group
+    if weakness is not None:
+        pool.sort(key=lambda q: (round(weakness.get(q.id, 0.5), 2), q.id in seen))
+    else:
+        pool.sort(key=lambda q: q.id in seen)
+    return pool[:count]
+
+
+def _quiz_question_out(
+    position: int, row: QuizRow, unit: UnitInfo, response: Response | None, finished: bool
+) -> QuizQuestionOut:
+    answered = response is not None and response.selected_option_id is not None
+    correct = row.correct_option
+    return QuizQuestionOut(
+        id=row.id,
+        position=position,
+        stem=row.stem,
+        unit_code=unit.code,
+        unit_title=unit.title,
+        topic_id=row.topic_id,
+        topic_title=row.topic_title,
+        difficulty=row.difficulty,
+        options=[OptionOut(id=o.id, label=o.label, text=o.text) for o in row.options],
+        selected_option_id=response.selected_option_id if response else None,
+        # The solution is only sent for questions that are answered (or after submitting).
+        correct_option_id=correct.id if correct and (answered or finished) else None,
+        is_correct=response.is_correct if response and (answered or finished) else None,
+        flagged=bool(response.flagged) if response else False,
+    )
+
+
+async def _quiz_out(session: AsyncSession, attempt: Attempt) -> QuizOut:
+    units = {u.id: u for u in await syllabus_service.list_units(session)}
+    rows = await repository.quiz_questions(session, list(attempt.question_ids))
+    responses = await repository.get_responses(session, attempt.id)
+    paper = await repository.get_paper(session, attempt.paper_id)
+    finished = attempt.status != "in_progress"
+    return QuizOut(
+        quiz_id=attempt.id,
+        title=paper.title if paper else "Quiz",
+        status=attempt.status,
+        total=len(rows),
+        answered=sum(1 for r in responses.values() if r.selected_option_id is not None),
+        timed=attempt.time_limit_minutes is not None,
+        time_limit_minutes=attempt.time_limit_minutes,
+        started_at=attempt.started_at,
+        questions=[
+            _quiz_question_out(n, row, units[row.unit_id], responses.get(row.id), finished)
+            for n, row in enumerate(rows, start=1)
+        ],
+    )
+
+
+async def start_quiz(session: AsyncSession, user_id: uuid.UUID, req: QuizCreate) -> QuizOut:
+    """Pick the questions and freeze them. 404 UNIT_NOT_FOUND / TOPIC_NOT_FOUND ·
+    422 NO_QUESTIONS when nothing approved matches."""
+    units = await syllabus_service.list_units(session)
+    unit = _resolve_unit(units, req.unit) if req.unit else None
+    topic = await syllabus_service.resolve_topic(session, req.topic) if req.topic else None
+
+    mistake_ids = None
+    if req.mistakes_only:
+        mistake_ids = await performance_service.mistake_question_ids(session, user_id, MISTAKE_POOL)
+        if not mistake_ids:
+            raise AppError(
+                "You have no open mistakes to practise. Nice work!",
+                code="NO_MISTAKES",
+                status_code=422,
+            )
+    candidates = [
+        q
+        for q in await repository.quiz_candidates(
+            session,
+            unit_id=unit.id if unit and topic is None else None,
+            topic_id=topic.id if topic else None,
+            concept_id=req.concept_id,
+            question_ids=mistake_ids,
+            difficulty=None if req.difficulty == "mixed" else req.difficulty,
+        )
+        if len(q.options) >= 2 and q.correct_option is not None
+    ]
+    if not candidates:
+        raise AppError(
+            "There are no approved questions for this selection yet. Try another topic or "
+            "difficulty.",
+            code="NO_QUESTIONS",
+            status_code=422,
+        )
+
+    weakness = None
+    if req.focus_weak:
+        links = await repository.concept_links(session, [q.id for q in candidates])
+        mastery = await performance_service.concept_mastery_values(
+            session, user_id, list({c for ids in links.values() for c in ids})
+        )
+        weakness = {
+            q.id: min((mastery.get(c, 0.5) for c in links.get(q.id, [])), default=0.5)
+            for q in candidates
+        }
+    seen = await repository.seen_question_ids(session, user_id)
+    chosen = pick_questions(candidates, req.count, seen=seen, weakness=weakness)
+
+    if req.mistakes_only:
+        title = "Practice my mistakes"
+    elif topic is not None:
+        title = f"Quiz: {topic.title}"
+    elif unit is not None:
+        title = f"Quiz: Unit {unit.number} {unit.title}"
+    elif req.focus_weak:
+        title = "Targeted practice: weak areas"
+    else:
+        title = "Mixed quiz"
+    attempt = await repository.create_quiz(
+        session,
+        user_id,
+        [q.id for q in chosen],
+        title=title,
+        unit_id=unit.id if unit else (topic.unit_id if topic else None),
+        topic_id=topic.id if topic else None,
+        minutes=quiz_minutes(len(chosen)) if req.timed else None,
+        blueprint=req.model_dump(mode="json"),
+    )
+    await session.commit()
+    return await _quiz_out(session, attempt)
+
+
+async def _own_quiz(session: AsyncSession, user_id: uuid.UUID, quiz_id: uuid.UUID) -> Attempt:
+    attempt = await repository.get_quiz_attempt(session, quiz_id)
+    if attempt is None or attempt.user_id != user_id:  # someone else's = "not found"
+        raise NotFoundError("Quiz not found", code="QUIZ_NOT_FOUND")
+    return attempt
+
+
+async def get_quiz(session: AsyncSession, user_id: uuid.UUID, quiz_id: uuid.UUID) -> QuizOut:
+    return await _quiz_out(session, await _own_quiz(session, user_id, quiz_id))
+
+
+async def answer_quiz_question(
+    session: AsyncSession, user_id: uuid.UUID, quiz_id: uuid.UUID, req: QuizAnswerIn
+) -> AnswerFeedback:
+    """Save one answer and return the feedback card. Answers are final (409 ALREADY_ANSWERED),
+    because the feedback shows the solution."""
+    attempt = await _own_quiz(session, user_id, quiz_id)
+    if attempt.status != "in_progress":
+        raise ConflictError("This quiz is already submitted", code="QUIZ_FINISHED")
+    if req.question_id not in attempt.question_ids:
+        raise AppError("That question is not part of this quiz", code="QUESTION_NOT_IN_QUIZ")
+    row = (await repository.quiz_questions(session, [req.question_id]))[0]
+    chosen = next((o for o in row.options if o.id == req.option_id), None)
+    correct = row.correct_option
+    if chosen is None or correct is None:
+        raise AppError("That option does not belong to the question", code="OPTION_INVALID")
+
+    responses = await repository.get_responses(session, attempt.id)
+    response = responses.get(row.id)
+    if response is not None and response.selected_option_id is not None:
+        raise ConflictError("You already answered this question", code="ALREADY_ANSWERED")
+    if response is None:
+        response = Response(attempt_id=attempt.id, question_id=row.id)
+        await repository.add_response(session, response)
+        responses[row.id] = response
+    response.selected_option_id = chosen.id
+    response.is_correct = chosen.id == correct.id
+    response.marks_awarded = 1.0 if response.is_correct else 0.0
+    response.time_spent_seconds = req.time_spent_seconds
+    response.answered_at = clock.now()
+    await session.flush()
+
+    effect = await performance_service.record_answer(
+        session,
+        user_id,
+        question_id=row.id,
+        score=1.0 if response.is_correct else 0.0,
+        response_id=response.id,
+        misconception_id=None if response.is_correct else chosen.misconception_id,
+    )
+    await quality_service.record_answer(
+        session, row.id, correct=bool(response.is_correct), label=chosen.label
+    )
+    await performance_service.record_study_activity(session, user_id)
+    if req.time_spent_seconds:
+        await performance_service.add_study_time(session, user_id, req.time_spent_seconds)
+
+    misconception = None
+    if not response.is_correct and chosen.misconception_id is not None:
+        found = await repository.get_misconceptions(session, [chosen.misconception_id])
+        m = found.get(chosen.misconception_id)
+        if m is not None:
+            misconception = MisconceptionCard(
+                id=m.id, title=m.title, description=m.description, correction=m.correction_md
+            )
+    concept = None
+    if effect.concept_id is not None:
+        briefs = await performance_service.concept_briefs(session, [effect.concept_id])
+        if briefs:
+            c = briefs[0]
+            concept = ConceptRef(
+                id=c.id, name=c.name, topic_id=c.topic_id, topic_title=c.topic_title
+            )
+    mastery = None
+    if effect.mastery_after is not None:
+        mastery = MasteryChange(
+            before=round(effect.mastery_before * 100)
+            if effect.mastery_before is not None
+            else None,
+            after=round(effect.mastery_after * 100),
+            level=effect.level,
+        )
+    await session.commit()
+    return AnswerFeedback(
+        question_id=row.id,
+        selected_option_id=chosen.id,
+        correct_option_id=correct.id,
+        is_correct=bool(response.is_correct),
+        explanation=row.explanation,
+        option_explanation=chosen.explanation_md,
+        misconception=misconception,
+        concept=concept,
+        mastery=mastery,
+        mistake_type=effect.mistake_type.value if effect.mistake_type else None,
+        recurring_misconception=effect.recurring,
+        recurring_count=effect.recurring_count,
+        answered=sum(1 for r in responses.values() if r.selected_option_id is not None),
+        total=len(attempt.question_ids),
+    )
+
+
+async def flag_quiz_question(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    quiz_id: uuid.UUID,
+    question_id: uuid.UUID,
+    flagged: bool,
+) -> None:
+    """Flag a question for review (kept with the response, so it survives app restarts)."""
+    attempt = await _own_quiz(session, user_id, quiz_id)
+    if question_id not in attempt.question_ids:
+        raise AppError("That question is not part of this quiz", code="QUESTION_NOT_IN_QUIZ")
+    responses = await repository.get_responses(session, attempt.id)
+    response = responses.get(question_id)
+    if response is None:
+        response = Response(attempt_id=attempt.id, question_id=question_id)
+        await repository.add_response(session, response)
+    response.flagged = flagged
+    await session.commit()
+
+
+def _label(option: MCQOption | None) -> str | None:
+    return f"{option.label}. {option.text}" if option else None
+
+
+def build_quiz_result(
+    attempt: Attempt,
+    title: str,
+    rows: list[QuizRow],
+    responses: dict[uuid.UUID, Response],
+    misconceptions: dict[uuid.UUID, Any],
+) -> QuizResult:
+    """Pure: the result screen from the stored answers. Unanswered questions count as wrong."""
+    by_topic: dict[uuid.UUID, TopicAccuracy] = {}
+    counts: dict[uuid.UUID, int] = {}
+    review = []
+    score = answered = seconds = 0
+    for position, row in enumerate(rows, start=1):
+        response = responses.get(row.id)
+        selected = next(
+            (o for o in row.options if response and o.id == response.selected_option_id), None
+        )
+        is_correct = bool(response and response.is_correct)
+        score += int(is_correct)
+        answered += int(selected is not None)
+        seconds += (response.time_spent_seconds or 0) if response else 0
+        topic = by_topic.setdefault(
+            row.topic_id,
+            TopicAccuracy(
+                topic_id=row.topic_id, topic=row.topic_title, correct=0, total=0, percent=0
+            ),
+        )
+        topic.total += 1
+        topic.correct += int(is_correct)
+        if selected is not None and not is_correct and selected.misconception_id in misconceptions:
+            counts[selected.misconception_id] = counts.get(selected.misconception_id, 0) + 1
+        review.append(
+            ReviewItem(
+                question_id=row.id,
+                position=position,
+                stem=row.stem,
+                topic=row.topic_title,
+                selected=_label(selected),
+                correct=_label(row.correct_option) or "",
+                is_correct=is_correct,
+                explanation=row.explanation,
+                flagged=bool(response.flagged) if response else False,
+            )
+        )
+    for topic in by_topic.values():
+        topic.percent = round(100 * topic.correct / topic.total) if topic.total else 0
+    if not seconds and attempt.submitted_at is not None:
+        seconds = max(0, int((attempt.submitted_at - attempt.started_at).total_seconds()))
+    total = len(rows)
+    return QuizResult(
+        quiz_id=attempt.id,
+        title=title,
+        score=score,
+        total=total,
+        answered=answered,
+        percent=round(100 * score / total) if total else 0,
+        time_seconds=seconds,
+        by_topic=sorted(by_topic.values(), key=lambda t: (t.percent, t.topic)),
+        misconceptions=[
+            MisconceptionCount(
+                id=mid,
+                title=misconceptions[mid].title,
+                correction=misconceptions[mid].correction_md,
+                count=n,
+            )
+            for mid, n in sorted(counts.items(), key=lambda item: -item[1])
+        ],
+        review=review,
+        mistakes=answered - score,
+        disclaimer=DISCLAIMER,
+    )
+
+
+async def _quiz_result(session: AsyncSession, attempt: Attempt) -> QuizResult:
+    rows = await repository.quiz_questions(session, list(attempt.question_ids))
+    responses = await repository.get_responses(session, attempt.id)
+    paper = await repository.get_paper(session, attempt.paper_id)
+    misconception_ids = list(
+        {o.misconception_id for row in rows for o in row.options if o.misconception_id}
+    )
+    misconceptions = await repository.get_misconceptions(session, misconception_ids)
+    return build_quiz_result(
+        attempt, paper.title if paper else "Quiz", rows, responses, misconceptions
+    )
+
+
+async def submit_quiz(session: AsyncSession, user_id: uuid.UUID, quiz_id: uuid.UUID) -> QuizResult:
+    """Finish the quiz: unanswered questions are stored as wrong, unit mastery gets a new
+    snapshot and the recommendations are refreshed. Submitting twice returns the same result."""
+    attempt = await _own_quiz(session, user_id, quiz_id)
+    if attempt.status == "in_progress":
+        rows = await repository.quiz_questions(session, list(attempt.question_ids))
+        responses = await repository.get_responses(session, attempt.id)
+        score = 0
+        for row in rows:
+            response = responses.get(row.id)
+            if response is None:
+                response = Response(attempt_id=attempt.id, question_id=row.id)
+                await repository.add_response(session, response)
+            if response.selected_option_id is None:
+                response.is_correct = False
+                response.marks_awarded = 0.0
+            score += int(bool(response.is_correct))
+        attempt.status = "graded"
+        attempt.submitted_at = clock.now()
+        attempt.score = float(score)
+        attempt.max_score = float(len(rows))
+        attempt.percentage = round(100 * score / len(rows), 1) if rows else 0.0
+        # Concept mastery was updated answer by answer; here only units / mistakes / progress.
+        await performance_service.after_attempt_marked(
+            session, user_id, attempt.id, source=MasterySource.QUIZ, record_concepts=False
+        )
+        await session.commit()
+    return await _quiz_result(session, attempt)
+
+
+async def quiz_result(session: AsyncSession, user_id: uuid.UUID, quiz_id: uuid.UUID) -> QuizResult:
+    attempt = await _own_quiz(session, user_id, quiz_id)
+    if attempt.status == "in_progress":
+        raise ConflictError("This quiz is not submitted yet", code="QUIZ_NOT_FINISHED")
+    return await _quiz_result(session, attempt)
+
+
+def _brief(attempt: Attempt, title: str) -> QuizBrief:
+    return QuizBrief(
+        quiz_id=attempt.id,
+        title=title,
+        status=attempt.status,
+        total=len(attempt.question_ids),
+        score=int(attempt.score) if attempt.score is not None else None,
+        percent=round(attempt.percentage) if attempt.percentage is not None else None,
+        started_at=attempt.started_at,
+    )
+
+
+async def practice_hub(session: AsyncSession, user_id: uuid.UUID) -> PracticeHub:
+    quizzes = await repository.recent_quizzes(session, user_id, RECENT_QUIZZES + 5)
+    in_progress = next((_brief(a, t) for a, t in quizzes if a.status == "in_progress"), None)
+    mastery = await performance_service.concept_mastery_values(session, user_id)
+    mistakes = await performance_service.mistake_question_ids(session, user_id, MISTAKE_POOL)
+    return PracticeHub(
+        in_progress=in_progress,
+        recent=[_brief(a, t) for a, t in quizzes if a.status != "in_progress"][:RECENT_QUIZZES],
+        open_mistakes=len(mistakes),
+        weak_concepts=sum(
+            1 for value in mastery.values() if value < performance_service.WEAK_BELOW
+        ),
+        approved_questions=len(await repository.quiz_candidates(session)),
+    )

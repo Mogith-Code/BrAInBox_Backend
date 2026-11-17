@@ -36,6 +36,7 @@ from api.modules.performance.grading import (
 )
 from api.modules.performance.repository import AnswerRow, ConceptInfo, MistakeRow
 from api.modules.performance.schemas import (
+    AccuracyDay,
     AIFeatureUsage,
     AnalyticsAIUsage,
     AnalyticsOverview,
@@ -45,15 +46,23 @@ from api.modules.performance.schemas import (
     ConceptPerformance,
     DailyCount,
     GradeBandOut,
+    HeatmapResponse,
+    HeatmapTopic,
+    HeatmapUnit,
+    InsightsOverview,
     InsightsSummaryResponse,
+    MasteryPoint,
     MisconceptionOut,
     MissedTopic,
     MistakeOut,
     MistakeUpdate,
     ModuleStatus,
     OverallResult,
+    RecurringMistake,
+    RecurringResponse,
     ResourceOut,
     ReviewQuestion,
+    StudyDay,
     TopicFeedback,
     TopicInsightsResponse,
     TopicPerformance,
@@ -404,7 +413,12 @@ async def get_topic_insights(
 
 
 async def after_attempt_marked(
-    session: AsyncSession, user_id: uuid.UUID, attempt_id: uuid.UUID, *, source: MasterySource
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    *,
+    source: MasterySource,
+    record_concepts: bool = True,
 ) -> int:
     """Everything the performance module keeps up to date after marking. The caller commits.
 
@@ -424,8 +438,10 @@ async def after_attempt_marked(
         attempt_id,
         source=source,
         record_units=source != MasterySource.DIAGNOSTIC,
+        record_concepts=record_concepts,
     )
     await refresh_topic_progress(session, user_id)
+    await save_daily_snapshot(session, user_id)
     return recorded
 
 
@@ -501,6 +517,7 @@ async def update_mastery(
     *,
     source: MasterySource,
     record_units: bool = True,
+    record_concepts: bool = True,
 ) -> None:
     """Unit snapshots from this attempt, and concept mastery for the concepts it touched.
 
@@ -515,6 +532,8 @@ async def update_mastery(
         snapshots = unit_snapshots(attempt_rows)
         if snapshots:
             await record_unit_mastery(session, user_id, snapshots, source.value)
+    if not record_concepts:  # quizzes already updated each concept answer by answer
+        return
 
     links = await repository.get_concept_links(session, list({r.question_id for r in attempt_rows}))
     touched = {concept_id for concept_ids in links.values() for concept_id in concept_ids}
@@ -1128,3 +1147,417 @@ async def top_misconceptions(
     return await repository.top_misconception_per_topic(
         session, _start_of_day(first_day), topic_ids
     )
+
+
+# =========================================================================== per-answer tracking
+# The learning loop's instant path: ONE answer -> mastery of its concept, a typed mistake and
+# the recurring-misconception check. Used by quizzes (after every MCQ) and by the written-answer
+# evaluation (once per marking point). No AI call, so feedback stays under a second.
+
+MASTERY_KEEP = 0.7  # mastery_new = 0.7 * mastery_old + 0.3 * score
+MASTERY_NEW = 0.3
+# A concept never practised starts in the middle, so one answer can't label it weak or strong.
+MASTERY_PRIOR = 0.5
+WEAK_BELOW = 0.40
+IMPROVING_BELOW = 0.65
+STRONG_BELOW = 0.85  # 0.85 and above = mastered
+RECURRING_COUNT = 3  # the same misconception 3+ times...
+RECURRING_DAYS = 14  # ...within 14 days is "recurring"
+
+
+def next_mastery(old: float | None, score: float) -> float:
+    """Pure: the weighted moving average. `score` is 0..1 (1 = right, 0.5 = partly right)."""
+    base = MASTERY_PRIOR if old is None else old
+    return round(min(1.0, max(0.0, MASTERY_KEEP * base + MASTERY_NEW * score)), 4)
+
+
+def mastery_level(mastery: float | None) -> str:
+    """Pure: weak | improving | strong | mastered (`not_started` without any answer)."""
+    if mastery is None:
+        return "not_started"
+    if mastery < WEAK_BELOW:
+        return "weak"
+    if mastery < IMPROVING_BELOW:
+        return "improving"
+    if mastery < STRONG_BELOW:
+        return "strong"
+    return "mastered"
+
+
+def mcq_mistake_type(
+    misconception_id: uuid.UUID | None, mastery_before: float | None
+) -> MistakeType:
+    """Pure: why a wrong MCQ answer happened, from what we know without asking an AI.
+
+    * the chosen option is mapped to a misconception -> `misconception`
+    * the concept was already mastered               -> `careless`
+    * otherwise                                      -> `knowledge_gap`
+    """
+    if misconception_id is not None:
+        return MistakeType.MISCONCEPTION
+    if mastery_before is not None and mastery_before >= STRONG_BELOW:
+        return MistakeType.CARELESS
+    return MistakeType.KNOWLEDGE_GAP
+
+
+@dataclass
+class AnswerEffect:
+    """What one answer changed (shown on the instant feedback card)."""
+
+    concept_id: uuid.UUID | None = None
+    mastery_before: float | None = None
+    mastery_after: float | None = None
+    level: str = "not_started"
+    mistake_id: uuid.UUID | None = None
+    mistake_type: MistakeType | None = None
+    recurring: bool = False
+    recurring_count: int = 0
+
+
+async def record_answer(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    question_id: uuid.UUID,
+    score: float,
+    response_id: uuid.UUID | None = None,
+    misconception_id: uuid.UUID | None = None,
+    concept_id: uuid.UUID | None = None,
+    mistake_type: MistakeType | None = None,
+    note: str | None = None,
+) -> AnswerEffect:
+    """Apply ONE answer: update the concept's mastery and record a mistake if it was wrong.
+
+    `score`: 1.0 right, 0.0 wrong, 0.5 a partly covered marking point. The concept is
+    `concept_id`, else the misconception's concept, else the one the question tests most.
+    Changing an MCQ answer replaces that response's earlier mistake. The caller commits.
+    """
+    effect = AnswerEffect()
+    misconception = None
+    if misconception_id is not None:
+        found = await repository.get_misconceptions(session, [misconception_id])
+        misconception = found[0] if found else None
+    if concept_id is None and misconception is not None:
+        concept_id = misconception.concept_id
+    if concept_id is None:
+        concept_id = (await repository.get_main_concepts(session, [question_id])).get(question_id)
+    effect.concept_id = concept_id
+
+    if concept_id is not None:
+        rows = await repository.get_concept_mastery_rows(session, user_id, [concept_id])
+        before = rows[concept_id].mastery_score if concept_id in rows else None
+        after = next_mastery(before, score)
+        await repository.upsert_concept_mastery(
+            session,
+            {
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "mastery_score": after,
+                "attempts_count": 1,
+                "correct_count": 1 if score >= 1.0 else 0,
+                "last_practiced_at": clock.now(),
+            },
+        )
+        effect.mastery_before, effect.mastery_after = before, after
+        effect.level = mastery_level(after)
+
+    if response_id is not None:  # the student changed their answer: drop the old mistake
+        old = await repository.get_mistake_by_response(session, response_id)
+        if old is not None:
+            await repository.delete_mistake(session, old)
+
+    if score < 1.0:
+        kind = mistake_type or mcq_mistake_type(misconception_id, effect.mastery_before)
+        mistake = Mistake(
+            user_id=user_id,
+            question_id=question_id,
+            response_id=response_id,
+            misconception_id=misconception_id,
+            concept_id=concept_id,
+            mistake_type=kind,
+            note=note,
+        )
+        await repository.add_mistakes(session, [mistake])
+        effect.mistake_id, effect.mistake_type = mistake.id, kind
+        if misconception_id is not None:
+            effect.recurring_count = await repository.count_misconception_mistakes(
+                session, user_id, misconception_id, clock.now() - timedelta(days=RECURRING_DAYS)
+            )
+            effect.recurring = effect.recurring_count >= RECURRING_COUNT
+    return effect
+
+
+async def record_written_answer(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    question_id: uuid.UUID,
+    score: float,
+    problems: list[tuple[MistakeType, str]],
+) -> AnswerEffect:
+    """Apply ONE evaluated written answer: the concept's mastery moves once, by the share of
+    the marks earned (`score` 0..1), and every problem (a missing or partly covered marking
+    point, or the answer's structure) becomes its own mistake. The caller commits."""
+    effect = AnswerEffect()
+    concept_id = (await repository.get_main_concepts(session, [question_id])).get(question_id)
+    effect.concept_id = concept_id
+    if concept_id is not None:
+        rows = await repository.get_concept_mastery_rows(session, user_id, [concept_id])
+        before = rows[concept_id].mastery_score if concept_id in rows else None
+        after = next_mastery(before, score)
+        await repository.upsert_concept_mastery(
+            session,
+            {
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "mastery_score": after,
+                "attempts_count": 1,
+                "correct_count": 1 if score >= 1.0 else 0,
+                "last_practiced_at": clock.now(),
+            },
+        )
+        effect.mastery_before, effect.mastery_after = before, after
+        effect.level = mastery_level(after)
+    if problems:
+        await repository.add_mistakes(
+            session,
+            [
+                Mistake(
+                    user_id=user_id,
+                    question_id=question_id,
+                    concept_id=concept_id,
+                    mistake_type=kind,
+                    note=note[:1000],
+                )
+                for kind, note in problems
+            ],
+        )
+        effect.mistake_type = problems[0][0]
+    return effect
+
+
+async def add_study_time(session: AsyncSession, user_id: uuid.UUID, seconds: int) -> None:
+    """Count time spent answering towards today's study minutes. The caller commits."""
+    await repository.add_study_minutes(
+        session, user_id, clock.today(), minutes=max(0, round(seconds / 60)), actions=1
+    )
+
+
+# =========================================================================== data for recommendations
+
+
+@dataclass
+class ConceptState:
+    """Everything the recommendation rules need to know about one concept of one student."""
+
+    concept_id: uuid.UUID
+    name: str
+    topic_id: uuid.UUID
+    topic_title: str
+    topic_code: str | None
+    unit_id: uuid.UUID
+    unit_number: int
+    unit_title: str
+    exam_weight: float
+    mastery: float
+    attempts: int
+    last_practiced_at: datetime | None
+    open_mistakes: int = 0
+    written_mistakes: int = 0
+    recurring_misconception: str | None = None
+    recurring_misconception_id: uuid.UUID | None = None
+    recurring_count: int = 0
+
+
+async def concept_states(session: AsyncSession, user_id: uuid.UUID) -> list[ConceptState]:
+    """One entry per concept the student has practised (no made-up values for the rest)."""
+    mastery = await repository.get_concept_mastery_rows(session, user_id)
+    if not mastery:
+        return []
+    now = clock.now()
+    window = now - timedelta(days=RECURRING_DAYS)
+    month = now - timedelta(days=30)
+    concepts = await repository.concept_rows(session, list(mastery))
+    open_counts = await repository.open_mistake_counts(session, user_id, month)
+    written = await repository.open_mistake_counts(session, user_id, month, written_only=True)
+    recurring = await repository.recurring_misconceptions(
+        session, user_id, window, window - timedelta(days=RECURRING_DAYS), RECURRING_COUNT
+    )
+    by_concept = {
+        r.misconception.concept_id: r for r in reversed(recurring) if r.misconception.concept_id
+    }
+    states = []
+    for c in concepts:
+        row = mastery[c.id]
+        rec = by_concept.get(c.id)
+        states.append(
+            ConceptState(
+                concept_id=c.id,
+                name=c.name,
+                topic_id=c.topic_id,
+                topic_title=c.topic_title,
+                topic_code=c.topic_code,
+                unit_id=c.unit_id,
+                unit_number=c.unit_number,
+                unit_title=c.unit_title,
+                exam_weight=c.exam_weight,
+                mastery=float(row.mastery_score),
+                attempts=row.attempts_count,
+                last_practiced_at=row.last_practiced_at,
+                open_mistakes=open_counts.get(c.id, 0),
+                written_mistakes=written.get(c.id, 0),
+                recurring_misconception=rec.misconception.title if rec else None,
+                recurring_misconception_id=rec.misconception.id if rec else None,
+                recurring_count=rec.count if rec else 0,
+            )
+        )
+    return states
+
+
+async def mistake_question_ids(
+    session: AsyncSession, user_id: uuid.UUID, limit: int
+) -> list[uuid.UUID]:
+    """Questions behind the student's open mistakes ("practice my mistakes")."""
+    return await repository.open_mistake_question_ids(session, user_id, limit)
+
+
+async def concept_mastery_values(
+    session: AsyncSession, user_id: uuid.UUID, concept_ids: list[uuid.UUID] | None = None
+) -> dict[uuid.UUID, float]:
+    rows = await repository.get_concept_mastery_rows(session, user_id, concept_ids)
+    return {concept_id: float(row.mastery_score) for concept_id, row in rows.items()}
+
+
+# =========================================================================== insights: overview, heatmap, recurring
+
+
+async def save_daily_snapshot(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Store today's overall mastery (average of the newest unit values). The caller commits."""
+    units = await current_unit_mastery(session, user_id)
+    if not units:
+        return
+    overall = round(sum(units.values()) / len(units), 2)
+    await repository.save_snapshot(
+        session, user_id, clock.today(), overall, {str(u): v for u, v in units.items()}
+    )
+
+
+async def get_overview(session: AsyncSession, user: CurrentUser) -> InsightsOverview:
+    """GET /insights/overview: overall mastery and its weekly change, study time for the last
+    7 days and the accuracy trend for the last 14."""
+    today = clock.today()
+    units = await current_unit_mastery(session, user.id)
+    week_ago = await unit_mastery_week_ago(session, user.id)
+    overall = round(sum(units.values()) / len(units)) if units else None
+    previous = round(sum(week_ago.values()) / len(week_ago)) if week_ago else None
+    minutes = await repository.study_minutes_by_day(session, user.id, today - timedelta(days=6))
+    accuracy = await repository.daily_accuracy(
+        session, user.id, _start_of_day(today - timedelta(days=13))
+    )
+    by_day = {day: (correct, answered) for day, correct, answered in accuracy}
+    snapshots = await repository.snapshots_since(session, user.id, today - timedelta(days=29))
+    return InsightsOverview(
+        overall_mastery=overall,
+        mastery_change_week=(
+            overall - previous if overall is not None and previous is not None else None
+        ),
+        streak_days=await get_streak(session, user.id),
+        study_minutes_week=sum(minutes.values()),
+        study_time=[
+            StudyDay(
+                date=today - timedelta(days=n), minutes=minutes.get(today - timedelta(days=n), 0)
+            )
+            for n in range(6, -1, -1)
+        ],
+        accuracy_trend=[
+            AccuracyDay(
+                date=day,
+                answered=by_day[day][1],
+                accuracy=round(100 * by_day[day][0] / by_day[day][1]) if by_day[day][1] else None,
+            )
+            for day in sorted(by_day)
+        ],
+        mastery_history=[
+            MasteryPoint(date=s.snapshot_date, mastery=round(float(s.overall_mastery)))
+            for s in snapshots
+        ],
+    )
+
+
+async def get_heatmap(session: AsyncSession, user: CurrentUser) -> HeatmapResponse:
+    """GET /insights/heatmap: every current topic with the student's mastery (average of its
+    practised concepts, 0-100) or null when nothing was practised."""
+    concepts = await repository.concept_rows(session)
+    mastery = await repository.get_concept_mastery_rows(session, user.id)
+    topics: dict[uuid.UUID, HeatmapTopic] = {}
+    values: dict[uuid.UUID, list[float]] = {}
+    units: dict[uuid.UUID, HeatmapUnit] = {}
+    for c in concepts:
+        unit = units.setdefault(
+            c.unit_id,
+            HeatmapUnit(unit_id=c.unit_id, number=c.unit_number, title=c.unit_title, topics=[]),
+        )
+        if c.topic_id not in topics:
+            topics[c.topic_id] = HeatmapTopic(
+                topic_id=c.topic_id,
+                code=c.topic_code,
+                number=c.topic_number,
+                title=c.topic_title,
+                mastery=None,
+                level="not_started",
+                concepts_practised=0,
+                concepts_total=0,
+            )
+            unit.topics.append(topics[c.topic_id])
+        topics[c.topic_id].concepts_total += 1
+        if c.id in mastery:
+            values.setdefault(c.topic_id, []).append(float(mastery[c.id].mastery_score))
+    for topic_id, scores in values.items():
+        average = sum(scores) / len(scores)
+        topic = topics[topic_id]
+        topic.mastery = round(average * 100)
+        topic.level = mastery_level(average)
+        topic.concepts_practised = len(scores)
+    return HeatmapResponse(units=sorted(units.values(), key=lambda u: u.number))
+
+
+async def get_recurring(session: AsyncSession, user: CurrentUser) -> RecurringResponse:
+    """GET /mistakes/recurring: misconceptions hit 3+ times in the last 14 days, with a trend
+    against the 14 days before."""
+    now = clock.now()
+    since = now - timedelta(days=RECURRING_DAYS)
+    rows = await repository.recurring_misconceptions(
+        session, user.id, since, since - timedelta(days=RECURRING_DAYS), RECURRING_COUNT
+    )
+    concept_ids = [r.misconception.concept_id for r in rows if r.misconception.concept_id]
+    concepts = {c.id: c for c in await repository.concept_rows(session, concept_ids)}
+    items = []
+    for r in rows:
+        concept = concepts.get(r.misconception.concept_id) if r.misconception.concept_id else None
+        trend = (
+            "up" if r.count > r.previous_count else "down" if r.count < r.previous_count else "same"
+        )
+        items.append(
+            RecurringMistake(
+                misconception_id=r.misconception.id,
+                title=r.misconception.title,
+                description=r.misconception.description,
+                correction=r.misconception.correction_md,
+                count=r.count,
+                previous_count=r.previous_count,
+                trend=trend,
+                last_at=r.last_at,
+                concept_id=concept.id if concept else None,
+                concept=concept.name if concept else None,
+                topic_id=concept.topic_id if concept else None,
+                topic=concept.topic_title if concept else None,
+            )
+        )
+    return RecurringResponse(items=items, window_days=RECURRING_DAYS, min_count=RECURRING_COUNT)
+
+
+async def concept_briefs(
+    session: AsyncSession, concept_ids: list[uuid.UUID]
+) -> list[repository.ConceptRow]:
+    """Concepts with their topic and unit, for other modules' feedback cards."""
+    return await repository.concept_rows(session, concept_ids)

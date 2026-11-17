@@ -21,4 +21,6 @@ RUN useradd --create-home appuser
 USER appuser
 
 EXPOSE 8001
-CMD ["uvicorn", "ai_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Cloud Run tells the container which port to use through $PORT (default 8001 elsewhere).
+# --proxy-headers: trust X-Forwarded-* from the Cloud Run front end (https URLs, client IP).
+CMD ["sh", "-c", "exec uvicorn ai_service.main:app --host 0.0.0.0 --port ${PORT:-8001} --proxy-headers --forwarded-allow-ips=*"]

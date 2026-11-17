@@ -1,0 +1,76 @@
+# Deploy the backend to Google Cloud Run.
+#   merge to develop -> staging        merge to main -> production
+# It only runs when backend-ci passed for the same commit.
+#
+# Repository secrets / variables this needs (Settings > Secrets and variables > Actions):
+#   secrets.GCP_SA_KEY               JSON key of a deployer service account (see deploy/README.md)
+#   secrets.PROD_DATABASE_URL        production database (for migrations)
+#   secrets.STAGING_DATABASE_URL     staging database
+#   vars.GCP_PROJECT_ID              Google Cloud / Firebase project id
+#   vars.GCP_REGION                  optional, default asia-south1
+#   vars.CORS_ORIGINS, vars.ADMIN_ORIGINS, vars.SMTP_USER, vars.EMAIL_FROM,
+#   vars.CLOUDFLARE_ACCOUNT_ID, vars.AL_EXAM_DATES      optional settings (deploy/README.md)
+name: backend-deploy
+
+on:
+  workflow_run:
+    workflows: [backend-ci]
+    types: [completed]
+    branches: [main, develop]
+
+concurrency:
+  group: backend-deploy-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only after a green CI run of a push (not of a pull request).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.workflow_run.head_branch == 'main' && 'production' || 'staging' }}
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
+      ENV_NAME: ${{ github.event.workflow_run.head_branch == 'main' && 'prod' || 'staging' }}
+      DATABASE_URL: ${{ github.event.workflow_run.head_branch == 'main' && secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+      CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+      ADMIN_ORIGINS: ${{ vars.ADMIN_ORIGINS }}
+      SMTP_USER: ${{ vars.SMTP_USER }}
+      EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      AL_EXAM_DATES: ${{ vars.AL_EXAM_DATES }}
+      TAG: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install (for migrations)
+        run: pip install -e ".[api]"
+
+      # Migrations first: new code must never run against an old schema.
+      - name: Migrate the database
+        run: ./deploy/deploy.sh migrate
+
+      - name: Build and deploy both services
+        run: ./deploy/deploy.sh deploy
+
+      - name: Smoke test
+        run: |
+          SUFFIX=""; [ "$ENV_NAME" = "prod" ] || SUFFIX="-$ENV_NAME"
+          URL="$(gcloud run services describe "brainbox-api$SUFFIX" --project "$PROJECT_ID" --region "$REGION" --format 'value(status.url)')"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "$URL/api/v1/health"

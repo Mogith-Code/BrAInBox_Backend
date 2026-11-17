@@ -9,10 +9,12 @@ Errors:
 """
 
 import logging
+import time
 from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends
+from fastapi.concurrency import run_in_threadpool
 
 from api.core.config import get_settings
 from api.core.errors import AppError, ServiceUnavailableError
@@ -22,16 +24,54 @@ logger = logging.getLogger(__name__)
 SERVICE_TOKEN_HEADER = "X-Service-Token"
 
 
+# Google identity tokens for a private Cloud Run service, cached until shortly before they
+# expire (they last one hour): {audience: (token, fetched_at)}.
+_identity_tokens: dict[str, tuple[str, float]] = {}
+IDENTITY_TOKEN_SECONDS = 45 * 60
+
+
+def _fetch_identity_token(audience: str) -> str:
+    """Blocking: ask Google for an ID token that lets this service call `audience`."""
+    import google.auth.transport.requests
+    import google.oauth2.id_token
+
+    request = google.auth.transport.requests.Request()
+    return str(google.oauth2.id_token.fetch_id_token(request, audience))
+
+
+async def identity_token(audience: str) -> str:
+    cached = _identity_tokens.get(audience)
+    if cached is not None and time.monotonic() - cached[1] < IDENTITY_TOKEN_SECONDS:
+        return cached[0]
+    token = await run_in_threadpool(_fetch_identity_token, audience)
+    _identity_tokens[audience] = (token, time.monotonic())
+    return token
+
+
 class AIClient:
-    def __init__(self, base_url: str, token: str, timeout: float = 60.0):
+    def __init__(self, base_url: str, token: str, timeout: float = 60.0, audience: str = ""):
         self._base_url = base_url
         self._headers = {SERVICE_TOKEN_HEADER: token}
         self._timeout = timeout
+        # Set in production, where the ai_service is a private Cloud Run service: every call
+        # then also carries a Google-signed identity token (AI_SERVICE_AUDIENCE = its URL).
+        self._audience = audience
+
+    async def _auth_headers(self) -> dict[str, str]:
+        if not self._audience:
+            return self._headers
+        try:
+            token = await identity_token(self._audience)
+        except Exception as exc:
+            logger.warning("Could not get an identity token for the ai_service: %s", exc)
+            raise _unavailable() from exc
+        return {**self._headers, "Authorization": f"Bearer {token}"}
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        headers = await self._auth_headers()
         try:
             async with httpx.AsyncClient(
-                base_url=self._base_url, headers=self._headers, timeout=self._timeout
+                base_url=self._base_url, headers=headers, timeout=self._timeout
             ) as client:
                 response = await client.post(path, json=payload)
                 response.raise_for_status()
@@ -49,7 +89,7 @@ class AIClient:
 
     async def health(self) -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=self._base_url, headers=self._headers, timeout=5
+            base_url=self._base_url, headers=await self._auth_headers(), timeout=5
         ) as client:
             response = await client.get("/health")
             response.raise_for_status()
@@ -95,7 +135,10 @@ def get_ai_client() -> AIClient:
     """FastAPI dependency (tests override it with a fake)."""
     settings = get_settings()
     return AIClient(
-        settings.AI_SERVICE_URL, settings.AI_SERVICE_TOKEN, settings.AI_SERVICE_TIMEOUT_SECONDS
+        settings.AI_SERVICE_URL,
+        settings.AI_SERVICE_TOKEN,
+        settings.AI_SERVICE_TIMEOUT_SECONDS,
+        settings.AI_SERVICE_AUDIENCE,
     )
 
 

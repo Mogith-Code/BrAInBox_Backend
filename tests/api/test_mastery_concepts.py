@@ -183,13 +183,9 @@ async def test_after_attempt_marked_end_to_end(exam_data, db_session):  # noqa: 
         async def count(model, *where):  # type: ignore[no-untyped-def]
             return await db_session.scalar(select(func.count()).select_from(model).where(*where))
 
-        # ---- one call records everything
-        recorded = await service.after_attempt_marked(
-            db_session, STUDENT.id, attempt_id, source=MasterySource.EXAM
-        )
-        await db_session.commit()
-        assert recorded == 2  # the two wrong answers
-        assert await count(Mistake, Mistake.user_id == STUDENT.id) == 2
+        # ---- submitting the paper already recorded everything (after_attempt_marked)
+        assert attempt_id is not None
+        assert await count(Mistake, Mistake.user_id == STUDENT.id) == 2  # the two wrong answers
 
         snapshot = (
             await db_session.execute(

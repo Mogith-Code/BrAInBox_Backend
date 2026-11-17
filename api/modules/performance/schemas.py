@@ -329,3 +329,73 @@ class AnalyticsAIUsage(BaseModel):
     output_tokens: int | None
     by_feature: list[AIFeatureUsage]  # most used first
     daily_requests: list[DailyCount]  # one entry per day, oldest first, 0 when none
+
+
+# =========================================================================== overview, heatmap, recurring
+class StudyDay(BaseModel):
+    date: date
+    minutes: int
+
+
+class AccuracyDay(BaseModel):
+    date: date
+    answered: int
+    accuracy: int | None  # 0-100
+
+
+class MasteryPoint(BaseModel):
+    date: date
+    mastery: int  # 0-100
+
+
+class InsightsOverview(BaseModel):
+    overall_mastery: int | None  # 0-100, null for a new student
+    mastery_change_week: int | None
+    streak_days: int
+    study_minutes_week: int
+    study_time: list[StudyDay]  # the last 7 days, oldest first
+    accuracy_trend: list[AccuracyDay]  # days with answers in the last 14 days
+    mastery_history: list[MasteryPoint]  # daily snapshots, last 30 days
+
+
+class HeatmapTopic(BaseModel):
+    topic_id: uuid.UUID
+    code: str | None
+    number: str
+    title: str
+    mastery: int | None  # 0-100, null = nothing practised yet
+    level: str  # not_started | weak | improving | strong | mastered
+    concepts_practised: int
+    concepts_total: int
+
+
+class HeatmapUnit(BaseModel):
+    unit_id: uuid.UUID
+    number: int
+    title: str
+    topics: list[HeatmapTopic]
+
+
+class HeatmapResponse(BaseModel):
+    units: list[HeatmapUnit]
+
+
+class RecurringMistake(BaseModel):
+    misconception_id: uuid.UUID
+    title: str
+    description: str | None
+    correction: str | None
+    count: int
+    previous_count: int
+    trend: str  # up | down | same
+    last_at: datetime
+    concept_id: uuid.UUID | None
+    concept: str | None
+    topic_id: uuid.UUID | None
+    topic: str | None
+
+
+class RecurringResponse(BaseModel):
+    items: list[RecurringMistake]
+    window_days: int
+    min_count: int

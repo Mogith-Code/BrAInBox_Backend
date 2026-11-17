@@ -13,6 +13,9 @@ class ApiSettings(SharedSettings):
     AI_SERVICE_URL: str = "http://localhost:8001"
     # Generating a whole paper calls the LLM once per topic, so allow a few minutes.
     AI_SERVICE_TIMEOUT_SECONDS: float = 180.0
+    # Production only: the ai_service's own https URL. When set, calls also carry a Google
+    # identity token for it, so the ai_service can be a private Cloud Run service.
+    AI_SERVICE_AUDIENCE: str = ""
 
     # Comma-separated list. "*" is allowed inside an entry, e.g. "http://localhost:*"
     CORS_ORIGINS: str = "http://localhost:*,http://127.0.0.1:*"
@@ -21,6 +24,24 @@ class ApiSettings(SharedSettings):
 
     # How AI jobs are run: "local" (FastAPI BackgroundTasks) or "cloudtasks" (Google Cloud Tasks)
     JOB_RUNNER: str = "local"
+    # --- JOB_RUNNER=cloudtasks (production on Cloud Run)
+    CLOUD_TASKS_PROJECT: str = ""  # empty = FIREBASE_PROJECT_ID
+    CLOUD_TASKS_LOCATION: str = "asia-south1"
+    CLOUD_TASKS_QUEUE: str = "brainbox-jobs"
+    # Public https URL of THIS api service; the queue calls /api/v1/internal/jobs/{id}/run on it.
+    JOBS_TARGET_URL: str = ""
+    # Service account the queue signs its calls with (optional, adds an OIDC token).
+    CLOUD_TASKS_SERVICE_ACCOUNT: str = ""
+    CLOUD_TASKS_DEADLINE_SECONDS: int = 600
+
+    # --- Daily limits per student for the AI-heavy endpoints (0 = no limit)
+    EVALUATIONS_DAILY_LIMIT: int = 30
+    OCR_DAILY_LIMIT_PER_USER: int = 10
+    PAPERS_DAILY_LIMIT: int = 5
+    COMMUNITY_POSTS_DAILY_LIMIT: int = 20
+    # Photos of handwritten answers: at most this many pages, each at most this big.
+    ANSWER_MAX_PAGES: int = 6
+    ANSWER_IMAGE_MAX_MB: int = 8
 
     YOUTUBE_API_KEY: str = ""
 

@@ -147,6 +147,13 @@ class MCQReview(BaseModel):
     suggested_fix: str | None = None
 
 
+class BlindAnswer(BaseModel):
+    """A reviewer's own answer to an MCQ, given without the key (quality gate)."""
+
+    answer_index: int = Field(ge=0, le=4)
+    confidence: float = Field(ge=0, le=1, default=0.5)
+
+
 class MisconceptionMapping(BaseModel):
     option_label: str
     misconception_id: str | None = None
@@ -163,12 +170,31 @@ class EvaluationFeedback(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     improvements: list[str] = Field(default_factory=list)
 
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """The fake LLM writes no tips, so the pipeline's template tips are used."""
+        return {"feedback": "", "strengths": [], "improvements": []}
+
 
 # ----------------------------------------------------------------- community (Mogith)
 class ModerationResult(BaseModel):
     allowed: bool
+    label: Literal["ok", "off_topic", "inappropriate"] = "ok"
     categories: list[str] = Field(default_factory=list)
     reason: str = ""
+
+    @model_validator(mode="after")
+    def label_and_allowed_agree(self) -> "ModerationResult":
+        # Older prompts only answer `allowed`: a refused post is at least "inappropriate".
+        if not self.allowed and self.label == "ok":
+            self.label = "inappropriate"
+        self.allowed = self.label == "ok"
+        return self
+
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """The fake LLM lets everything through (the rule checks still run)."""
+        return {"allowed": True, "label": "ok", "categories": [], "reason": ""}
 
 
 class PostTags(BaseModel):

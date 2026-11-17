@@ -24,8 +24,9 @@ Rule: routers only validate input, check the role and call `service`. No SQL her
 
 import uuid
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, BackgroundTasks, Response, status
 
+from api.core.ai_client import AIClientDep
 from api.core.database import SessionDep
 from api.core.pagination import Page, PageParamsDep
 from api.core.security import CurrentUserDep
@@ -43,6 +44,8 @@ from api.modules.community.schemas import (
     ReportIn,
     ReportOut,
     StudyGroupOut,
+    TopicSuggestIn,
+    TopicSuggestOut,
     VoteIn,
     VoteOut,
 )
@@ -108,11 +111,30 @@ async def list_posts(
     summary="Create a post in a group",
 )
 async def create_post(
-    group_id: str, req: PostCreate, user: CurrentUserDep, session: SessionDep
+    group_id: str,
+    req: PostCreate,
+    user: CurrentUserDep,
+    session: SessionDep,
+    ai: AIClientDep,
+    background_tasks: BackgroundTasks,
 ) -> PostOut:
     """Members only: 403 `NOT_A_MEMBER`. `topic_id` must be in the group's unit: 400
-    `TOPIC_NOT_IN_GROUP_UNIT`. Published straight away for now."""
-    return await service.create_post(session, user, group_id, req)
+    `TOPIC_NOT_IN_GROUP_UNIT`. The AI classifies the post: `moderation_status` is `flagged`
+    (hidden until an admin decides) when it is off-topic or inappropriate. A question also gets
+    an AI-suggested answer a few seconds later (a reply with `is_ai_suggested: true`)."""
+    return await service.create_post(session, user, group_id, req, ai, background_tasks)
+
+
+@router.post(
+    "/posts/suggest-topic",
+    response_model=TopicSuggestOut,
+    summary="AI-suggested topic tag for a draft post",
+)
+async def suggest_topic(
+    req: TopicSuggestIn, user: CurrentUserDep, session: SessionDep, ai: AIClientDep
+) -> TopicSuggestOut:
+    """Call it while the student writes; they can change the suggestion before posting."""
+    return await service.suggest_topic(session, user, req, ai)
 
 
 @router.get("/posts/{post_id}", response_model=PostDetailOut, summary="A post with its replies")
@@ -146,10 +168,14 @@ async def delete_post(post_id: uuid.UUID, user: CurrentUserDep, session: Session
     summary="Reply to a post",
 )
 async def create_reply(
-    post_id: uuid.UUID, req: ReplyCreate, user: CurrentUserDep, session: SessionDep
+    post_id: uuid.UUID,
+    req: ReplyCreate,
+    user: CurrentUserDep,
+    session: SessionDep,
+    ai: AIClientDep,
 ) -> ReplyOut:
-    """Members of the post's group only: 403 `NOT_A_MEMBER`. Published straight away for now."""
-    return await service.create_reply(session, user, post_id, req)
+    """Members of the post's group only: 403 `NOT_A_MEMBER`. Classified like a post."""
+    return await service.create_reply(session, user, post_id, req, ai)
 
 
 @router.patch("/replies/{reply_id}", response_model=ReplyOut, summary="Edit my reply")
