@@ -24,6 +24,12 @@ ticks one. Empty on non-study days. New table in migration `0002`: `daily_plan_i
 | POST | `/api/v1/study-plan` | Create / regenerate a plan |
 | PATCH | `/api/v1/study-plan/items/{id}` | Mark an item done |
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes study plans + items, daily plan items and recommendations. `export_user_data` gives `{recommendations, study_plan: {plans (with items), daily_items}}`.
+
 ## Files
 
 | File | What goes in it |
