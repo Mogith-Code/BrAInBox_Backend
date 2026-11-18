@@ -5,7 +5,7 @@ The Flutter app depends on these shapes exactly (see README.md). JSON is snake_c
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -83,6 +83,34 @@ class PasswordResetCompleteRequest(BaseModel):
 
 class ResetDoneOut(BaseModel):
     reset: bool = True
+
+
+# ---------------------------------------------------------------- my data export
+class CommunityExportOut(BaseModel):
+    posts: list[dict[str, Any]]
+    replies: list[dict[str, Any]]
+
+
+class DataExportOut(BaseModel):
+    """GET /auth/me/export: everything we store about the caller. The app saves it as .json.
+
+    Files (answer photos, uploads, post images) are Storage paths, not the files.
+    """
+
+    exported_at: str  # ISO 8601, UTC
+    account: dict[str, Any]
+    profile: dict[str, Any] | None  # null before profile setup
+    settings: dict[str, Any]
+    privacy: dict[str, Any]
+    quiz_attempts: list[dict[str, Any]]  # quizzes, practice and the diagnostic
+    exam_attempts: list[dict[str, Any]]
+    evaluations: list[dict[str, Any]]
+    mistakes: list[dict[str, Any]]
+    recommendations: list[dict[str, Any]]
+    study_plan: dict[str, Any]  # {"plans": [... with items], "daily_items": [...]}
+    notes: list[dict[str, Any]]
+    uploads: list[dict[str, Any]]
+    community: CommunityExportOut
 
 
 # ---------------------------------------------------------------- admin: Students (users_admin.py)
