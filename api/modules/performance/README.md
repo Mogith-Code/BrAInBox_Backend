@@ -217,6 +217,12 @@ reaches the 5-answer minimum from the diagnostic alone, so it can't make a topic
    answered questions with their approved model answer (or question explanation), misconceptions linked to
    the wrong options the student actually chose, and approved resources for topics below grade B.
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes the mistakes journal, concept / unit mastery, mastery snapshots, study activity and topic progress. `export_user_data` lists the mistakes journal.
+
 ## Files
 
 | File | What goes in it |
