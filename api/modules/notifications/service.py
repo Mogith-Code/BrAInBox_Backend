@@ -182,4 +182,19 @@ async def on_job_finished(session: AsyncSession, job: AIJob) -> None:
     )
 
 
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+async def count_devices(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Number of push devices (the export shows the number, never the FCM tokens)."""
+    return await repository.count_devices(session, user_id)
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's notifications and device tokens (no commit). No files."""
+    await repository.delete_user_rows(session, user_id)
+    return []
+
+
 jobs.register_job_listener(on_job_finished)

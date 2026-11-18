@@ -31,3 +31,9 @@ Other modules call `notifications.service.notify(session, user_id, type, title, 
 row; the caller's commit saves it.
 
 Tests: `tests/api/test_notifications.py`.
+
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes the student's notifications and push device tokens. `count_devices` gives the number shown in the export (never the FCM tokens).
