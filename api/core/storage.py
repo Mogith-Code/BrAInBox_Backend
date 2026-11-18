@@ -85,6 +85,45 @@ def _write_local(root: str, path: str, data: bytes) -> None:
     file.write_bytes(data)
 
 
+def delete_files(paths: list[str]) -> int:
+    """Delete files from Storage. Blocking: call it with run_in_threadpool. Never raises.
+
+    A path ending in "/" is a folder: every file inside it is deleted, e.g.
+    "answers/<user_id>/". Used when a student deletes their account (auth module).
+    Returns how many paths could NOT be deleted (they are logged, so an admin can clean up).
+    """
+    failed = 0
+    for path in paths:
+        try:
+            if uses_local_files():
+                _delete_local(get_settings().LOCAL_STORAGE_DIR, path)
+            elif path.endswith("/"):
+                for blob in _get_bucket().list_blobs(prefix=path):
+                    blob.delete()
+            else:
+                blob = _get_bucket().blob(path)
+                if blob.exists():
+                    blob.delete()
+        except Exception:
+            failed += 1
+            logger.exception("Could not delete storage path %s", path)
+    return failed
+
+
+def _delete_local(root: str, path: str) -> None:
+    """Dev only: delete a file or folder inside the local storage folder."""
+    import shutil
+
+    folder = Path(root).resolve()
+    target = (folder / path).resolve()
+    if target == folder or not target.is_relative_to(folder):  # never the whole folder
+        raise ValueError(f"Storage path outside the storage folder: {path}")
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink(missing_ok=True)
+
+
 def uses_local_files() -> bool:
     """True in dev without a bucket: files live in LOCAL_STORAGE_DIR."""
     settings = get_settings()
