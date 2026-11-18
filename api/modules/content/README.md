@@ -78,6 +78,12 @@ Text notes are not stored as a file (`uploads.file_path` is empty); the text is 
 | POST | `/api/v1/library` | Save an item |
 | DELETE | `/api/v1/library/{id}` | Remove an item |
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes the student's uploads + summaries, own notes and library items and returns the Storage folder `uploads/<user_id>/`. `export_user_data` gives `{notes, uploads}` (uploads with their summaries; files as Storage paths).
+
 ## Files
 
 | File | What goes in it |
