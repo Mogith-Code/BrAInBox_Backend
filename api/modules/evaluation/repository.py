@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import AIJob, Evaluation, ModelAnswer, Question, Topic, Unit
@@ -214,3 +214,19 @@ async def count_open_for_responses(
     if exclude_id is not None:
         stmt = stmt.where(Evaluation.id != exclude_id)
     return int(await session.scalar(stmt) or 0)
+
+
+# ---------------------------------------------------------------- account delete / export
+
+
+async def list_user_evaluations(session: AsyncSession, user_id: uuid.UUID) -> list[Evaluation]:
+    """Every evaluation of one student, oldest first (for the data export)."""
+    rows = await session.scalars(
+        select(Evaluation).where(Evaluation.user_id == user_id).order_by(Evaluation.created_at)
+    )
+    return list(rows)
+
+
+async def delete_user_evaluations(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete every evaluation of one student. No commit."""
+    await session.execute(delete(Evaluation).where(Evaluation.user_id == user_id))
