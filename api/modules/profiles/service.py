@@ -195,3 +195,47 @@ async def main_batch_year(session: AsyncSession) -> int:
     """The A/L year most students are preparing for (next year if nobody chose one yet)."""
     year = clock.today().year
     return await repository.most_common_exam_year(session, year) or year + 1
+
+
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> dict[str, dict | None]:
+    """{"profile": {...} | None, "settings": {...}}. Settings show the defaults when the
+    student never changed them."""
+    p = await repository.get_by_user_id(session, user_id)
+    profile = None
+    if p is not None:
+        profile = {
+            "school": p.school,
+            "district": p.district,
+            "exam_year": p.exam_year,
+            "avatar_url": p.avatar_url,
+            "bio": p.bio,
+            "stream": p.stream,
+            "subject": p.subject,
+            "target_grade": p.target_grade,
+            "confidence": p.confidence,
+            "study_days": list(p.study_days) if p.study_days else None,
+            "hours_per_day": float(p.hours_per_day) if p.hours_per_day is not None else None,
+            "preferred_time": p.preferred_time,
+            "profile_completed_at": p.profile_completed_at,
+            "diagnostic_completed_at": p.diagnostic_completed_at,
+            "diagnostic_skipped_at": p.diagnostic_skipped_at,
+        }
+    s = await repository.get_settings_row(session, user_id)
+    settings = {
+        "theme": s.theme if s else "system",
+        "notifications_enabled": s.notifications_enabled if s else True,
+        "daily_reminder_time": s.daily_reminder_time if s else None,
+        "email_updates": s.email_updates if s else False,
+    }
+    return {"profile": profile, "settings": settings}
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's profile and settings (no commit). No files: avatar_url is a link
+    (e.g. the Google photo), not a file we store."""
+    await repository.delete_user_rows(session, user_id)
+    return []
