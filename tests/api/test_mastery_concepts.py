@@ -10,7 +10,7 @@ from api.modules.performance.grading import mastery_percent
 from api.modules.performance.repository import ConceptInfo
 from shared.db.models import Concept, ConceptMastery, Mistake, QuestionConcept, UnitMastery
 from shared.enums import MasterySource
-from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
+from tests.api.test_exams import FakeAIClient, _app_with, exam_data, generate_paper  # noqa: F401 (fixture)
 from tests.api.test_performance import CELLS, GENETICS, Rows
 from tests.conftest import STUDENT, _client
 
@@ -154,12 +154,7 @@ async def test_concept_insights_read_only_my_answers(client, monkeypatch):
 async def test_after_attempt_marked_end_to_end(exam_data, db_session):  # noqa: F811
     """Generate + submit a paper, link two of its questions to a concept, then record."""
     async with _client(_app_with(FakeAIClient())) as c:
-        paper = (
-            await c.post(
-                "/api/v1/papers/generate",
-                json={"topic_ids": [str(exam_data.id)], "num_questions": 4},
-            )
-        ).json()
+        paper = await generate_paper(c, {"topic_ids": [str(exam_data.id)], "num_questions": 4})
         q = paper["questions"]
         concept = Concept(topic_id=exam_data.id, name="Mastery test concept")
         db_session.add(concept)

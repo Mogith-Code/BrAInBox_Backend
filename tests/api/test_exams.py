@@ -328,6 +328,19 @@ async def _job(c, job_id: str) -> dict:  # type: ignore[no-untyped-def]
     return response.json()
 
 
+async def generate_paper(c, body: dict) -> dict:  # type: ignore[no-untyped-def]
+    """POST /papers/generate is a queued job now (202 + job id).
+    Wait for the job, then return the paper from GET /papers/{id}.
+    "paper_id" is added so older tests can keep using it."""
+    queued = await c.post("/api/v1/papers/generate", json=body)
+    assert queued.status_code == 202, queued.text
+    job = await _job(c, queued.json()["job_id"])
+    assert job["status"] == "succeeded", job
+    paper = (await c.get(f"/api/v1/papers/{job['result']['paper_id']}")).json()
+    paper["paper_id"] = paper["id"]
+    return paper
+
+
 @pytest.mark.db
 async def test_blueprint_uses_unseen_bank_questions_and_generates_the_gaps(exam_data, db_session):
     topic = exam_data

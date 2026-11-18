@@ -10,7 +10,7 @@ from api.core.security import CurrentUser, get_current_user
 from api.modules.performance import repository, service
 from shared.db.models import MCQOption, Misconception
 from shared.enums import MistakeType, UserRole
-from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
+from tests.api.test_exams import FakeAIClient, _app_with, exam_data, generate_paper  # noqa: F401 (fixture)
 from tests.api.test_performance import CELLS, GENETICS, Rows
 from tests.conftest import STUDENT, _client
 
@@ -100,12 +100,7 @@ async def test_update_unknown_mistake_is_not_found(client, monkeypatch):
 async def test_mistake_journal_after_submitting_a_paper(exam_data, db_session):  # noqa: F811
     """Generate + submit a paper through exams, record its mistakes, use the journal."""
     async with _client(_app_with(FakeAIClient())) as c:
-        paper = (
-            await c.post(
-                "/api/v1/papers/generate",
-                json={"topic_ids": [str(exam_data.id)], "num_questions": 5},
-            )
-        ).json()
+        paper = await generate_paper(c, {"topic_ids": [str(exam_data.id)], "num_questions": 5})
         q = paper["questions"]
         answers = [{"question_id": q[0]["id"], "selected": "B"}]  # correct
         answers += [{"question_id": x["id"], "selected": "A"} for x in q[1:4]]  # 3 wrong
@@ -150,7 +145,7 @@ async def test_mistake_journal_after_submitting_a_paper(exam_data, db_session): 
             assert linked["correction"] == "Fix it so."
             assert linked["your_answer"] != linked["correct_answer"]
             assert linked["correct_answer"] == "Mitochondrion"
-            assert linked["question"] == q[1]["question"]
+            assert linked["question"] == q[1]["stem"]
             assert (linked["topic"], linked["source"]) == ("Test topic", "exam")
             assert linked["is_resolved"] is False
 

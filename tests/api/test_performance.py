@@ -35,7 +35,7 @@ from shared.db.models import (
     UserTopicProgress,
 )
 from shared.enums import AttemptKind, QuestionType, TopicProgressStatus, UserRole
-from tests.api.test_exams import FakeAIClient, _app_with, exam_data  # noqa: F401 (fixture)
+from tests.api.test_exams import FakeAIClient, _app_with, exam_data, generate_paper  # noqa: F401 (fixture)
 from tests.conftest import STUDENT, _client
 
 # --------------------------------------------------------------------------- grade bands
@@ -435,12 +435,7 @@ async def test_topic_insights_rejects_a_bad_attempt_id(client):
 async def test_insights_after_submitting_a_paper(exam_data):  # noqa: F811 (fixture from test_exams)
     """Generate + submit a paper through exams, then read the topic insights."""
     async with _client(_app_with(FakeAIClient())) as c:
-        paper = (
-            await c.post(
-                "/api/v1/papers/generate",
-                json={"topic_ids": [str(exam_data.id)], "num_questions": 6},
-            )
-        ).json()
+        paper = await generate_paper(c, {"topic_ids": [str(exam_data.id)], "num_questions": 6})
         q = paper["questions"]
         answers = [{"question_id": x["id"], "selected": "B"} for x in q[:2]]  # 2 correct
         answers += [{"question_id": x["id"], "selected": "A"} for x in q[2:5]]  # 3 wrong
@@ -773,12 +768,7 @@ async def test_start_topic_requires_login(anon_client):
 
 async def _submit_paper(c, topic_id, selected: list[str | None]):  # type: ignore[no-untyped-def]
     """Generate a paper with one question per entry and submit these answers ("B" is correct)."""
-    paper = (
-        await c.post(
-            "/api/v1/papers/generate",
-            json={"topic_ids": [str(topic_id)], "num_questions": len(selected)},
-        )
-    ).json()
+    paper = await generate_paper(c, {"topic_ids": [str(topic_id)], "num_questions": len(selected)})
     answers = [
         {"question_id": q["id"], "selected": s}
         for q, s in zip(paper["questions"], selected, strict=True)
