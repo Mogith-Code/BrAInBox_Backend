@@ -7,7 +7,7 @@ Only this module's `service.py` may import this file.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import AIJob
@@ -34,3 +34,9 @@ async def count_jobs_since(
     if exclude_failed:
         stmt = stmt.where(AIJob.status != JobStatus.FAILED)
     return int(await session.scalar(stmt) or 0)
+
+
+async def delete_user_jobs(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the jobs one student started (their input can hold the student's answers).
+    No commit. ai_usage_log rows stay for cost reports, without the job / user link."""
+    await session.execute(delete(AIJob).where(AIJob.requested_by == user_id))
