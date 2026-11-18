@@ -45,7 +45,8 @@ backend creates, emails and checks them:
 | `POST /auth/register` | token | `{full_name, phone?, consent: true}` | `UserOut` (201 new / 200 existing) | `CONSENT_REQUIRED`, `INVALID_PHONE`, `EMAIL_IN_USE` |
 | `GET /auth/me` | token | – | `UserOut` | `USER_NOT_FOUND` (404) |
 | `PATCH /auth/me` | token | `{full_name?, phone?}` (`phone: null` removes it) | `UserOut` | `INVALID_PHONE` |
-| `DELETE /auth/me` | token | – | 204 | `FIREBASE_ERROR` (503) |
+| `GET /auth/me/export` | token | – | `DataExportOut` (all my data, JSON) | `USER_NOT_FOUND` (404) |
+| `DELETE /auth/me` | token | – | 204 | `FIREBASE_ERROR` (503, nothing deleted) |
 | `POST /auth/email-code/send` | token | – | `{sent, resend_in: 60, expires_in: 600, dev_code?}` | `ALREADY_VERIFIED`, `RESEND_TOO_SOON` |
 | `POST /auth/email-code/verify` | token | `{code}` | `UserOut` | `CODE_INVALID` (+`attempts_left`), `CODE_EXPIRED`, `TOO_MANY_ATTEMPTS` |
 | `POST /auth/password-reset/send` | none | `{email}` | always `{sent, resend_in, expires_in, dev_code?}` | `RESEND_TOO_SOON` |
@@ -56,6 +57,37 @@ backend creates, emails and checks them:
 
 - **Phone**: optional, Sri Lankan mobiles only, normalised to E.164 (`077 123 4567` → `+94771234567`).
 - **Password policy**: at least 8 characters, with a letter and a number (the app checks it too).
+
+## Privacy: delete my account, download my data
+
+**`DELETE /auth/me`** (`service.delete_me`) removes everything about the student. Auth never touches
+another module's tables: each module in `USER_DATA_SERVICES` has
+`delete_user_data(session, user_id) -> list[storage paths]` that deletes its own rows **without committing**.
+
+| Module | What is deleted |
+|---|---|
+| evaluation | evaluations + the answer-photo folder `answers/<user_id>/` in Storage |
+| exams | quiz / exam / diagnostic attempts, their answers, the student's personal papers |
+| recommendations | study plans + items, daily plan items, recommendations |
+| performance | mistakes journal, concept / unit mastery, snapshots, activity, topic progress |
+| content | uploads + summaries, own notes, library items + `uploads/<user_id>/` in Storage |
+| learn | topic bookmarks + the Learn upload folder in Storage |
+| community | posts (with the replies under them), replies, votes, reports, group memberships + post images. Other students' post scores, reply counts and accepted answers are corrected |
+| notifications | notifications, push device tokens |
+| jobs | AI jobs the student started (their input can hold answers) |
+| profiles | profile, app settings |
+| auth | email codes, reset tokens, the `users` row |
+
+Order: all rows above → delete the **Firebase login** (fails → rollback, `503 FIREBASE_ERROR`, nothing lost) →
+commit → delete the **Storage files** (last, because it can't be undone; a failure is only logged).
+Kept on purpose: `ai_usage_log` rows (cost reports, user link set to NULL), `audit_log`, and shared content the
+student made that admins review (AI-generated questions, visuals); their `created_by` becomes NULL.
+
+**`GET /auth/me/export`** (`service.export_me`) returns one JSON object the app saves as a `.json` file:
+`{exported_at, account, profile, settings, privacy, quiz_attempts, exam_attempts, evaluations, mistakes,
+recommendations, study_plan: {plans, daily_items}, notes, uploads, community: {posts, replies}}`. Each module's
+`export_user_data(session, user_id)` gives its part. Only the caller's rows; files are Storage paths (never bytes);
+no Firebase uid, codes, reset tokens or FCM tokens (`privacy.push_devices` is just a count).
 
 ## Email
 
@@ -164,4 +196,6 @@ Errors on the inbox screen: `CODE_INVALID` (shows `attempts_left`), `CODE_EXPIRE
 | `service.py` | Business logic (codes, hashing, Firebase calls via `api/core/firebase_users.py`) |
 | `repository.py` | All SQL for `users`, `email_codes`, `password_reset_tokens` |
 
-Tests: `tests/api/test_auth.py` (Firebase and email are faked).
+Tests: `tests/api/test_auth.py` (Firebase and email are faked), `tests/api/test_account_privacy.py`
+(delete leaves no row of the student in any table, Storage delete is called, other students keep their data; export
+shape, only own data, 401 without a token).
