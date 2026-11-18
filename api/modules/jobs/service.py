@@ -78,3 +78,9 @@ async def count_recent_jobs(
     """How many jobs of this type the user started since `since` (failed ones don't count).
     Used for daily limits, e.g. PAPERS_DAILY_LIMIT in the exams module."""
     return await repository.count_jobs_since(session, user_id, job_type, since)
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Account delete (auth module): remove the student's AI jobs. No commit, no files."""
+    await repository.delete_user_jobs(session, user_id)
+    return []

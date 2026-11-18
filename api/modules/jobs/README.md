@@ -24,6 +24,12 @@ technical error becomes "Something went wrong while making this. Please try agai
 Modules that must save rows when a job succeeds pass `on_success` to `core/jobs.run_job_inline`, so the
 rows and status "succeeded" are saved in one commit (see `api/modules/visuals/service.py`).
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes the AI jobs the student started (their `input` can hold the student's answers). `ai_usage_log` rows stay for cost reports.
+
 ## Files
 
 | File | What goes in it |
