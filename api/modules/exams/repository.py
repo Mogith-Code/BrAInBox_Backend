@@ -19,6 +19,7 @@ from sqlalchemy import (
     ColumnElement,
     String,
     cast,
+    delete,
     distinct,
     exists,
     false,
@@ -434,3 +435,52 @@ async def save_blueprint_paper(
     )
     await session.flush()
     return paper
+
+
+# ---------------------------------------------------------------- account delete / export
+# Quizzes, the diagnostic and exams all live in `attempts`, so this module handles them all.
+# Personal papers: the ones built for one student (quiz, diagnostic, ai_generated).
+PERSONAL_PAPER_KINDS = (
+    PaperKind.QUIZ.value,
+    PaperKind.DIAGNOSTIC.value,
+    PaperKind.AI_GENERATED.value,
+)
+
+
+async def list_user_attempts(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Attempt, list[Response]]]:
+    """Every attempt of one student (oldest first) with its answers."""
+    attempts = list(
+        await session.scalars(
+            select(Attempt).where(Attempt.user_id == user_id).order_by(Attempt.started_at)
+        )
+    )
+    answers: dict[uuid.UUID, list[Response]] = {a.id: [] for a in attempts}
+    if attempts:
+        rows = await session.scalars(
+            select(Response)
+            .where(Response.attempt_id.in_(list(answers)))
+            .order_by(Response.created_at)
+        )
+        for response in rows:
+            answers[response.attempt_id].append(response)
+    return [(a, answers[a.id]) for a in attempts]
+
+
+async def delete_user_attempts(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's answers, attempts and personal papers. No commit.
+
+    A personal paper that ANOTHER student has an attempt on is kept (never delete their data).
+    """
+    own_attempts = select(Attempt.id).where(Attempt.user_id == user_id)
+    await session.execute(delete(Response).where(Response.attempt_id.in_(own_attempts)))
+    await session.execute(delete(Attempt).where(Attempt.user_id == user_id))
+    used_by_others = exists().where(Attempt.paper_id == Paper.id, Attempt.user_id != user_id)
+    await session.execute(
+        delete(Paper).where(
+            Paper.created_by == user_id,
+            Paper.paper_type.in_(PERSONAL_PAPER_KINDS),
+            ~used_by_others,
+        )
+    )
