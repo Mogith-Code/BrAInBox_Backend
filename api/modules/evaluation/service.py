@@ -652,5 +652,42 @@ async def admin_set_manual_marks(
     return _admin_out(evaluation, question)
 
 
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+def answer_photos_folder(user_id: uuid.UUID) -> str:
+    """Storage folder with every answer photo of one student (see upload_pages)."""
+    return f"answers/{user_id}/"
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The student's evaluations for the data export. Photos as Storage paths, not bytes."""
+    rows = await repository.list_user_evaluations(session, user_id)
+    return [
+        {
+            "id": e.id,
+            "question_id": e.question_id,
+            "answer_text": e.answer_text,
+            "answer_image_path": e.answer_image_path,
+            "ocr_text": e.ocr_text,
+            "method": e.method,
+            "estimated_marks": e.estimated_marks,
+            "max_marks": e.max_marks,
+            "feedback": e.feedback,
+            "status": e.status,
+            "created_at": e.created_at,
+        }
+        for e in rows
+    ]
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's evaluations (no commit). Returns the Storage paths to delete
+    after the commit: the whole answer-photo folder (also photos never marked)."""
+    await repository.delete_user_evaluations(session, user_id)
+    return [answer_photos_folder(user_id)]
+
+
 jobs.register_job_handler(JobType.OCR_ANSWER, on_ocr_done, on_job_failed)
 jobs.register_job_handler(JobType.EVALUATE_ANSWER, on_evaluated, on_job_failed)

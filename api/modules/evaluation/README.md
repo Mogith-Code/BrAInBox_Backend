@@ -16,6 +16,12 @@
 | POST | `/api/v1/evaluations/ocr` | Upload a handwritten answer photo -> OCR_ANSWER job |
 | GET | `/api/v1/evaluations/{id}` | Result: estimated marks, matched points, feedback |
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes the student's evaluations and returns the answer-photo folder `answers/<user_id>/` (also photos that were never marked). `export_user_data` lists the evaluations (photos as Storage paths).
+
 ## Files
 
 | File | What goes in it |
