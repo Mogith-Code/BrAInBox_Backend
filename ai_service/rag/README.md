@@ -68,7 +68,7 @@ and put them in `data/rag_sources/syllabus/`. The unit is read from the file nam
 ("© 2018 National Institute of Education…") and the "Biology Resource Book" running header are removed.
 Scanned pages are read with **Tesseract OCR** when it is installed (Docker image: yes; Windows: install it, or set `TESSERACT_CMD`).
 
-**From the admin portal (planned):** `POST /api/v1/admin/rag/documents` uploads the file and creates a
+**From the admin portal (planned):** `POST /api/v1/admin/rag/sources` uploads the file and creates a
 `source_documents` row plus a `RAG_INGEST` job. The ai_service then runs `pipeline.run_job`.
 
 > Use the **same embedder** for ingesting and for searching. Fake vectors and Gemini vectors are not comparable.

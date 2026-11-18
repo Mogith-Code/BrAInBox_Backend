@@ -9,14 +9,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-
-class ModuleStatus(BaseModel):
-    """Response of the placeholder status routes."""
-
-    module: str
-    status: str
-
-
 # ---------------------------------------------------------------- GET /admin/dashboard
 # "aiReview" is camelCase on purpose: it is the app's enum value.
 KpiKind = Literal["students", "quizzes", "aiReview", "reports"]

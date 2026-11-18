@@ -22,6 +22,7 @@ from api.core import clock
 from api.core.ai_client import AIClient
 from api.core.errors import AppError, NotFoundError
 from api.core.security import CurrentUser
+from api.modules.notifications import service as notifications_service
 from api.modules.performance import service as performance_service
 from api.modules.performance.service import ConceptState
 from api.modules.profiles import service as profiles_service
@@ -47,6 +48,7 @@ from shared.db.models import (
 )
 from shared.enums import (
     ContentStatus,
+    NotificationType,
     PlanSource,
     RecommendationAction,
     RecommendationStatus,
@@ -804,6 +806,18 @@ async def regenerate_plan(
             )
             for slot in slots
         ],
+    )
+    total_minutes = sum(slot.minutes for slot in slots)
+    notifications_service.notify(
+        session,
+        user.id,
+        NotificationType.PLAN_READY,
+        "Your study plan is ready",
+        f"{plan.title}: {len(slots)} tasks, about {total_minutes} min in all."
+        if slots
+        else f"{plan.title}: no tasks yet. Do a quiz so we can plan around your weak spots.",
+        {"screen": "plan", "plan_id": str(plan.id)},
+        ai_generated=True,
     )
     await session.commit()
     return await _plan_out(session, user.id, plan)

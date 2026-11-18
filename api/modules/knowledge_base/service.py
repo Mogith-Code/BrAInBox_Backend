@@ -57,10 +57,17 @@ class MarkingScheme:
     points: list[MarkingPoint]
 
 
-async def get_marking_scheme(session: AsyncSession, question_id: uuid.UUID) -> MarkingScheme | None:
+async def get_marking_scheme(
+    session: AsyncSession, question_id: uuid.UUID, *, allow_ai_draft: bool = False
+) -> MarkingScheme | None:
     """The APPROVED model answer of a question with its marking points and keywords, or None
-    (no model answer, not approved yet, or no marking points)."""
+    (no model answer, not approved yet, or no marking points).
+
+    `allow_ai_draft=True` falls back to the AI-made scheme that came with an AI-generated
+    question (not reviewed yet). Only for marking answers on the student's own model paper."""
     answer = await repository.approved_answer_for_question(session, question_id)
+    if answer is None and allow_ai_draft:
+        answer = await repository.ai_answer_for_question(session, question_id)
     if answer is None:
         return None
     points = await repository.answer_points(session, answer.id)
@@ -85,6 +92,54 @@ async def get_marking_scheme(session: AsyncSession, question_id: uuid.UUID) -> M
             for p in points
         ],
     )
+
+
+async def questions_with_marking_scheme(
+    session: AsyncSession, question_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Which of these questions have an approved marking scheme (so answers can be marked)."""
+    return await repository.questions_with_approved_points(session, question_ids)
+
+
+async def save_ai_marking_scheme(
+    session: AsyncSession,
+    question_id: uuid.UUID,
+    answer_text: str,
+    points: list[dict[str, Any]],
+    created_by: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """Store the model answer + marking points an AI wrote together with a generated question.
+
+    `points`: [{"text", "marks", "keywords": [...]}]. Saved as source "ai", status
+    pending_review: admins review it with the question. No commit (the caller commits)."""
+    answer = ModelAnswer(
+        id=uuid.uuid4(),
+        question_id=question_id,
+        answer_text=answer_text.strip(),
+        total_marks=float(sum(float(p.get("marks") or 0) for p in points)),
+        source="ai",
+        status=ContentStatus.PENDING_REVIEW,
+        created_by=created_by,
+        updated_at=clock.now(),
+    )
+    await repository.add(session, answer)
+    for n, point in enumerate(points):
+        row = AnswerPoint(
+            id=uuid.uuid4(),
+            model_answer_id=answer.id,
+            point_text=str(point.get("text") or "").strip(),
+            marks=float(point.get("marks") or 1),
+            order_index=n,
+        )
+        await repository.add(session, row)
+        # Unique per point ignoring case (uq_keywords_point_keyword_lower).
+        keywords: dict[str, str] = {}
+        for raw in point.get("keywords") or []:
+            keyword = " ".join(str(raw).split())[:100]
+            if keyword:
+                keywords.setdefault(keyword.lower(), keyword)
+        await repository.replace_keywords(session, row.id, list(keywords.values()))
+    return answer.id
 
 
 # =========================================================================== admin: model answers

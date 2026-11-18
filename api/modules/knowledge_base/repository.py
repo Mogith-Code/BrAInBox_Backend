@@ -118,3 +118,35 @@ async def keyword_rows(
     for keyword in result.scalars():
         rows[keyword.answer_point_id].append(keyword)
     return rows
+
+
+async def ai_answer_for_question(
+    session: AsyncSession, question_id: uuid.UUID
+) -> ModelAnswer | None:
+    """The newest AI-made model answer of a question that isn't rejected / archived."""
+    result = await session.execute(
+        select(ModelAnswer)
+        .where(
+            ModelAnswer.question_id == question_id,
+            ModelAnswer.source == "ai",
+            ModelAnswer.status.in_(["draft", "pending_review", "approved"]),
+        )
+        .order_by(ModelAnswer.updated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def questions_with_approved_points(
+    session: AsyncSession, question_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Questions that have an approved model answer with at least one marking point."""
+    if not question_ids:
+        return set()
+    result = await session.execute(
+        select(ModelAnswer.question_id)
+        .join(AnswerPoint, AnswerPoint.model_answer_id == ModelAnswer.id)
+        .where(ModelAnswer.question_id.in_(question_ids), ModelAnswer.status == "approved")
+        .distinct()
+    )
+    return set(result.scalars())

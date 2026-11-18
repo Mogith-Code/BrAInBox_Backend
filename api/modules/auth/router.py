@@ -23,7 +23,6 @@ from api.core.security import CurrentUserDep, FirebaseClaimsDep
 from api.modules.auth import service
 from api.modules.auth.schemas import (
     CodeSentOut,
-    ModuleStatus,
     PasswordResetCompleteRequest,
     PasswordResetSendRequest,
     PasswordResetVerifyRequest,
@@ -36,12 +35,6 @@ from api.modules.auth.schemas import (
 )
 
 router = APIRouter(tags=["Auth"])
-
-
-@router.get("/auth/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    return await service.get_status()
 
 
 # ---------------------------------------------------------------- account

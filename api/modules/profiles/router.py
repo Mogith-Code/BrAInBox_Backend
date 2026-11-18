@@ -14,15 +14,9 @@ from fastapi import APIRouter
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.profiles import service
-from api.modules.profiles.schemas import ModuleStatus, ProfileOptionsOut, ProfileOut, ProfileUpdate
+from api.modules.profiles.schemas import ProfileOptionsOut, ProfileOut, ProfileUpdate
 
 router = APIRouter(tags=["Profiles"])
-
-
-@router.get("/profiles/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    return await service.get_status()
 
 
 @router.get(

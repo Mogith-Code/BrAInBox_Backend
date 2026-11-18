@@ -25,19 +25,11 @@ from api.core.security import CurrentUserDep
 from api.modules.content import service
 from api.modules.content.schemas import (
     MAX_TITLE_CHARS,
-    ModuleStatus,
     UploadOut,
     UploadTextRequest,
 )
 
 router = APIRouter(tags=["Content"])
-
-
-@router.get("/content/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    # TODO(Samni): replace this placeholder with the real endpoints listed above.
-    return await service.get_status()
 
 
 @router.post(

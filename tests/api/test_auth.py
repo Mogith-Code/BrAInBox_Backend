@@ -14,17 +14,6 @@ from tests.conftest import STUDENT, delete_test_user, make_api_client, student_c
 # --------------------------------------------------------------------------- no database
 
 
-async def test_auth_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/auth/status")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "UNAUTHORIZED"
-
-
-async def test_auth_status_placeholder(client):
-    response = await client.get("/api/v1/auth/status")
-    assert response.json() == {"module": "auth", "status": "todo"}
-
-
 @pytest.mark.parametrize(
     "raw",
     ["077 123 4567", "0771234567", "771234567", "94771234567", "+94 77 123-4567", "(077) 123 4567"],

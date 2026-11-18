@@ -129,6 +129,61 @@ class GeneratedMCQSet(BaseModel):
         }
 
 
+class GeneratedMarkingPoint(BaseModel):
+    """One marking point of a generated structured / essay question."""
+
+    text: str
+    marks: int = Field(ge=1, le=10)
+    keywords: list[str] = Field(default_factory=list)  # words that show the point was made
+
+
+class GeneratedWrittenQuestion(BaseModel):
+    """One A/L structured or essay question with its model answer and marking points."""
+
+    question: str
+    marks: int = Field(ge=1, le=20)
+    model_answer: str
+    points: list[GeneratedMarkingPoint] = Field(min_length=1, max_length=15)
+
+    @model_validator(mode="after")
+    def points_add_up_to_the_marks(self) -> "GeneratedWrittenQuestion":
+        total = sum(p.marks for p in self.points)
+        if total != self.marks:
+            raise ValueError(f"the marking points give {total} marks, the question {self.marks}")
+        return self
+
+
+class GeneratedWrittenSet(BaseModel):
+    questions: list[GeneratedWrittenQuestion]
+
+    @classmethod
+    def fake_example(cls) -> dict[str, Any]:
+        """Valid sample used by the fake LLM (offline / tests)."""
+        return {
+            "questions": [
+                {
+                    "question": "Explain how the structure of a mitochondrion suits its function.",
+                    "marks": 4,
+                    "model_answer": (
+                        "The inner membrane is folded into cristae, giving a large surface for "
+                        "the electron transport chain and ATP synthase. The matrix holds the "
+                        "enzymes of the Krebs cycle."
+                    ),
+                    "points": [
+                        {"text": "Cristae give a large surface area", "marks": 1,
+                         "keywords": ["cristae", "surface area"]},
+                        {"text": "Electron transport chain / ATP synthase on the inner membrane",
+                         "marks": 1, "keywords": ["electron transport", "ATP synthase"]},
+                        {"text": "Matrix contains Krebs cycle enzymes", "marks": 1,
+                         "keywords": ["matrix", "Krebs"]},
+                        {"text": "Double membrane separates the matrix from the cytoplasm",
+                         "marks": 1, "keywords": ["double membrane"]},
+                    ],
+                }
+            ]
+        }  # fmt: skip
+
+
 class AnswerExplanation(BaseModel):
     question_id: str
     explanation: str

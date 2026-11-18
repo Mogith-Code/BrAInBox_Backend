@@ -25,7 +25,6 @@ from api.core.ai_client import AIClientDep
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.admin import service as admin_service
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.quality import service as quality_service
 from api.modules.quality.schemas import QualityQueueOut, ReviewDecisionIn
 from api.modules.questions import service as questions_service
@@ -36,6 +35,7 @@ from api.modules.questions.schemas import (
     AdminQuestionStatus,
     BulkQuestionsIn,
     DifficultyValue,
+    MisconceptionSuggestJobOut,
     OptionMisconceptionIn,
     OptionMisconceptionOut,
     PaperType,
@@ -46,11 +46,6 @@ from api.modules.questions.schemas import (
 )
 
 router = APIRouter(prefix="/questions", tags=["Admin: questions"])
-
-
-@router.get("/status", response_model=ModuleStatus, summary="Placeholder: admin area status")
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="questions_admin", status="todo")
 
 
 # ---------------------------------------------------------------- question bank
@@ -126,6 +121,37 @@ async def review_question(
     action = "question.review_approve" if req.approve else "question.review_reject"
     await admin_service.record_audit(session, admin, action, "question", question_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{question_id}/misconception-suggestions",
+    response_model=MisconceptionSuggestJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Ask the AI which misconception is behind each wrong option (suggestions only)",
+)
+async def suggest_misconceptions(
+    question_id: uuid.UUID,
+    admin: CurrentUserDep,
+    session: SessionDep,
+    ai: AIClientDep,
+    background_tasks: BackgroundTasks,
+) -> MisconceptionSuggestJobOut:
+    """Queues a MAP_MISCONCEPTIONS job for this MCQ. Poll `GET /api/v1/jobs/{job_id}`; when
+    it succeeded, `result.suggestions` has one item per wrong option:
+    `{option_id, label, option_text, current_misconception, suggested_misconception,
+    misconception_id, is_new, similarity}`.
+
+    Nothing is saved: confirm each option you agree with by sending its text to
+    `PUT /admin/options/{option_id}/misconception`.
+
+    Errors: 404 `QUESTION_NOT_FOUND` · 422 `NOT_AN_MCQ` / `NO_WRONG_OPTIONS`."""
+    out = await questions_service.admin_suggest_misconceptions(
+        session, admin.id, question_id, background_tasks, ai
+    )
+    await admin_service.record_audit(
+        session, admin, "question.suggest_misconceptions", "question", question_id
+    )
+    return out
 
 
 # ---------------------------------------------------------------- past papers

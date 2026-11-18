@@ -31,7 +31,6 @@ from api.modules.performance.schemas import (
     InsightsSummaryResponse,
     MistakeOut,
     MistakeUpdate,
-    ModuleStatus,
     RecurringResponse,
     TopicInsightsResponse,
     TopicProgressOut,
@@ -40,14 +39,6 @@ from api.modules.performance.schemas import (
 from shared.enums import MistakeType
 
 router = APIRouter(tags=["Performance"])
-
-
-@router.get(
-    "/performance/status", response_model=ModuleStatus, summary="Placeholder: module status"
-)
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    return await service.get_status()
 
 
 @router.get(

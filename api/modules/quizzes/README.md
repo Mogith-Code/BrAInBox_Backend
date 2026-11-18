@@ -40,8 +40,6 @@ How it works:
 | GET | `/api/v1/quizzes/{id}/results` | Score + explanations |
 | POST | `/api/v1/quizzes/diagnostic` | Start the diagnostic test |
 
-Placeholder right now: `GET /api/v1/quizzes/status` → `{"module": "quizzes", "status": "todo"}` (needs login).
-
 ## Files
 
 | File | What goes in it |

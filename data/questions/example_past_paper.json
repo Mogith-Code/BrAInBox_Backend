@@ -1,0 +1,25 @@
+{
+  "year": 1990,
+  "paper_part": "part_1",
+  "title": "Example A/L Biology Paper I (MCQ)",
+  "duration_minutes": 120,
+  "questions": [
+    {
+      "number": "1",
+      "topic": "Cell Structure",
+      "question": "Which organelle is the main site of ATP production in a eukaryotic cell?",
+      "options": ["Ribosome", "Mitochondrion", "Golgi apparatus", "Lysosome", "Peroxisome"],
+      "correct_answer": "Mitochondrion",
+      "marks": 1,
+      "difficulty": "easy",
+      "explanation": "Most ATP is made by oxidative phosphorylation on the inner mitochondrial membrane."
+    },
+    {
+      "number": "2",
+      "topic": "Cell Structure",
+      "question": "Which of the following is present in prokaryotic cells but absent in animal cells?",
+      "options": ["Cell membrane", "Ribosomes", "Cell wall", "Cytoplasm", "DNA"],
+      "correct_answer": "Cell wall"
+    }
+  ]
+}

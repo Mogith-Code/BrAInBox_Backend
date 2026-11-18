@@ -29,6 +29,9 @@ from shared.enums import SourceType
 PROMPT_NAME = "questions/generate_mcq"
 PROMPT_VERSION = 2
 PROMPT_ID = prompt_id(PROMPT_NAME, PROMPT_VERSION)
+# v3 adds a target difficulty (model paper blueprints); v2 stays for everything else.
+DIFFICULTY_PROMPT_VERSION = 3
+DIFFICULTY_PROMPT_ID = prompt_id(PROMPT_NAME, DIFFICULTY_PROMPT_VERSION)
 
 SOURCE_TYPES = [SourceType.SYLLABUS, SourceType.TEACHER_GUIDE, SourceType.APPROVED_NOTE]
 MAX_RETRIES = 2  # extra attempts when the LLM returns invalid questions
@@ -53,25 +56,33 @@ async def generate_for_topic(
     *,
     unit_id: uuid.UUID | None = None,
     examples: list[dict[str, Any]] | None = None,
+    difficulty: str | None = None,
 ) -> tuple[list[GeneratedMCQ], BuiltContext]:
-    """Return up to `count` validated MCQs and the context (with citations) they came from."""
+    """Return up to `count` validated MCQs and the context (with citations) they came from.
+
+    `difficulty` (easy | medium | hard) uses the v3 prompt; without it, v2 as before."""
     context = await gather_context(topic_title, unit_id)
     if not context.citations:
         raise NoContextError(f"No syllabus content found for topic '{topic_title}'")
 
+    version = DIFFICULTY_PROMPT_VERSION if difficulty else PROMPT_VERSION
     prompt = render_prompt(
         PROMPT_NAME,
-        PROMPT_VERSION,
+        version,
         topic_title=topic_title,
         count=count,
         context=context.text,
         examples=examples or [],
+        difficulty=difficulty,
     )
     last_error: Exception | None = None
     for _ in range(MAX_RETRIES + 1):
         try:
             result = await get_llm().generate_json(
-                prompt, GeneratedMCQSet, temperature=TEMPERATURE, prompt_name=PROMPT_ID
+                prompt,
+                GeneratedMCQSet,
+                temperature=TEMPERATURE,
+                prompt_name=prompt_id(PROMPT_NAME, version),
             )
             return result.questions[:count], context
         except ValidationError as exc:  # bad JSON or a question that breaks the rules

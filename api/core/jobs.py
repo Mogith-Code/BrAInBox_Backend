@@ -61,6 +61,28 @@ def register_job_handler(
         _failure_handlers[job_type] = on_failure
 
 
+_listeners: list[JobHandler] = []
+
+
+def register_job_listener(listener: JobHandler) -> None:
+    """Be told when ANY job ends (succeeded or failed), e.g. to notify the student.
+
+    `listener(session, job)` runs inside run_job_inline right before the final commit, after the
+    job's own handler, so what it adds is saved in that commit. No commit inside. A listener that
+    raises is logged and ignored: it never changes the job's outcome."""
+    if listener not in _listeners:
+        _listeners.append(listener)
+
+
+async def _tell_listeners(session: AsyncSession, job: AIJob) -> None:
+    for listener in _listeners:
+        try:
+            async with session.begin_nested():  # a failing listener only undoes its own rows
+                await listener(session, job)
+        except Exception:
+            logger.exception("Job listener %s failed for job %s", listener, job.id)
+
+
 async def create_job(
     session: AsyncSession,
     job_type: JobType,
@@ -114,11 +136,15 @@ async def run_job_inline(
         logger.exception("Job %s failed", job.id)
         # The handler may have left the session in a failed transaction.
         await session.rollback()
+        # The rollback expired the row; load it again so listeners / callers can read it
+        # (an expired attribute can't be loaded lazily in async code: MissingGreenlet).
+        await session.refresh(job)
         # AppErrors keep their code, e.g. "EMPTY_NOTES: The notes are empty...", so the module
         # that owns the job can tell the student what went wrong.
         job.error = f"{exc.code}: {exc.message}" if isinstance(exc, AppError) else str(exc)
         job.status = JobStatus.FAILED
     job.finished_at = datetime.now(UTC)
+    await _tell_listeners(session, job)
     await session.commit()
     return job
 

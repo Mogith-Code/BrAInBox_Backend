@@ -24,8 +24,6 @@ ticks one. Empty on non-study days. New table in migration `0002`: `daily_plan_i
 | POST | `/api/v1/study-plan` | Create / regenerate a plan |
 | PATCH | `/api/v1/study-plan/items/{id}` | Mark an item done |
 
-Placeholder right now: `GET /api/v1/recommendations/status` → `{"module": "recommendations", "status": "todo"}` (needs login).
-
 ## Files
 
 | File | What goes in it |

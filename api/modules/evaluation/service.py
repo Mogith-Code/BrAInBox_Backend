@@ -296,29 +296,82 @@ async def create_evaluation(
     job = await jobs.create_job(
         session,
         JobType.EVALUATE_ANSWER,
-        {
-            "evaluation_id": str(evaluation.id),
-            "question": question.stem,
-            "answer_text": answer,
-            "max_marks": evaluation.max_marks,
-            "topic_id": str(question.topic_id) if question.topic_id else None,
-            "points": [
-                {
-                    "id": str(p.id),
-                    "text": p.text,
-                    "marks": p.marks,
-                    "is_required": p.is_required,
-                    "keywords": p.keywords,
-                }
-                for p in scheme.points
-            ],
-        },
+        _evaluation_payload(evaluation, question, answer, scheme),
         requested_by=user.id,
     )
     evaluation.job_id = job.id
     await session.commit()
     jobs.enqueue_job(job, background_tasks, ai)
     return EvaluationJobOut(evaluation_id=evaluation.id, job_id=job.id, status="queued")
+
+
+def _evaluation_payload(
+    evaluation: Evaluation, question: Question, answer: str, scheme: Any
+) -> dict[str, Any]:
+    """EVALUATE_ANSWER payload (ai_service/pipelines/evaluation/scorer.py)."""
+    return {
+        "evaluation_id": str(evaluation.id),
+        "question": question.stem,
+        "answer_text": answer,
+        "max_marks": evaluation.max_marks,
+        "topic_id": str(question.topic_id) if question.topic_id else None,
+        "points": [
+            {
+                "id": str(p.id),
+                "text": p.text,
+                "marks": p.marks,
+                "is_required": p.is_required,
+                "keywords": p.keywords,
+            }
+            for p in scheme.points
+        ],
+    }
+
+
+async def start_paper_answer_evaluation(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    question_id: uuid.UUID,
+    answer_text: str,
+    *,
+    response_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+) -> AIJob | None:
+    """Queue the marking of a written answer on an exam paper (exams module).
+
+    Unlike POST /evaluations the question may be one of the student's own AI questions (not
+    approved yet): its AI-made marking scheme is used then. No daily limit (papers have their
+    own, PAPERS_DAILY_LIMIT). Returns the job to enqueue (create_job commits), or None when the
+    question has no marking scheme at all."""
+    question = await repository.get_question(session, question_id)
+    if question is None or question.question_type == QuestionType.MCQ:
+        return None
+    scheme = await knowledge_service.get_marking_scheme(session, question.id, allow_ai_draft=True)
+    if scheme is None:
+        return None
+    answer = answer_text.strip()
+    evaluation = Evaluation(
+        user_id=user_id,
+        question_id=question.id,
+        response_id=response_id,
+        answer_text=answer,
+        status=JobStatus.QUEUED,
+        max_marks=min(float(question.marks), scheme.total_marks) or scheme.total_marks,
+    )
+    await repository.add(session, evaluation)
+    payload = _evaluation_payload(evaluation, question, answer, scheme)
+    payload.update({"attempt_id": str(attempt_id), "response_id": str(response_id)})
+    job = await jobs.create_job(session, JobType.EVALUATE_ANSWER, payload, requested_by=user_id)
+    evaluation.job_id = job.id
+    await session.commit()
+    return job
+
+
+async def open_paper_evaluations(
+    session: AsyncSession, response_ids: list[uuid.UUID], exclude_id: uuid.UUID | None = None
+) -> int:
+    """How many evaluations of these exam responses are still queued / running."""
+    return await repository.count_open_for_responses(session, response_ids, exclude_id)
 
 
 # =========================================================================== job handlers
@@ -454,7 +507,9 @@ async def get_evaluation(
         ai_result = (job.result or {}).get("result", {})
     points = [_point(p) for p in (evaluation.matched_points or [])] if marked else []
     scheme = (
-        await knowledge_service.get_marking_scheme(session, evaluation.question_id)
+        await knowledge_service.get_marking_scheme(
+            session, evaluation.question_id, allow_ai_draft=evaluation.response_id is not None
+        )
         if marked
         else None
     )

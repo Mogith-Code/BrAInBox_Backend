@@ -19,18 +19,10 @@ from fastapi import APIRouter, Request, Response, status
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.admin import service as admin_service
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.community import service as community_service
 from api.modules.community.schemas import GroupCreate, GroupOut, ModerationItemOut, ResolveReportIn
 
 router = APIRouter(tags=["Admin: moderation"])
-
-
-@router.get(
-    "/moderation/status", response_model=ModuleStatus, summary="Placeholder: admin area status"
-)
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="moderation_admin", status="todo")
 
 
 @router.get(

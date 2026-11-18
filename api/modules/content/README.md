@@ -78,8 +78,6 @@ Text notes are not stored as a file (`uploads.file_path` is empty); the text is 
 | POST | `/api/v1/library` | Save an item |
 | DELETE | `/api/v1/library/{id}` | Remove an item |
 
-Placeholder right now: `GET /api/v1/content/status` → `{"module": "content", "status": "todo"}` (needs login).
-
 ## Files
 
 | File | What goes in it |

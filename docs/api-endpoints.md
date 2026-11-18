@@ -2,7 +2,7 @@
 
 All routes are under `/api/v1` and need `Authorization: Bearer <Firebase ID token>`, except `GET /api/v1/health`.
 Admin routes are under `/api/v1/admin` and need role `admin`.
-Modules not built yet have a placeholder: `GET /api/v1/<module>/status`. Admin areas not built yet have `GET /api/v1/admin/<area>/status`.
+The only placeholder left is `GET /api/v1/knowledge-base/status` (that module has no real endpoint yet).
 The live list is always at `http://localhost:8000/docs`.
 
 Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
@@ -286,11 +286,11 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/papers/generate` | ✅ AI model paper for 1–10 topics (BUILD_PAPER) |
-| POST | `/api/v1/papers/generate-by-units` | ✅ `{units: [1-10], num_questions, title?}` → paper; questions spread over the units, each labelled "Unit N: title" (`INVALID_UNITS`, `UNIT_NOT_FOUND`, `NO_QUESTIONS_GENERATED`) |
-| POST | `/api/v1/papers/{id}/submit` | ✅ Mark answers, topic scores, weak topics, explanations |
-| GET | `/api/v1/papers` | List papers |
-| GET | `/api/v1/papers/{id}` | One paper |
+| GET | `/api/v1/papers?year=&type=&page=&size=` | ✅ Approved past papers, newest year first → `Page[{id, title, paper_type, year, question_types, question_count, outdated_count, total_marks, duration_minutes}]`. `type` = `mcq` \| `structured` \| `essay` (papers with that kind of question) |
+| GET | `/api/v1/papers/{id}?hide_outdated=false` | ✅ An approved past paper or one of my model papers → `{id, title, paper_type, year, duration_minutes, total_marks, question_count, hidden_outdated, questions: [{id, position, question_type, topic_id, topic, stem, marks, options: [{label, text}], is_outdated}]}`. No answers. `PAPER_NOT_FOUND` 404 |
+| POST | `/api/v1/papers/generate` | ✅ **Breaking: now 202.** Model paper blueprint `{unit_numbers?, topic_ids?, mcq_count, structured_count, essay_count, difficulty: {easy, medium, hard}, time_limit_minutes?, title?}` (old `{topic_ids, num_questions}` = that many MCQs) → 202 `{job_id, status, from_bank, to_generate}`. Unseen approved bank questions first, the AI writes only the gaps (all 3 types; a rejected question is regenerated once, then dropped). Poll `GET /jobs/{job_id}` → `result: {paper_id, title, total_questions, from_bank, generated, warnings}`. `TOPIC_NOT_FOUND` / `UNIT_NOT_FOUND` 404, `DAILY_LIMIT_REACHED` 429 |
+| POST | `/api/v1/papers/generate-by-units` | ✅ `{units: [1-10], num_questions, title?}` → paper (synchronous, MCQs); questions spread over the units, each labelled "Unit N: title" (`INVALID_UNITS`, `UNIT_NOT_FOUND`, `NO_QUESTIONS_GENERATED`, `DAILY_LIMIT_REACHED`) |
+| POST | `/api/v1/papers/{id}/submit` | ✅ `{answers: [{question_id, selected?: "A".."E", answer_text?}], explain}` → MCQ marks, topic scores, weak topics, explanations, plus `status` (`graded` \| `marking`), `written: [{question_id, status: queued \| unanswered \| not_markable, evaluation_id, job_id, max_marks}]`, `written_marks_total`, `pending_written`. Written answers are marked by the evaluation module (`GET /evaluations/{id}`); the attempt's score is completed when they are |
 | POST | `/api/v1/attempts` | Start an attempt |
 | GET | `/api/v1/attempts/{id}` | Attempt with answers |
 
@@ -347,7 +347,7 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | POST | `/api/v1/groups/{id}/join` | ✅ Join a group (safe to repeat) |
 | DELETE | `/api/v1/groups/{id}/join` | ✅ Leave a group (safe to repeat) |
 | GET | `/api/v1/groups/{id}/posts` | ✅ Feed of a group (`?sort=new\|top`, paged) |
-| POST | `/api/v1/groups/{id}/posts` | ✅ Create a post (members; published straight away for now; AI moderation later) |
+| POST | `/api/v1/groups/{id}/posts` | ✅ Create a post (members; AI-moderated first; held as `pending` when the AI is down) |
 | GET | `/api/v1/posts/{id}` | ✅ Post with its replies |
 | PATCH / DELETE | `/api/v1/posts/{id}` | ✅ Edit my post / delete my post (admins can delete any) |
 | POST | `/api/v1/posts/{id}/replies` | ✅ Reply (members of the post's group) |
@@ -357,6 +357,17 @@ style, width, height, is_ai_generated, is_verified, created_at`. `image_url` loa
 | POST | `/api/v1/votes` | ✅ `{post_id \| reply_id, value: 1 \| -1 \| 0}` → my vote + new score (members; not my own) |
 | POST | `/api/v1/posts/{id}/report` | ✅ `{reason, details?}` → 201 (`ALREADY_REPORTED` 409; hidden after 3 reporters) |
 | POST | `/api/v1/replies/{id}/report` | ✅ Same, for a reply |
+
+## notifications — Mogith
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/notifications?limit=50&unread_only=false` | ✅ `{items: [{id, type, event, title, body, created_at, read, ai_generated, data}], unread_count}`, newest first. `type` = the app's kind (reminder, recommendation, community, achievement, streak, other); `event` = job_done, plan_ready, community_reply, system... |
+| PATCH | `/api/v1/notifications/{id}` | ✅ `{read: true \| false}` → the notification (`NOTIFICATION_NOT_FOUND` 404) |
+| POST | `/api/v1/notifications/read-all` | ✅ → `{updated}` |
+
+Created for: a finished (or failed) student background job (summary, notes, visual, answer marking), a new
+weekly study plan, and an approved reply (or the AI answer) to the student's post.
 
 ## jobs — shared
 
@@ -478,6 +489,7 @@ Admins' own activity is never counted. Day labels use Sri Lanka dates.
 | Method | Path | Description |
 |---|---|---|
 | PUT | `/api/v1/admin/options/{option_id}/misconception` | ✅ `{misconception: "..." \| null}` → `{option_id, question_id, question_code, label, text, is_correct, misconception}`. null / "" removes the link; the same text is stored once per concept in `misconceptions` and reused |
+| POST | `/api/v1/admin/questions/{id}/misconception-suggestions` | ✅ 202 `{job_id, question_id}`: a MAP_MISCONCEPTIONS job. Poll `GET /jobs/{job_id}`; `result.suggestions` = `[{option_id, label, option_text, current_misconception, suggested_misconception, misconception_id, is_new, similarity}]`, one per wrong option. **Suggestions only**: the admin confirms each with the PUT above. `NOT_AN_MCQ` / `NO_WRONG_OPTIONS` 422 |
 
 ### Admin: knowledge base / model answers (`knowledge_admin.py`, placeholder screen in the app)
 
@@ -500,7 +512,7 @@ status, points: [{id, text, marks, keywords (A-Z)}], updated_at}`. Keywords are 
 
 Poll `GET /api/v1/jobs/{job_id}` for the job. Note: the ai_service reads the file from its own disk, so ingestion
 works in dev (files under `LOCAL_STORAGE_DIR`); with `STORAGE_BUCKET` set, downloading the file in the ai_service is
-still a TODO (`ai_service/rag/ingestion/pipeline.py`). The older placeholder routes `/admin/rag/documents` still exist.
+still a TODO (`ai_service/rag/ingestion/pipeline.py`).
 
 
 ## Error codes (for the app's `ErrorMessages`)
@@ -515,6 +527,9 @@ Failed AI jobs return `status: "failed"` with `error` (a sentence) and `error_co
 | `ALREADY_REPORTED` | 409 | visuals | my report of this visual is still pending |
 | `VISUAL_LIMIT_REACHED` | 429 | visuals | daily visual limit reached; `retry_after` (seconds) + `Retry-After` header |
 | `JOB_NOT_FOUND` | 404 | jobs | unknown job, or another student's job |
+| `PAPER_NOT_FOUND` | 404 | exams | unknown paper, an unapproved past paper, or another student's model paper |
+| `DAILY_LIMIT_REACHED` | 429 | exams, evaluation | exams: `PAPERS_DAILY_LIMIT` papers generated in 24 h; evaluation: answers checked in 24 h |
+| `NO_QUESTIONS_GENERATED` | 502 / job `error_code` | exams | the AI could not make any question for the paper (no syllabus content) |
 | `NOT_BIOLOGY` | job `error_code` | visuals | "I can only draw Biology visuals." |
 | `AI_SERVICE_UNAVAILABLE` | 503 / job `error_code` | all AI features | the AI is busy or down; try again later |
 | `AI_DAILY_LIMIT` | 422 / job `error_code` | all AI features | today's free AI allowance (whole app) is used up; try tomorrow |

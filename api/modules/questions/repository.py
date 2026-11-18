@@ -14,6 +14,7 @@ from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import (
+    Attempt,
     MCQOption,
     Misconception,
     PaperQuestion,
@@ -355,6 +356,28 @@ async def get_option(session: AsyncSession, option_id: uuid.UUID) -> MCQOption |
     return await session.get(MCQOption, option_id)
 
 
+async def list_misconceptions(
+    session: AsyncSession, concept_id: uuid.UUID | None, limit: int = 100
+) -> list[Misconception]:
+    """The misconceptions of one concept (or the ones with no concept), by title."""
+    stmt = select(Misconception).where(
+        Misconception.concept_id == concept_id
+        if concept_id is not None
+        else Misconception.concept_id.is_(None)
+    )
+    result = await session.execute(stmt.order_by(Misconception.title).limit(limit))
+    return list(result.scalars())
+
+
+async def misconception_titles(session: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    result = await session.execute(
+        select(Misconception.id, Misconception.title).where(Misconception.id.in_(ids))
+    )
+    return {key: title for key, title in result.all()}
+
+
 async def misconception_title(
     session: AsyncSession, misconception_id: uuid.UUID | None
 ) -> str | None:
@@ -362,3 +385,61 @@ async def misconception_title(
         return None
     row = await session.get(Misconception, misconception_id)
     return row.title if row else None
+
+
+async def unseen_bank_question_ids(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    question_type: QuestionType,
+    difficulty: str,
+    unit_ids: list[uuid.UUID],
+    topic_ids: list[uuid.UUID],
+    exclude: set[uuid.UUID],
+    limit: int,
+) -> list[uuid.UUID]:
+    """Approved, current bank questions of one type + difficulty that this student has never
+    answered, in random order. Scope: the topics if given, else the units (by the question's
+    unit or its topic's unit). Outdated questions / topics / units are left out; MCQs need a
+    correct option."""
+    if limit <= 0 or not (unit_ids or topic_ids):
+        return []
+    answered = (
+        exists()
+        .where(Response.question_id == Question.id)
+        .where(Response.attempt_id == Attempt.id, Attempt.user_id == user_id)
+    )
+    stmt = (
+        select(Question.id)
+        .outerjoin(Topic, Topic.id == Question.topic_id)
+        .outerjoin(Unit, Unit.id == func.coalesce(Question.unit_id, Topic.unit_id))
+        .where(
+            Question.status == ContentStatus.APPROVED,
+            Question.is_outdated.is_(False),
+            Question.question_type == question_type,
+            Question.difficulty == difficulty,
+            or_(Topic.id.is_(None), Topic.is_outdated.is_(False)),
+            or_(Unit.id.is_(None), Unit.is_outdated.is_(False)),
+            ~answered,
+        )
+    )
+    if topic_ids:
+        stmt = stmt.where(Question.topic_id.in_(topic_ids))
+    else:
+        stmt = stmt.where(Unit.id.in_(unit_ids))
+    if exclude:
+        stmt = stmt.where(Question.id.not_in(list(exclude)))
+    if question_type == QuestionType.MCQ:
+        stmt = stmt.where(
+            exists().where(MCQOption.question_id == Question.id, MCQOption.is_correct.is_(True))
+        )
+    result = await session.execute(stmt.order_by(func.random()).limit(limit))
+    return list(result.scalars())
+
+
+async def stems(session: AsyncSession, ids: list[uuid.UUID]) -> list[str]:
+    if not ids:
+        return []
+    return list(
+        (await session.execute(select(Question.stem).where(Question.id.in_(ids)))).scalars()
+    )

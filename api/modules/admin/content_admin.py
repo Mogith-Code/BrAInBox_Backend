@@ -21,7 +21,6 @@ from fastapi import APIRouter, Body, Query, Request
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
 from api.modules.admin import service as admin_service
-from api.modules.admin.schemas import ModuleStatus
 from api.modules.content import service as content_service
 from api.modules.content.schemas import (
     ContentEditIn,
@@ -34,11 +33,6 @@ from shared.enums import ContentStatus
 router = APIRouter(prefix="/content", tags=["Admin: content"])
 
 ReviewBody = Annotated[ContentReviewIn | None, Body()]
-
-
-@router.get("/status", response_model=ModuleStatus, summary="Placeholder: admin area status")
-async def area_status(admin: CurrentUserDep) -> ModuleStatus:
-    return ModuleStatus(module="content_admin", status="todo")
 
 
 @router.get("", response_model=list[ContentItemOut], summary="Content library")

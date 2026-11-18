@@ -27,6 +27,8 @@ from api.modules.questions.schemas import (
     AdminQuestionPage,
     AdminQuestionRow,
     ExplainQuestionResponse,
+    MisconceptionSuggestion,
+    MisconceptionSuggestJobOut,
     ModuleStatus,
     OptionMisconceptionOut,
     PastPaperAnswerIn,
@@ -75,6 +77,36 @@ async def get_example_questions(
                 }
             )
     return examples
+
+
+async def pick_unseen_bank_questions(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    question_type: QuestionType,
+    difficulty: Difficulty | str,
+    unit_ids: list[uuid.UUID],
+    topic_ids: list[uuid.UUID],
+    limit: int,
+    exclude: set[uuid.UUID] | None = None,
+) -> list[uuid.UUID]:
+    """Up to `limit` approved, current bank questions this student has never answered (random
+    order), for a model paper blueprint (exams module)."""
+    return await repository.unseen_bank_question_ids(
+        session,
+        user_id,
+        question_type=question_type,
+        difficulty=str(getattr(difficulty, "value", difficulty)),
+        unit_ids=unit_ids,
+        topic_ids=topic_ids,
+        exclude=exclude or set(),
+        limit=limit,
+    )
+
+
+async def question_stems(session: AsyncSession, question_ids: list[uuid.UUID]) -> list[str]:
+    """The texts of these questions (for the AI's duplicate check)."""
+    return await repository.stems(session, question_ids)
 
 
 async def _visible_question(
@@ -698,3 +730,102 @@ async def admin_set_option_misconception(
         is_correct=option.is_correct,
         misconception=await repository.misconception_title(session, option.misconception_id),
     )
+
+
+# =========================================================================== AI misconception mapping
+# Admin asks the AI which misconception is behind each wrong option of ONE MCQ (MAP_MISCONCEPTIONS,
+# ai_service/pipelines/questions/mcq_mapping.py). The job only proposes: nothing is linked until
+# the admin confirms each option with PUT /admin/options/{option_id}/misconception.
+MAX_KNOWN_MISCONCEPTIONS = 100
+
+
+async def admin_suggest_misconceptions(
+    session: AsyncSession,
+    admin_id: uuid.UUID,
+    question_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    ai: AIClient | None = None,
+) -> MisconceptionSuggestJobOut:
+    """Queue a MAP_MISCONCEPTIONS job for one MCQ.
+
+    404 QUESTION_NOT_FOUND · 422 NOT_AN_MCQ · 422 NO_WRONG_OPTIONS."""
+    question = await repository.get_question(session, question_id)
+    if question is None:
+        raise _not_found(question_id)
+    if question.question_type != QuestionType.MCQ:
+        raise AppError(
+            "Misconceptions can only be suggested for MCQs", code="NOT_AN_MCQ", status_code=422
+        )
+    options = (await repository.options_with_misconceptions(session, [question.id]))[question.id]
+    if not any(not o.is_correct and o.text.strip() for o, _ in options):
+        raise AppError("Add the wrong options first", code="NO_WRONG_OPTIONS", status_code=422)
+    concept_id = await repository.main_concept(session, question.id)
+    known = await repository.list_misconceptions(session, concept_id, MAX_KNOWN_MISCONCEPTIONS)
+    payload = {
+        "question": {
+            "id": str(question.id),
+            "question": question.stem,
+            "options": [
+                {"label": o.label, "text": o.text, "is_correct": o.is_correct} for o, _ in options
+            ],
+        },
+        "misconceptions": [{"id": str(m.id), "title": m.title} for m in known],
+    }
+    job = await jobs.create_job(session, JobType.MAP_MISCONCEPTIONS, payload, requested_by=admin_id)
+    jobs.enqueue_job(job, background_tasks, ai)
+    return MisconceptionSuggestJobOut(job_id=job.id, question_id=question.id)
+
+
+def _uuid_or_none(value: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+async def on_misconceptions_suggested(session: AsyncSession, job: AIJob) -> None:
+    """MAP_MISCONCEPTIONS finished: add `suggestions` (one per wrong option, with the option id
+    and readable titles) to the job result, so the admin screen can show them and confirm each
+    one. Nothing is linked here."""
+    result = dict((job.result or {}).get("result") or {})
+    question_id = uuid.UUID(str(job.input["question"]["id"]))
+    options = {
+        o.label: (o, title)
+        for o, title in (await repository.options_with_misconceptions(session, [question_id]))[
+            question_id
+        ]
+    }
+    mappings = [m for m in result.get("mappings") or [] if isinstance(m, dict)]
+    known_titles = await repository.misconception_titles(
+        session, [i for m in mappings if (i := _uuid_or_none(m.get("misconception_id")))]
+    )
+    suggestions: list[dict[str, Any]] = []
+    for m in mappings:
+        row = options.get(str(m.get("option_label")))
+        if row is None or row[0].is_correct:  # option renamed / deleted since, or the right one
+            continue
+        option, current = row
+        known_id = _uuid_or_none(m.get("misconception_id"))
+        known_title = known_titles.get(known_id) if known_id else None
+        title = known_title or " ".join(str(m.get("new_misconception_title") or "").split())
+        if not title:
+            continue
+        suggestion = MisconceptionSuggestion(
+            option_id=option.id,
+            label=option.label,
+            option_text=option.text,
+            current_misconception=current,
+            suggested_misconception=title[:200],
+            misconception_id=known_id if known_title else None,
+            is_new=known_title is None,
+            similarity=m.get("similarity"),
+        )
+        suggestions.append(suggestion.model_dump(mode="json"))
+    suggestions.sort(key=lambda s: s["label"])
+    job.result = {
+        **(job.result or {}),
+        "result": {**result, "question_id": str(question_id), "suggestions": suggestions},
+    }
+
+
+jobs.register_job_handler(JobType.MAP_MISCONCEPTIONS, on_misconceptions_suggested)

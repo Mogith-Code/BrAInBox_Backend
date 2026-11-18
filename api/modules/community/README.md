@@ -45,8 +45,6 @@ posts live under their group (`/groups/{id}/posts`).
 | POST | `/api/v1/posts/{id}/report` | ✅ done | Report a post: `{reason, details?}`. Again while open → 409 `ALREADY_REPORTED`; my own → 400 `CANNOT_REPORT_OWN` |
 | POST | `/api/v1/replies/{id}/report` | ✅ done | Report a reply (same rules) |
 
-Placeholder: `GET /api/v1/community/status` → `{"module": "community", "status": "todo"}` (needs login).
-
 ### Groups
 
 - The groups come from `scripts/seed_dev.py`: a default **General** group plus one per unit (`unit-1` ... `unit-10`).
@@ -98,14 +96,16 @@ Placeholder: `GET /api/v1/community/status` → `{"module": "community", "status
 
 ### Moderation (decision)
 
-**For now, new posts are published straight away** (`moderation_status = approved`) and students can report
-bad ones; reports go to `content_reports`, the admin moderation queue. This is one setting,
-`NEW_CONTENT_STATUS` in `service.py` (posts and replies), so it can be switched later. Edits don't change the
-status.
+Every new post and reply is classified by the AI moderator (`POST /sync/moderate`) before it is saved:
+`ok` -> `approved` (published); `off_topic` / `inappropriate` -> `flagged` (hidden from others until an admin
+decides). **When the AI service can't be reached the content is held as `pending`** with
+`moderation_reason = "Held: AI moderation was unavailable"`: only its author sees it, and a held reply does not
+count in `reply_count`. Our users are minors, so nothing unchecked is published (`NEW_CONTENT_STATUS` in
+`service.py`). Students can still report approved content (`content_reports`, the admin moderation queue).
+Edits don't change the status.
 
-Later (AI step): a new post starts as `pending`, the `MODERATE_POST` job checks it (bullying, hate, sexual
-content, personal data, spam, cheating), then marks it `approved` or `flagged`. Flagged posts are hidden from
-others until an admin decides. If the AI is unavailable the post stays `pending` and is retried.
+Open: held content is not yet re-checked or shown in the admin queue, so it stays pending until someone
+releases it.
 
 ## Files
 

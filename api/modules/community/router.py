@@ -33,7 +33,6 @@ from api.core.security import CurrentUserDep
 from api.modules.community import service
 from api.modules.community.repository import PostSort
 from api.modules.community.schemas import (
-    ModuleStatus,
     PostCreate,
     PostDetailOut,
     PostOut,
@@ -51,12 +50,6 @@ from api.modules.community.schemas import (
 )
 
 router = APIRouter(tags=["Community"])
-
-
-@router.get("/community/status", response_model=ModuleStatus, summary="Placeholder: module status")
-async def module_status(user: CurrentUserDep) -> ModuleStatus:
-    """Placeholder route. Needs a logged-in user."""
-    return await service.get_status()
 
 
 # ---------------------------------------------------------------- groups

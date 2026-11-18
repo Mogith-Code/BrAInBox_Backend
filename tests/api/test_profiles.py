@@ -17,11 +17,6 @@ FULL_PROFILE = {
 }
 
 
-async def test_profiles_status_requires_login(anon_client):
-    response = await anon_client.get("/api/v1/profiles/status")
-    assert response.status_code == 401
-
-
 async def test_options(client):
     response = await client.get("/api/v1/profile/options")
     assert response.status_code == 200
