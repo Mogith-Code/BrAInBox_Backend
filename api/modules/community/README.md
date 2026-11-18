@@ -107,6 +107,12 @@ Edits don't change the status.
 Open: held content is not yet re-checked or shown in the admin queue, so it stays pending until someone
 releases it.
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` hard-deletes the student's posts (with the replies under them), replies, votes, reports and group memberships, takes their votes off other posts' scores and their replies off other posts' reply counts / accepted answer, and returns the post image paths. `export_user_data` gives `{posts, replies}`.
+
 ## Files
 
 | File | What goes in it |
