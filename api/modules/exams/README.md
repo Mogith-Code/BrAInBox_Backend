@@ -93,6 +93,12 @@ listener) stores each answer's marks on its response and adds them to the attemp
 Seed example questions: `python scripts/import_question_bank.py`; past papers: `python scripts/import_past_papers.py`
 (see `data/questions/README.md`).
 
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes all of the student's attempts (quiz, diagnostic, exam), their answers, and the student's personal papers (`quiz`, `diagnostic`, `ai_generated` with `created_by` = the student, unless another student has an attempt on it). `export_user_data` gives `{quiz_attempts, exam_attempts}` with the answers.
+
 ## Files
 
 | File | What goes in it |
