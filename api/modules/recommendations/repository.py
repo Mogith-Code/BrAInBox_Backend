@@ -173,3 +173,43 @@ async def get_plan_item(
         .where(PlanItem.id == item_id, StudyPlan.user_id == user_id)
     )
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------- account delete / export
+
+
+async def list_user_recommendations(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[Recommendation]:
+    result = await session.execute(
+        select(Recommendation)
+        .where(Recommendation.user_id == user_id)
+        .order_by(Recommendation.created_at)
+    )
+    return list(result.scalars())
+
+
+async def list_user_plans(session: AsyncSession, user_id: uuid.UUID) -> list[StudyPlan]:
+    result = await session.execute(
+        select(StudyPlan).where(StudyPlan.user_id == user_id).order_by(StudyPlan.created_at)
+    )
+    return list(result.scalars())
+
+
+async def list_user_daily_items(session: AsyncSession, user_id: uuid.UUID) -> list[DailyPlanItem]:
+    result = await session.execute(
+        select(DailyPlanItem)
+        .where(DailyPlanItem.user_id == user_id)
+        .order_by(DailyPlanItem.plan_date, DailyPlanItem.position)
+    )
+    return list(result.scalars())
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's study plans + items, daily plan items and recommendations.
+    No commit. Plan items first (they point to recommendations)."""
+    own_plans = select(StudyPlan.id).where(StudyPlan.user_id == user_id)
+    await session.execute(delete(PlanItem).where(PlanItem.study_plan_id.in_(own_plans)))
+    await session.execute(delete(StudyPlan).where(StudyPlan.user_id == user_id))
+    await session.execute(delete(DailyPlanItem).where(DailyPlanItem.user_id == user_id))
+    await session.execute(delete(Recommendation).where(Recommendation.user_id == user_id))
