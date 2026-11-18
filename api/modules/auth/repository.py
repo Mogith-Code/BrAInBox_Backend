@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Date, and_, case, cast, func, or_, select, update
+from sqlalchemy import Date, and_, case, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import EmailCode, PasswordResetToken, StudentProfile, StudyActivity, User
@@ -65,6 +65,17 @@ async def close_open_codes(session: AsyncSession, email: str, purpose: str, now:
 
 
 # ---------------------------------------------------------------- reset tokens
+async def delete_user(session: AsyncSession, user: User) -> None:
+    """Delete the users row with its codes and reset tokens (also codes sent to the email
+    before the account existed). No commit. Other modules delete their rows first."""
+    await session.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+    is_theirs = EmailCode.user_id == user.id
+    if user.email:
+        is_theirs = or_(is_theirs, EmailCode.email == user.email.lower())
+    await session.execute(delete(EmailCode).where(is_theirs))
+    await session.execute(delete(User).where(User.id == user.id))
+
+
 async def get_reset_token(session: AsyncSession, token_hash: str) -> PasswordResetToken | None:
     result = await session.execute(
         select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
