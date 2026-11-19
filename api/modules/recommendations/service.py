@@ -872,3 +872,77 @@ async def reorder_plan(
         item.order_index = order
     await session.commit()
     return await _plan_out(session, user.id, await repository.active_plan(session, user.id))
+
+
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> dict[str, Any]:
+    """{"recommendations": [...], "study_plan": {"plans": [...], "daily_items": [...]}}."""
+    recommendations = [
+        {
+            "id": r.id,
+            "action_type": r.action_type,
+            "topic_id": r.topic_id,
+            "concept_id": r.concept_id,
+            "resource_id": r.resource_id,
+            "target_ref": r.target_ref,
+            "reason": r.reason,
+            "priority": r.priority,
+            "status": r.status,
+            "created_at": r.created_at,
+            "completed_at": r.completed_at,
+        }
+        for r in await repository.list_user_recommendations(session, user_id)
+    ]
+    plans = []
+    for plan in await repository.list_user_plans(session, user_id):
+        items = await repository.plan_items(session, plan.id)
+        plans.append(
+            {
+                "id": plan.id,
+                "title": plan.title,
+                "start_date": plan.start_date,
+                "end_date": plan.end_date,
+                "status": plan.status,
+                "generated_from": plan.generated_from,
+                "created_at": plan.created_at,
+                "items": [
+                    {
+                        "id": i.id,
+                        "title": i.title,
+                        "action_type": i.action_type,
+                        "topic_id": i.topic_id,
+                        "due_date": i.due_date,
+                        "is_done": i.is_done,
+                        "done_at": i.done_at,
+                        "estimated_minutes": i.estimated_minutes,
+                    }
+                    for i in items
+                ],
+            }
+        )
+    daily_items = [
+        {
+            "plan_date": d.plan_date,
+            "position": d.position,
+            "kind": d.kind,
+            "title": d.title,
+            "minutes": d.minutes,
+            "topic_id": d.topic_id,
+            "done": d.done,
+            "done_at": d.done_at,
+        }
+        for d in await repository.list_user_daily_items(session, user_id)
+    ]
+    return {
+        "recommendations": recommendations,
+        "study_plan": {"plans": plans, "daily_items": daily_items},
+    }
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete recommendations, study plans + items and daily plan items (no commit). No files."""
+    await repository.delete_user_rows(session, user_id)
+    return []

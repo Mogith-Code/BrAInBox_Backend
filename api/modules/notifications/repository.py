@@ -1,16 +1,16 @@
 """All SQL queries for the notifications module. Owner: Mogith.
 
-Tables: notifications
+Tables: notifications, device_tokens (push tokens)
 Only this module's `service.py` may import this file.
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import Notification
+from shared.db.models import DeviceToken, Notification
 
 
 def add(session: AsyncSession, notification: Notification) -> None:
@@ -52,3 +52,20 @@ async def mark_all_read(session: AsyncSession, user_id: uuid.UUID, now: datetime
         .returning(Notification.id)
     )
     return len(result.all())
+
+
+# ---------------------------------------------------------------- account delete / export
+
+
+async def count_devices(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """How many phones of the student get push notifications."""
+    result = await session.execute(
+        select(func.count()).select_from(DeviceToken).where(DeviceToken.user_id == user_id)
+    )
+    return result.scalar_one()
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's notifications and push device tokens. No commit."""
+    await session.execute(delete(Notification).where(Notification.user_id == user_id))
+    await session.execute(delete(DeviceToken).where(DeviceToken.user_id == user_id))

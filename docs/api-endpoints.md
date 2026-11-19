@@ -20,7 +20,8 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | POST | `/api/v1/auth/register` | token | ✅ Create / update my users row `{full_name, phone?, consent}` → `UserOut` (201 new, 200 existing) |
 | GET | `/api/v1/auth/me` | token | ✅ My account + onboarding flags (`USER_NOT_FOUND` before register) |
 | PATCH | `/api/v1/auth/me` | token | ✅ Change `full_name` / `phone` |
-| DELETE | `/api/v1/auth/me` | token | ✅ Delete account (DB + Firebase) → 204 |
+| GET | `/api/v1/auth/me/export` | token | ✅ Download a copy of all my data → `DataExportOut` JSON (the app saves it as `.json`): `{exported_at, account, profile, settings, privacy, quiz_attempts, exam_attempts, evaluations, mistakes, recommendations, study_plan, notes, uploads, community: {posts, replies}}`. Only the caller's data; files as Storage paths; no uid / codes / tokens. Works for suspended accounts (`USER_NOT_FOUND` before register) |
+| DELETE | `/api/v1/auth/me` | token | ✅ Delete account → 204: **all** my rows in every module (attempts + answers, evaluations, plan, recommendations, mistakes, notes, uploads, posts / replies / votes, notifications, AI jobs, profile), my Storage files (answer photos, uploads, post images), then the Firebase login. Firebase fails → `FIREBASE_ERROR` 503 and nothing is deleted |
 | POST | `/api/v1/auth/email-code/send` | token | ✅ Email a verification code (`ALREADY_VERIFIED`, `RESEND_TOO_SOON` 429) |
 | POST | `/api/v1/auth/email-code/verify` | token | ✅ `{code}` → `UserOut` with `email_verified: true` |
 | POST | `/api/v1/auth/password-reset/send` | none | ✅ `{email}` → always `{sent: true, ...}` |

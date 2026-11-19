@@ -1,15 +1,15 @@
 """All SQL queries for the profiles module. Owner: Mogith.
 
-Tables: student_profiles
+Tables: student_profiles, user_settings
 Only this module's `service.py` may import this file.
 """
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import StudentProfile
+from shared.db.models import StudentProfile, UserSettings
 
 
 async def count_student_profiles(session: AsyncSession) -> int:
@@ -38,3 +38,16 @@ async def most_common_exam_year(session: AsyncSession, from_year: int) -> int | 
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------- account delete / export
+
+
+async def get_settings_row(session: AsyncSession, user_id: uuid.UUID) -> UserSettings | None:
+    return await session.get(UserSettings, user_id)
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's profile and app settings. No commit."""
+    await session.execute(delete(StudentProfile).where(StudentProfile.user_id == user_id))
+    await session.execute(delete(UserSettings).where(UserSettings.user_id == user_id))

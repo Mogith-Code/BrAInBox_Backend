@@ -5,7 +5,8 @@
     POST   /api/v1/auth/register                 token   create/update my users row (201 new / 200)
     GET    /api/v1/auth/me                       token   my account + onboarding flags
     PATCH  /api/v1/auth/me                       token   change full_name / phone
-    DELETE /api/v1/auth/me                       token   delete my account (DB + Firebase)
+    GET    /api/v1/auth/me/export                token   download all my data as JSON
+    DELETE /api/v1/auth/me                       token   delete my account (all data + Firebase)
     POST   /api/v1/auth/email-code/send          token   email a 6-digit verification code
     POST   /api/v1/auth/email-code/verify        token   check it -> email_verified = true
     POST   /api/v1/auth/password-reset/send      none    email a 6-digit reset code (always 200)
@@ -15,6 +16,8 @@
 Rule: routers only validate input, check the role and call `service`. No SQL here.
 """
 
+from typing import Any
+
 from fastapi import APIRouter, Response, status
 
 from api.core.database import SessionDep
@@ -23,6 +26,7 @@ from api.core.security import CurrentUserDep, FirebaseClaimsDep
 from api.modules.auth import service
 from api.modules.auth.schemas import (
     CodeSentOut,
+    DataExportOut,
     PasswordResetCompleteRequest,
     PasswordResetSendRequest,
     PasswordResetVerifyRequest,
@@ -65,6 +69,15 @@ async def update_me(
     req: UpdateMeRequest, claims: FirebaseClaimsDep, session: SessionDep
 ) -> UserOut:
     return await service.update_me(session, claims, req)
+
+
+@router.get(
+    "/auth/me/export",
+    response_model=DataExportOut,
+    summary="Download a copy of all my data (JSON)",
+)
+async def export_me(claims: FirebaseClaimsDep, session: SessionDep) -> dict[str, Any]:
+    return await service.export_me(session, claims)
 
 
 @router.delete(

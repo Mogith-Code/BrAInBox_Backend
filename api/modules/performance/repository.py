@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -1039,3 +1039,29 @@ async def concept_rows(
         ConceptRow(**{**row._asdict(), "exam_weight": float(row.exam_weight or 1.0)})
         for row in (await session.execute(stmt)).all()
     ]
+
+
+# ---------------------------------------------------------------- account delete / export
+# Every table of this module with a user_id: the student's progress and mistakes.
+USER_TABLES = (
+    Mistake,
+    ConceptMastery,
+    UnitMastery,
+    MasterySnapshot,
+    StudyActivity,
+    UserTopicProgress,
+)
+
+
+async def list_user_mistakes(session: AsyncSession, user_id: uuid.UUID) -> list[Mistake]:
+    """Every row of the student's mistakes journal, oldest first (for the data export)."""
+    rows = await session.scalars(
+        select(Mistake).where(Mistake.user_id == user_id).order_by(Mistake.created_at)
+    )
+    return list(rows)
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's mistakes, mastery, snapshots, activity and topic progress. No commit."""
+    for model in USER_TABLES:
+        await session.execute(delete(model).where(model.user_id == user_id))

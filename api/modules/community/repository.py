@@ -489,3 +489,58 @@ async def reports_per_day(session: AsyncSession, since: datetime) -> dict[date, 
         select(day, func.count()).where(ContentReport.created_at >= since).group_by(day)
     )
     return {d: int(n) for d, n in result.all()}
+
+
+# =========================================================================== account delete / export
+# Used by service.delete_user_data / export_user_data (DELETE /auth/me, GET /auth/me/export).
+
+
+async def list_user_posts(session: AsyncSession, user_id: uuid.UUID) -> list[Post]:
+    """Every post the student wrote (also soft-deleted ones), oldest first."""
+    result = await session.execute(
+        select(Post).where(Post.author_id == user_id).order_by(Post.created_at)
+    )
+    return list(result.scalars())
+
+
+async def list_user_replies(session: AsyncSession, user_id: uuid.UUID) -> list[Reply]:
+    """Every reply the student wrote (also soft-deleted ones), oldest first."""
+    result = await session.execute(
+        select(Reply).where(Reply.author_id == user_id).order_by(Reply.created_at)
+    )
+    return list(result.scalars())
+
+
+async def list_user_votes(session: AsyncSession, user_id: uuid.UUID) -> list[Vote]:
+    result = await session.execute(select(Vote).where(Vote.user_id == user_id))
+    return list(result.scalars())
+
+
+async def reply_ids_of_posts(session: AsyncSession, post_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+    """Ids of every reply under these posts (they are deleted together with the posts)."""
+    if not post_ids:
+        return []
+    result = await session.execute(select(Reply.id).where(Reply.post_id.in_(post_ids)))
+    return list(result.scalars())
+
+
+async def delete_reports_about(
+    session: AsyncSession, target_type: str, target_ids: list[uuid.UUID]
+) -> None:
+    """Delete reports of posts / replies that are being deleted (target_id has no FK)."""
+    if target_ids:
+        await session.execute(
+            delete(ContentReport).where(
+                ContentReport.target_type == target_type, ContentReport.target_id.in_(target_ids)
+            )
+        )
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Hard-delete the student's votes, replies, posts, reports and group memberships.
+    No commit. Deleting a post also deletes the replies and votes under it (FK cascade)."""
+    await session.execute(delete(Vote).where(Vote.user_id == user_id))
+    await session.execute(delete(Reply).where(Reply.author_id == user_id))
+    await session.execute(delete(Post).where(Post.author_id == user_id))
+    await session.execute(delete(ContentReport).where(ContentReport.reporter_id == user_id))
+    await session.execute(delete(GroupMember).where(GroupMember.user_id == user_id))

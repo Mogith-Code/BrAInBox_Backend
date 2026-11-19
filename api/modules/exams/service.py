@@ -72,6 +72,7 @@ from api.modules.questions import service as questions_service
 from api.modules.syllabus import service as syllabus_service
 from shared.db.models import AIJob, Paper
 from shared.enums import (
+    AttemptKind,
     ContentStatus,
     Difficulty,
     JobStatus,
@@ -849,6 +850,60 @@ async def on_paper_built(session: AsyncSession, job: AIJob) -> None:
             "warnings": warnings,
         },
     }
+
+
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+def _attempt_export(attempt: Any, answers: list[Any]) -> dict[str, Any]:
+    return {
+        "id": attempt.id,
+        "paper_id": attempt.paper_id,
+        "kind": attempt.kind,
+        "mode": attempt.mode,
+        "status": attempt.status,
+        "unit_id": attempt.unit_id,
+        "topic_id": attempt.topic_id,
+        "started_at": attempt.started_at,
+        "submitted_at": attempt.submitted_at,
+        "score": attempt.score,
+        "max_score": attempt.max_score,
+        "percentage": attempt.percentage,
+        "feedback": attempt.feedback,
+        "answers": [
+            {
+                "question_id": r.question_id,
+                "selected_option_id": r.selected_option_id,
+                "answer_text": r.answer_text,
+                "image_paths": list(r.image_paths or []),  # Storage paths, not the photos
+                "is_correct": r.is_correct,
+                "marks_awarded": r.marks_awarded,
+                "time_spent_seconds": r.time_spent_seconds,
+                "answered_at": r.answered_at,
+            }
+            for r in answers
+        ],
+    }
+
+
+async def export_user_data(
+    session: AsyncSession, user_id: uuid.UUID
+) -> dict[str, list[dict[str, Any]]]:
+    """{"quiz_attempts": [...], "exam_attempts": [...]} with the answers of each attempt.
+    Quizzes, practice and the diagnostic are "quiz_attempts"; exams are "exam_attempts"."""
+    out: dict[str, list[dict[str, Any]]] = {"quiz_attempts": [], "exam_attempts": []}
+    for attempt, answers in await repository.list_user_attempts(session, user_id):
+        key = "exam_attempts" if attempt.kind == AttemptKind.EXAM else "quiz_attempts"
+        out[key].append(_attempt_export(attempt, answers))
+    return out
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's quiz / exam attempts, answers and personal papers (no commit).
+    Answer photos are in the evaluation module's folder, so no Storage paths here."""
+    await repository.delete_user_attempts(session, user_id)
+    return []
 
 
 jobs.register_job_handler(JobType.BUILD_PAPER, on_paper_built)

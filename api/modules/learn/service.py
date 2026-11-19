@@ -890,3 +890,32 @@ async def delete_upload(session: AsyncSession, user: CurrentUser, upload_id: uui
     await session.delete(upload)  # summaries cascade
     await session.commit()
     await run_in_threadpool(_delete_upload_file, path)
+
+
+# =========================================================================== account delete
+# Called by the auth module (DELETE /auth/me). The upload rows belong to the content module.
+
+
+def upload_files_folder(user_id: uuid.UUID) -> str | None:
+    """Storage folder with the student's Learn tab upload files (see _write_upload).
+
+    With a bucket: uploads/learn/<user_id>/. Dev without a bucket the files are in
+    UPLOAD_DIR/<user_id>/, given relative to LOCAL_STORAGE_DIR (None if UPLOAD_DIR is outside it).
+    """
+    if not storage.uses_local_files():
+        return f"{STORAGE_PREFIX}{user_id}/"
+    settings = get_settings()
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    storage_root = Path(settings.LOCAL_STORAGE_DIR).resolve()
+    if not upload_root.is_relative_to(storage_root):
+        logger.warning("UPLOAD_DIR is outside LOCAL_STORAGE_DIR: Learn files of %s kept", user_id)
+        return None
+    return f"{upload_root.relative_to(storage_root).as_posix()}/{user_id}/"
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's topic bookmarks (no commit). Returns the Learn upload folder to
+    delete from Storage after the commit."""
+    await repository.delete_user_bookmarks(session, user_id)
+    folder = upload_files_folder(user_id)
+    return [folder] if folder else []

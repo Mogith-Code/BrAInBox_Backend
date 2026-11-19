@@ -41,3 +41,9 @@ Validation:
 | `get_study_settings(user_id)` | home → days to exam, today's plan |
 
 Tests: `tests/api/test_profiles.py`.
+
+## Account delete / data export (called by the auth module)
+
+Used by `DELETE /auth/me` and `GET /auth/me/export` (see `api/modules/auth/README.md`). Nothing is committed here; auth commits once for all modules.
+
+`delete_user_data` deletes the profile and `user_settings`. `export_user_data` gives `{profile, settings}` (settings show the defaults when never changed).

@@ -837,3 +837,76 @@ async def reports_per_day(session: AsyncSession, since: datetime) -> dict[date, 
     for day, n in (await visuals_service.reports_per_day(session, since)).items():
         counts[day] = counts.get(day, 0) + n
     return counts
+
+
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> dict[str, list[dict]]:
+    """{"posts": [...], "replies": [...]} the student wrote. Images as Storage paths."""
+    posts = [
+        {
+            "id": p.id,
+            "group_id": p.group_id,
+            "title": p.title,
+            "body": p.body,
+            "image_paths": list(p.image_paths or []),
+            "tags": list(p.tags or []),
+            "is_question": p.is_question,
+            "moderation_status": p.moderation_status,
+            "score": p.score,
+            "reply_count": p.reply_count,
+            "created_at": p.created_at,
+            "deleted_at": p.deleted_at,
+        }
+        for p in await repository.list_user_posts(session, user_id)
+    ]
+    replies = [
+        {
+            "id": r.id,
+            "post_id": r.post_id,
+            "body": r.body,
+            "is_accepted": r.is_accepted,
+            "moderation_status": r.moderation_status,
+            "score": r.score,
+            "created_at": r.created_at,
+            "deleted_at": r.deleted_at,
+        }
+        for r in await repository.list_user_replies(session, user_id)
+    ]
+    return {"posts": posts, "replies": replies}
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Hard-delete everything the student did in the community (no commit):
+    votes, replies, posts, reports and group memberships.
+
+    Other students' posts stay correct: the student's votes are taken off their scores, and
+    the student's replies are taken off their reply counts / accepted answer. Replies other
+    students wrote UNDER the student's own posts go with those posts (the thread is gone).
+    Returns the Storage paths of the student's post images, to delete after the commit.
+    """
+    for vote in await repository.list_user_votes(session, user_id):
+        model: repository.Target = Post if vote.post_id else Reply
+        await repository.add_score(session, model, vote.post_id or vote.reply_id, -vote.value)  # type: ignore[arg-type]
+
+    posts = await repository.list_user_posts(session, user_id)
+    own_post_ids = [p.id for p in posts]
+    replies = await repository.list_user_replies(session, user_id)
+    for reply in replies:
+        if reply.post_id in own_post_ids:
+            continue  # the whole post is deleted anyway
+        if reply.is_accepted:
+            await repository.set_accepted_reply(session, reply.post_id, None)
+        if reply.moderation_status == ModerationStatus.APPROVED and reply.deleted_at is None:
+            await repository.change_reply_count(session, reply.post_id, -1)
+
+    # Reports have no FK to their target, so remove the ones about deleted posts / replies.
+    deleted_reply_ids = [r.id for r in replies]
+    deleted_reply_ids += await repository.reply_ids_of_posts(session, own_post_ids)
+    await repository.delete_reports_about(session, "post", own_post_ids)
+    await repository.delete_reports_about(session, "reply", deleted_reply_ids)
+
+    await repository.delete_user_rows(session, user_id)
+    return [path for p in posts for path in (p.image_paths or [])]

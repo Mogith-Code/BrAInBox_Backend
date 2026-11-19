@@ -66,7 +66,8 @@ class GroupMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class Post(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A question / discussion post in a group. Kept (author = NULL) if the author leaves."""
+    """A question / discussion post in a group. Deleted with the author's account
+    (DELETE /auth/me, community service); the SET NULL below is only a fallback."""
 
     __tablename__ = "posts"
     __table_args__ = (

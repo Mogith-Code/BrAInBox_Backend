@@ -135,7 +135,7 @@ Migrations, in order: `0001_initial_schema` -> `0002_onboarding_auth` -> `0003_f
 |---|---|
 | `community_groups` | "General" (default) + one group per unit (`slug`). |
 | `group_members` | Membership + role. |
-| `posts` | Questions / discussions; kept with `author_id = NULL` if the author leaves. `accepted_reply_id` is a circular FK to `replies`. |
+| `posts` | Questions / discussions. Deleted (with their replies) when the author deletes their account (`DELETE /auth/me`); `author_id` is `SET NULL` only as a fallback. `accepted_reply_id` is a circular FK to `replies`. |
 | `replies` | Answers (students or AI, with RAG `sources`). |
 | `votes` | +1 / -1 on exactly one post **or** reply (CHECKs). |
 | `content_reports` | Reports on posts / replies - polymorphic `target_type` + `target_id`. |

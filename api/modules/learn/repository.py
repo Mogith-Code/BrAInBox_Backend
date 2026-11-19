@@ -395,3 +395,11 @@ async def get_learn_job(session: AsyncSession, job_id: uuid.UUID) -> AIJob | Non
         select(AIJob).where(AIJob.id == job_id, AIJob.job_type.in_(LEARN_JOB_TYPES))
     )
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------- account delete
+
+
+async def delete_user_bookmarks(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's topic bookmarks. No commit."""
+    await session.execute(delete(TopicBookmark).where(TopicBookmark.user_id == user_id))

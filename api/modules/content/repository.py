@@ -8,10 +8,19 @@ Only this module's `service.py` may import this file.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import AIJob, Note, SourceDocument, Summary, Topic, Unit, Upload
+from shared.db.models import (
+    AIJob,
+    LibraryItem,
+    Note,
+    SourceDocument,
+    Summary,
+    Topic,
+    Unit,
+    Upload,
+)
 from shared.enums import ContentStatus, JobStatus, JobType
 
 
@@ -210,3 +219,43 @@ async def get_source_document(
 async def add_row(session: AsyncSession, row: object) -> None:
     session.add(row)
     await session.flush()
+
+
+# ---------------------------------------------------------------- account delete / export
+
+
+async def list_user_notes(session: AsyncSession, user_id: uuid.UUID) -> list[Note]:
+    """The student's own notes (Learn tab), not the shared official ones."""
+    result = await session.execute(
+        select(Note).where(Note.user_id == user_id).order_by(Note.created_at)
+    )
+    return list(result.scalars())
+
+
+async def list_user_uploads(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Upload, list[Summary]]]:
+    """Every upload of the student (oldest first) with its summaries."""
+    uploads = list(
+        await session.scalars(
+            select(Upload).where(Upload.user_id == user_id).order_by(Upload.created_at)
+        )
+    )
+    summaries: dict[uuid.UUID, list[Summary]] = {u.id: [] for u in uploads}
+    if uploads:
+        rows = await session.scalars(
+            select(Summary)
+            .where(Summary.upload_id.in_(list(summaries)))
+            .order_by(Summary.created_at)
+        )
+        for summary in rows:
+            summaries[summary.upload_id].append(summary)  # type: ignore[index]
+    return [(u, summaries[u.id]) for u in uploads]
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the student's summaries, uploads, own notes and library items. No commit."""
+    await session.execute(delete(Summary).where(Summary.user_id == user_id))
+    await session.execute(delete(Upload).where(Upload.user_id == user_id))
+    await session.execute(delete(Note).where(Note.user_id == user_id))
+    await session.execute(delete(LibraryItem).where(LibraryItem.user_id == user_id))

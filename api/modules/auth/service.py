@@ -24,9 +24,10 @@ import secrets
 from datetime import date, timedelta
 from typing import Any
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import clock, firebase_users
+from api.core import clock, firebase_users, storage
 from api.core.config import get_settings
 from api.core.email import EmailSender, build_code_email
 from api.core.errors import (
@@ -49,14 +50,39 @@ from api.modules.auth.schemas import (
     UpdateMeRequest,
     UserOut,
 )
+from api.modules.community import service as community_service
+from api.modules.content import service as content_service
+from api.modules.evaluation import service as evaluation_service
+from api.modules.exams import service as exams_service
+from api.modules.jobs import service as jobs_service
+from api.modules.learn import service as learn_service
+from api.modules.notifications import service as notifications_service
 from api.modules.performance import service as performance_service
 from api.modules.profiles import service as profiles_service
 from api.modules.quizzes import service as quizzes_service
+from api.modules.recommendations import service as recommendations_service
 from shared.db.models import EmailCode, PasswordResetToken, User
 
 logger = logging.getLogger(__name__)
 
 MODULE_NAME = "auth"
+
+# DELETE /auth/me asks each of these modules to delete the student's rows, in this order.
+# Each has `delete_user_data(session, user_id) -> list[storage paths]` and does not commit.
+# Tables not listed here (e.g. question / visual reports, bookmarks are in learn) go with
+# the users row through ON DELETE CASCADE.
+USER_DATA_SERVICES = (
+    evaluation_service,  # evaluations + answer photos
+    exams_service,  # quiz / exam / diagnostic attempts, answers, personal papers
+    recommendations_service,  # study plan + items, daily plan, recommendations
+    performance_service,  # mistakes journal, mastery, activity
+    content_service,  # uploads + summaries, own notes, library
+    learn_service,  # bookmarks + Learn upload files
+    community_service,  # posts, replies, votes, reports, group memberships
+    notifications_service,  # notifications, push device tokens
+    jobs_service,  # AI jobs the student started
+    profiles_service,  # profile + settings
+)
 
 VERIFY_EMAIL = "verify_email"
 RESET_PASSWORD = "reset_password"
@@ -213,12 +239,80 @@ async def update_me(session: AsyncSession, claims: dict[str, Any], req: UpdateMe
 
 
 async def delete_me(session: AsyncSession, claims: dict[str, Any]) -> None:
-    """Delete the Firebase account first (if that fails nothing is deleted), then our data."""
-    await firebase_users.delete_user(claims["uid"])
+    """DELETE /auth/me: remove ALL of the student's data, then the Firebase login.
+
+    1. Each module deletes its own rows through its service (no commit yet) and tells us
+       which Storage files / folders belong to the student.
+    2. The users row (+ codes, reset tokens) is deleted.
+    3. The Firebase login is deleted. If that fails, the database changes are rolled back,
+       so nothing is lost and the student can simply try again.
+    4. Commit, then delete the Storage files (answer photos, uploads, post images). Files
+       are deleted last because that can't be undone; a failure is logged, never shown.
+    """
     user = await repository.get_user_by_uid(session, claims["uid"])
-    if user is not None:
-        await session.delete(user)  # cascades to profile, codes, mastery, attempts...
-        await session.commit()
+    if user is None:  # no row (e.g. never registered): only the Firebase login is left
+        await firebase_users.delete_user(claims["uid"])
+        return
+
+    storage_paths: list[str] = []
+    for module_service in USER_DATA_SERVICES:
+        storage_paths += await module_service.delete_user_data(session, user.id)
+    await repository.delete_user(session, user)
+    await session.flush()
+
+    try:
+        await firebase_users.delete_user(claims["uid"])
+    except Exception:
+        await session.rollback()
+        raise
+    await session.commit()
+
+    failed = await run_in_threadpool(storage.delete_files, storage_paths)
+    if failed:
+        logger.error("Account %s deleted, but %s Storage path(s) were not", user.id, failed)
+
+
+async def export_me(session: AsyncSession, claims: dict[str, Any]) -> dict[str, Any]:
+    """GET /auth/me/export: a copy of everything we store about the CURRENT student.
+
+    Only the caller's own rows are read (every service is asked for the caller's id).
+    Works for a suspended account too (like GET /auth/me). Files are
+    listed as Storage paths, never their bytes. No secrets: no Firebase uid, no codes, no
+    reset tokens, no push (FCM) tokens.
+    """
+    user = await _get_registered_user(session, claims)  # 404 USER_NOT_FOUND before register
+    profile_data = await profiles_service.export_user_data(session, user.id)
+    attempts = await exams_service.export_user_data(session, user.id)
+    plans = await recommendations_service.export_user_data(session, user.id)
+    content = await content_service.export_user_data(session, user.id)
+    return {
+        "exported_at": clock.now().isoformat(),
+        "account": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.display_name,
+            "phone": user.phone,
+            "role": user.role,
+            "email_verified": user.email_verified,
+            "created_at": user.created_at,
+            "last_login_at": user.last_login_at,
+        },
+        "profile": profile_data["profile"],
+        "settings": profile_data["settings"],
+        "privacy": {
+            "terms_accepted_at": user.consent_at,
+            "push_devices": await notifications_service.count_devices(session, user.id),
+        },
+        "quiz_attempts": attempts["quiz_attempts"],
+        "exam_attempts": attempts["exam_attempts"],
+        "evaluations": await evaluation_service.export_user_data(session, user.id),
+        "mistakes": await performance_service.export_user_data(session, user.id),
+        "recommendations": plans["recommendations"],
+        "study_plan": plans["study_plan"],
+        "notes": content["notes"],
+        "uploads": content["uploads"],
+        "community": await community_service.export_user_data(session, user.id),
+    }
 
 
 # =========================================================================== 6-digit codes

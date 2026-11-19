@@ -1561,3 +1561,29 @@ async def concept_briefs(
 ) -> list[repository.ConceptRow]:
     """Concepts with their topic and unit, for other modules' feedback cards."""
     return await repository.concept_rows(session, concept_ids)
+
+
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The student's mistakes journal for the data export."""
+    return [
+        {
+            "id": m.id,
+            "question_id": m.question_id,
+            "concept_id": m.concept_id,
+            "mistake_type": m.mistake_type,
+            "note": m.note,
+            "resolved_at": m.resolved_at,
+            "created_at": m.created_at,
+        }
+        for m in await repository.list_user_mistakes(session, user_id)
+    ]
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the mistakes journal and all progress / mastery rows (no commit). No files."""
+    await repository.delete_user_rows(session, user_id)
+    return []

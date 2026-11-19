@@ -568,3 +568,50 @@ async def admin_reindex(
     job = await jobs.create_job(session, JobType.RAG_INGEST, payload, requested_by=admin_id)
     jobs.enqueue_job(job, background_tasks)
     return RagJobOut(job_id=job.id, document_id=document_id)
+
+
+# =========================================================================== account delete / export
+# Called by the auth module (DELETE /auth/me and GET /auth/me/export).
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> dict[str, Any]:
+    """{"notes": [...], "uploads": [...]}: the student's own notes, and their uploads with the
+    summaries. Files are given as Storage paths (`file_path`), never their bytes."""
+    notes = [
+        {
+            "id": n.id,
+            "topic_id": n.topic_id,
+            "title": n.title,
+            "note_type": n.note_type,
+            "body_md": n.body_md,
+            "created_at": n.created_at,
+        }
+        for n in await repository.list_user_notes(session, user_id)
+    ]
+    uploads = [
+        {
+            "id": u.id,
+            "title": u.title,
+            "file_name": u.file_name,
+            "file_path": u.file_path,
+            "mime_type": u.mime_type,
+            "size_bytes": u.size_bytes,
+            "topic_id": u.topic_id,
+            "processing_status": u.processing_status,
+            "created_at": u.created_at,
+            "summaries": [
+                {"body_md": s.body_md, "key_points": s.key_points, "created_at": s.created_at}
+                for s in summaries
+            ],
+        }
+        for u, summaries in await repository.list_user_uploads(session, user_id)
+    ]
+    return {"notes": notes, "uploads": uploads}
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete uploads + summaries, own notes and library items (no commit). Returns the
+    Storage folder of the student's PDF uploads (POST /uploads/pdf) to delete after commit.
+    Learn tab upload files are removed by the learn module."""
+    await repository.delete_user_rows(session, user_id)
+    return [f"uploads/{user_id}/"]
