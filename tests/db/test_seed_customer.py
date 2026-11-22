@@ -57,7 +57,17 @@ def test_customer_seed_twice_changes_nothing(scratch_db, tmp_path, monkeypatch):
         REPO_ROOT / "data/questions/example_past_paper.json", questions / "1990_part_1.json"
     )
     shutil.copy(REPO_ROOT / "data/questions/example_past_paper.json", questions)
-    args = ("--questions-dir", str(questions), "--include-samples")
+    # Only the small sample note: a developer's real (gitignored) books would take many minutes.
+    rag_notes = tmp_path / "rag_sources" / "approved_notes"
+    rag_notes.mkdir(parents=True)
+    shutil.copy(REPO_ROOT / "data/rag_sources/approved_notes/sample_cell_transport.md", rag_notes)
+    args = (
+        "--questions-dir",
+        str(questions),
+        "--rag-dir",
+        str(tmp_path / "rag_sources"),
+        "--include-samples",
+    )
 
     alembic("upgrade head", scratch_db)
     first_run = seed_customer(scratch_db, tmp_path, *args)
