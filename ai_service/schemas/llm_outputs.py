@@ -153,6 +153,22 @@ class GeneratedWrittenQuestion(BaseModel):
         return self
 
 
+class TutorAnswer(BaseModel):
+    """Ask BrAInBox: an answer taken from the numbered source passages."""
+
+    answer: str = Field(min_length=1, max_length=4000)
+    found_in_sources: bool
+    used_sources: list[int] = Field(default_factory=list)
+
+    @classmethod
+    def fake_example(cls) -> dict[str, object]:
+        return {
+            "answer": "Fake answer from the sources.",
+            "found_in_sources": True,
+            "used_sources": [1],
+        }
+
+
 class GeneratedWrittenSet(BaseModel):
     questions: list[GeneratedWrittenQuestion]
 

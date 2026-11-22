@@ -47,6 +47,8 @@ from api.core.pagination import PageParamsDep
 from api.core.security import CurrentUserDep
 from api.modules.learn import service
 from api.modules.learn.schemas import (
+    AskIn,
+    AskOut,
     BookmarkList,
     BookmarkState,
     DiagramList,
@@ -71,6 +73,12 @@ from api.modules.learn.schemas import (
 from shared.enums import NoteKind, SummaryLength
 
 router = APIRouter(prefix="/learn", tags=["Learn"])
+
+
+@router.post("/ask", response_model=AskOut, summary="Ask BrAInBox (answers from approved books)")
+async def ask(req: AskIn, user: CurrentUserDep, session: SessionDep, ai: AIClientDep) -> AskOut:
+    """Errors: 401 · 404 `TOPIC_NOT_FOUND` · 422 · 503 `AI_SERVICE_UNAVAILABLE`."""
+    return await service.ask_tutor(session, req, ai)
 
 
 # --------------------------------------------------------------------------- syllabus tree

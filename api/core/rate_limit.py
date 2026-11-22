@@ -39,6 +39,7 @@ AUTH_ROUTES = [
 ]
 AI_ROUTES = [
     ("POST", rf"/api/v1/learn/topics/{_ID}/notes/generate"),
+    ("POST", r"/api/v1/learn/ask"),
     ("POST", r"/api/v1/learn/uploads"),
     ("POST", r"/api/v1/uploads/(text|pdf)"),
     ("POST", r"/api/v1/visuals/generate"),

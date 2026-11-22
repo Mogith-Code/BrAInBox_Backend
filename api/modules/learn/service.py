@@ -29,6 +29,8 @@ from api.core.security import CurrentUser
 from api.modules.learn import mastery, repository
 from api.modules.learn.mastery import NO_PRACTICE, TopicMastery
 from api.modules.learn.schemas import (
+    AskIn,
+    AskOut,
     BookmarkList,
     BookmarkOut,
     BookmarkState,
@@ -276,6 +278,16 @@ async def get_unit(session: AsyncSession, user: CurrentUser, unit_ref: str) -> U
 # =========================================================================== topics
 
 
+async def ask_tutor(session: AsyncSession, req: AskIn, ai: AIClient) -> AskOut:
+    """POST /learn/ask: an answer from the approved books, with where it came from."""
+    payload: dict[str, Any] = {"question": req.question.strip()}
+    if req.topic_id:
+        topic, unit, _ = await _topic(session, req.topic_id)
+        payload |= {"topic_title": topic.title, "unit_id": str(unit.id)}
+    result = (await ai.sync("ask-tutor", payload)).get("result", {})
+    return AskOut.model_validate(result)
+
+
 async def get_topic(session: AsyncSession, user: CurrentUser, topic_ref: str) -> TopicDetailOut:
     topic, unit, subject = await _topic(session, topic_ref)
     progress, practice = await _masteries(session, user, [topic])
@@ -384,6 +396,7 @@ async def generate_notes(
         **params,
         "params_hash": digest,
         "subject": subject.name if subject else "Biology",
+        "unit_id": str(unit.id),
         "unit_number": unit.number,
         "unit_title": unit.title,
         "topic_number": topic.number,

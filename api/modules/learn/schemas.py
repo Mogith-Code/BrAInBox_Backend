@@ -18,6 +18,23 @@ LearnJobStatus = Literal["queued", "running", "done", "failed"]
 NoteSourceOut = Literal["ai", "manual", "upload"]
 
 
+# ---------------------------------------------------------------- Ask BrAInBox
+class AskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=1000)
+    topic_id: str | None = None  # UUID or code, e.g. "bio-6.1"
+
+
+class AskSourceOut(BaseModel):
+    title: str
+    page: int | None = None
+
+
+class AskOut(BaseModel):
+    answer: str
+    grounded: bool  # false = the approved books don't contain the answer
+    sources: list[AskSourceOut]
+
+
 # ---------------------------------------------------------------- shared bits
 class SubjectRef(BaseModel):
     id: uuid.UUID
