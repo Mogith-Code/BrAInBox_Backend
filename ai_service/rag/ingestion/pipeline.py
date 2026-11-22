@@ -135,6 +135,9 @@ async def ingest_file(
     try:
         pages = clean_pages(load_document(path))
         chunks = chunk_pages(pages, settings.RAG_CHUNK_TOKENS, settings.RAG_CHUNK_OVERLAP)
+        if not chunks:
+            # Without this, a scanned book would be saved as "ready" with no text at all.
+            raise ValueError("No readable text. If it is a scanned PDF, install Tesseract OCR.")
         topics = await _load_topics(session, doc.unit_id)
         attach_metadata(chunks, DocumentMetadata(unit_id=doc.unit_id, topics=topics))
         embeddings = await embed_chunks(chunks, embedder)

@@ -61,6 +61,8 @@ class AISettings(SharedSettings):
     LLM_TIMEOUT_SECONDS: float = 60.0
     MAX_INPUT_CHARS: int = 60_000
     EMBEDDING_BATCH_SIZE: int = 100
+    # Below Gemini's free limit of 30,000 tokens a minute. 0 = no pause (paid plans).
+    EMBEDDING_TOKENS_PER_MINUTE: int = 24_000
 
     # --- Written-answer evaluation (pipelines/evaluation/scorer.py). Starting values, tuned
     # with scripts/eval_accuracy.py against manually marked answers.
