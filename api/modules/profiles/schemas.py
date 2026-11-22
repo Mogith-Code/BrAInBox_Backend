@@ -97,6 +97,21 @@ class ProfileOut(BaseModel):
     profile_completed: bool = False
 
 
+# ---------------------------------------------------------------- personal details
+class PersonalDetailsOut(BaseModel):
+    """The Edit profile page: who the student is (name and phone are saved by PATCH /auth/me)."""
+
+    full_name: str
+    email: str | None = None
+    phone: str | None = None
+    bio: str | None = None
+    avatar_url: str | None = None  # a link the app can load without a login header
+
+
+class PersonalDetailsUpdate(BaseModel):
+    bio: str | None = Field(default=None, max_length=500)  # send null or "" to clear it
+
+
 # ---------------------------------------------------------------- GET /profile/overview
 class AchievementOut(BaseModel):
     id: str  # "streak_7"

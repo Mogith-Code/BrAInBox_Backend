@@ -4,6 +4,10 @@
     GET    /api/v1/profile            my profile
     PATCH  /api/v1/profile            save any subset of the setup fields
     POST   /api/v1/profile/complete   "Finish setup" (all required fields must be filled)
+    GET    /api/v1/profile/details    Edit profile: name, email, phone, bio, photo
+    PATCH  /api/v1/profile/details    save my bio (name and phone: PATCH /auth/me)
+    POST   /api/v1/profile/avatar     upload my photo (JPEG, PNG or WebP, up to 3 MB)
+    DELETE /api/v1/profile/avatar     remove my photo
     GET    /api/v1/profile/overview   the Profile page: goal, stats, achievements
     POST   /api/v1/achievements/{id}/seen   the "Achievement unlocked" pop-up was shown
 
@@ -17,7 +21,9 @@ All need a registered user (Firebase token + POST /auth/register done).
 Rule: routers only validate input, check the role and call `service`. No SQL here.
 """
 
-from fastapi import APIRouter, Response, status
+from typing import Annotated
+
+from fastapi import APIRouter, File, Request, Response, UploadFile, status
 
 from api.core.database import SessionDep
 from api.core.security import CurrentUserDep
@@ -25,6 +31,8 @@ from api.modules.profiles import service
 from api.modules.profiles.schemas import (
     NotificationSettingsOut,
     NotificationSettingsUpdate,
+    PersonalDetailsOut,
+    PersonalDetailsUpdate,
     PrivacySettingsOut,
     PrivacySettingsUpdate,
     ProfileOptionsOut,
@@ -63,6 +71,39 @@ async def update_profile(
 @router.post("/profile/complete", response_model=ProfileOut, summary="Finish profile setup")
 async def complete_profile(user: CurrentUserDep, session: SessionDep) -> ProfileOut:
     return await service.complete_profile(session, user.id)
+
+
+@router.get("/profile/details", response_model=PersonalDetailsOut, summary="Name, bio and photo")
+async def get_details(
+    request: Request, user: CurrentUserDep, session: SessionDep
+) -> PersonalDetailsOut:
+    return await service.get_details(session, user, str(request.base_url))
+
+
+@router.patch("/profile/details", response_model=PersonalDetailsOut, summary="Save my bio")
+async def update_details(
+    req: PersonalDetailsUpdate, request: Request, user: CurrentUserDep, session: SessionDep
+) -> PersonalDetailsOut:
+    return await service.update_details(session, user, req, str(request.base_url))
+
+
+@router.post("/profile/avatar", response_model=PersonalDetailsOut, summary="Upload my photo")
+async def upload_avatar(
+    request: Request,
+    user: CurrentUserDep,
+    session: SessionDep,
+    file: Annotated[UploadFile, File()],
+) -> PersonalDetailsOut:
+    """JPEG, PNG or WebP, up to 3 MB. One byte over the limit is enough to refuse it."""
+    data = await file.read(service.MAX_AVATAR_BYTES + 1)
+    return await service.save_avatar(session, user, data, str(request.base_url))
+
+
+@router.delete("/profile/avatar", response_model=PersonalDetailsOut, summary="Remove my photo")
+async def delete_avatar(
+    request: Request, user: CurrentUserDep, session: SessionDep
+) -> PersonalDetailsOut:
+    return await service.remove_avatar(session, user, str(request.base_url))
 
 
 @router.get(
