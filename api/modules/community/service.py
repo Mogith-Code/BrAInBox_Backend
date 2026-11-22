@@ -6,7 +6,9 @@ or leave them. A private group is only visible to its members and can't be joine
 
 Posts and replies: anyone who can see a group can read them; only members can post or reply.
 Only the author can edit; the author or an admin can delete (soft delete). The post's author
-picks the accepted answer. New posts and replies are checked by the AI moderator first: OK ->
+picks the accepted answer. Authors who turned "show my name in the community" off (privacy
+setting, profiles module) are shown as "A/L student". New posts and replies are checked by the
+AI moderator first: OK ->
 published, off-topic / inappropriate -> flagged. When the moderator can't be reached they are
 held as "pending" (only the author sees them), because the users are minors.
 
@@ -62,6 +64,7 @@ from api.modules.community.schemas import (
     VoteOut,
 )
 from api.modules.notifications import service as notifications_service
+from api.modules.profiles import service as profiles_service
 from api.modules.syllabus import service as syllabus_service
 from api.modules.visuals import service as visuals_service
 from shared.db.models import (
@@ -89,6 +92,7 @@ HELD_REASON = "Held: AI moderation was unavailable"
 # different people is hidden (flagged) until an admin decides. 0 turns it off.
 REPORTS_TO_HIDE = 3
 UNNAMED_AUTHOR = "Student"
+ANONYMOUS_AUTHOR = "A/L student"  # the author turned "show my name" off
 
 
 async def get_status() -> ModuleStatus:
@@ -208,6 +212,31 @@ def reply_out(row: ReplyRow, user: CurrentUser) -> ReplyOut:
     )
 
 
+async def _hide_names(session: AsyncSession, rows: list[PostRow] | list[ReplyRow]) -> None:
+    """Show "A/L student" for authors who don't want their name shown (every viewer, the
+    author too, so they can see how others see them). Changes the rows in place."""
+    authors = {
+        row.post.author_id if isinstance(row, PostRow) else row.reply.author_id for row in rows
+    }
+    hidden = await profiles_service.users_hiding_name(
+        session, [a for a in authors if a is not None]
+    )
+    for row in rows:
+        author = row.post.author_id if isinstance(row, PostRow) else row.reply.author_id
+        if author in hidden:
+            row.author_name = ANONYMOUS_AUTHOR
+
+
+async def _post_out(session: AsyncSession, row: PostRow, user: CurrentUser) -> PostOut:
+    await _hide_names(session, [row])
+    return post_out(row, user)
+
+
+async def _reply_out(session: AsyncSession, row: ReplyRow, user: CurrentUser) -> ReplyOut:
+    await _hide_names(session, [row])
+    return reply_out(row, user)
+
+
 async def _check_topic(
     session: AsyncSession, topic_id: uuid.UUID, group_unit_id: uuid.UUID | None
 ) -> uuid.UUID:
@@ -239,6 +268,7 @@ async def list_posts(
     rows, total = await repository.list_posts(
         session, group.id, user.id, sort=sort, offset=paging.offset, limit=paging.size
     )
+    await _hide_names(session, rows)
     return Page.create([post_out(r, user) for r in rows], total, paging)
 
 
@@ -293,13 +323,15 @@ async def create_post(
             requested_by=user.id,
         )
         jobs.enqueue_job(job, background_tasks, ai)
-    return post_out(await _visible_post(session, user, post.id), user)
+    return await _post_out(session, await _visible_post(session, user, post.id), user)
 
 
 async def get_post(session: AsyncSession, user: CurrentUser, post_id: uuid.UUID) -> PostDetailOut:
     """GET /posts/{id}: the post with its visible replies."""
     row = await _visible_post(session, user, post_id)
     replies = await repository.list_replies(session, post_id, user.id)
+    await _hide_names(session, [row])
+    await _hide_names(session, replies)
     return PostDetailOut(
         **post_out(row, user).model_dump(), replies=[reply_out(r, user) for r in replies]
     )
@@ -333,7 +365,7 @@ async def update_post(
             post.unit_id = await _check_topic(session, req.topic_id, group_unit_id)
             post.topic_id = req.topic_id
     await session.commit()
-    return post_out(await _visible_post(session, user, post_id), user)
+    return await _post_out(session, await _visible_post(session, user, post_id), user)
 
 
 async def delete_post(session: AsyncSession, user: CurrentUser, post_id: uuid.UUID) -> None:
@@ -391,9 +423,9 @@ async def create_reply(
     if reply.moderation_status == ModerationStatus.APPROVED:  # only visible replies are counted
         await repository.change_reply_count(session, post.id, +1)
         if post.author_id is not None and post.author_id != user.id:
-            _notify_reply(session, post, reply)
+            await _notify_reply(session, post, reply)
     await session.commit()
-    return reply_out(await _visible_reply(session, user, reply.id), user)
+    return await _reply_out(session, await _visible_reply(session, user, reply.id), user)
 
 
 async def update_reply(
@@ -405,7 +437,7 @@ async def update_reply(
         raise ForbiddenError("Only the author can edit this reply", code="NOT_REPLY_AUTHOR")
     row.reply.body = req.body.strip()
     await session.commit()
-    return reply_out(await _visible_reply(session, user, reply_id), user)
+    return await _reply_out(session, await _visible_reply(session, user, reply_id), user)
 
 
 async def delete_reply(session: AsyncSession, user: CurrentUser, reply_id: uuid.UUID) -> None:
@@ -626,12 +658,15 @@ async def on_answer_suggested(session: AsyncSession, job: AIJob) -> None:
     await repository.add_reply(session, reply)
     await repository.change_reply_count(session, post.id, +1)
     if post.author_id is not None:
-        _notify_reply(session, post, reply)
+        await _notify_reply(session, post, reply)
 
 
-def _notify_reply(session: AsyncSession, post: Post, reply: Reply) -> None:
-    """COMMUNITY_REPLY notification for the post's author (saved with the caller's commit)."""
+async def _notify_reply(session: AsyncSession, post: Post, reply: Reply) -> None:
+    """COMMUNITY_REPLY notification for the post's author (saved with the caller's commit),
+    unless they turned "community replies" off in Settings > Notifications."""
     assert post.author_id is not None
+    if not await profiles_service.wants_community_replies(session, post.author_id):
+        return
     notifications_service.notify(
         session,
         post.author_id,

@@ -40,11 +40,20 @@ from shared.db.models.recommendation import (
 )
 from shared.db.models.syllabus import EMBEDDING_DIM, Concept, Subject, Topic, Unit
 from shared.db.models.system import AIJob, AIUsageLog, AppConfig, AuditLog
-from shared.db.models.user import DeviceToken, Notification, StudentProfile, User, UserSettings
+from shared.db.models.user import (
+    Achievement,
+    DeviceToken,
+    Notification,
+    StudentProfile,
+    User,
+    UserAchievement,
+    UserSettings,
+)
 from shared.db.models.visual import Visual, VisualReport
 
 __all__ = [
     "EMBEDDING_DIM",
+    "Achievement",
     "AIJob",
     "AIUsageLog",
     "AnswerPoint",
@@ -99,6 +108,7 @@ __all__ = [
     "UnitMastery",
     "Upload",
     "User",
+    "UserAchievement",
     "UserSettings",
     "UserTopicProgress",
     "Visual",

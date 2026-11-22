@@ -19,6 +19,7 @@ from sqlalchemy import text
 from api.core.config import get_settings
 from api.core.database import SessionDep
 from api.core.errors import register_error_handlers
+from api.core.rate_limit import RateLimiter, rate_limit_middleware
 from api.modules.admin.router import router as admin_router
 from api.modules.auth.router import router as auth_router
 from api.modules.community.router import router as community_router
@@ -33,6 +34,7 @@ from api.modules.learn.router import router as learn_router
 from api.modules.notifications.router import router as notifications_router
 from api.modules.performance.router import router as performance_router
 from api.modules.profiles.router import router as profiles_router
+from api.modules.profiles.router import settings_router
 from api.modules.quality.router import router as quality_router
 from api.modules.questions.router import router as questions_router
 from api.modules.quizzes.router import router as quizzes_router
@@ -40,6 +42,7 @@ from api.modules.recommendations.router import router as recommendations_router
 from api.modules.syllabus.router import router as syllabus_router
 from api.modules.visuals.router import router as visuals_router
 from shared.branding import APP_NAME, FAVICON_32_PATH, LOGO_URL, TAGLINE
+from shared.logging_setup import configure_logging
 
 API_PREFIX = "/api/v1"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -63,6 +66,7 @@ MODULE_ROUTERS = [
     recommendations_router,
     community_router,
     notifications_router,
+    settings_router,
     jobs_router,
     admin_router,
 ]
@@ -71,33 +75,19 @@ logger = logging.getLogger(__name__)
 
 
 def check_production_settings(settings: Any) -> None:
-    """Refuse to start in production with settings that are only safe on a laptop."""
-    problems = []
-    if settings.AI_SERVICE_TOKEN in ("", "dev-service-token"):
-        problems.append("AI_SERVICE_TOKEN must be a long random secret")
-    if settings.AUTH_CODE_SECRET in ("", "dev-only-change-me"):
-        problems.append("AUTH_CODE_SECRET must be a long random secret")
-    if not settings.FIREBASE_PROJECT_ID:
-        problems.append("FIREBASE_PROJECT_ID is empty (logins cannot be checked)")
-    if not settings.STORAGE_BUCKET:
-        problems.append("STORAGE_BUCKET is empty (uploads have nowhere to go)")
-    if settings.EMAIL_BACKEND == "console":
-        problems.append(
-            "EMAIL_BACKEND=console would print verification codes instead of sending them"
-        )
-    if settings.DEV_EXPOSE_CODES or settings.DEBUG_SHOW_ANSWERS:
-        problems.append("DEV_EXPOSE_CODES and DEBUG_SHOW_ANSWERS must be false")
-    if "*" in settings.CORS_ORIGINS and "localhost" not in settings.CORS_ORIGINS:
-        problems.append("CORS_ORIGINS must list the real origins, not a wildcard")
-    if settings.JOB_RUNNER == "cloudtasks" and not settings.JOBS_TARGET_URL:
-        problems.append("JOBS_TARGET_URL is needed with JOB_RUNNER=cloudtasks")
+    """Refuse to start in production with settings that are only safe on a laptop.
+
+    Every problem is listed at once (see ApiSettings.production_problems), so one failed start
+    shows everything to fix.
+    """
+    problems = settings.production_problems()
     if problems:
         raise RuntimeError("Unsafe production settings: " + "; ".join(problems))
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    logging.basicConfig(level=settings.LOG_LEVEL)
+    configure_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
     if settings.DEV_LOGIN_ENABLED:
         if settings.ENVIRONMENT != "dev":
             # The dev login lets anyone in as admin; never allow it on a real server.
@@ -119,14 +109,20 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    # --- CORS (mobile web build + admin portal)
+    # --- Per-minute limits on the auth and AI routes (api/core/rate_limit.py). Added before
+    # CORS so CORS wraps it: a 429 still carries the CORS headers the admin portal needs.
+    app.middleware("http")(rate_limit_middleware(RateLimiter()))
+
+    # --- CORS: only the origins in CORS_ORIGINS / ADMIN_ORIGINS (the admin portal).
+    # Production allows exact https origins only (ApiSettings.production_problems).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_exact_origins(),
         allow_origin_regex=settings.cors_origin_regex(),
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        expose_headers=["Retry-After"],
     )
 
     register_error_handlers(app)

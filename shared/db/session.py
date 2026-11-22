@@ -17,7 +17,11 @@ def make_engine(database_url: str | None = None) -> AsyncEngine:
     if settings.ENVIRONMENT == "test":
         # Tests run each test in its own event loop, so never reuse pooled connections.
         return create_async_engine(url, poolclass=NullPool)
-    return create_async_engine(url, pool_pre_ping=True)
+    # hide_parameters: database errors in the log show the SQL but not the values sent with it
+    # (emails, answers), so no personal data ends up in the production logs.
+    return create_async_engine(
+        url, pool_pre_ping=True, hide_parameters=settings.ENVIRONMENT == "prod"
+    )
 
 
 # Creating the engine does not connect yet; the first query does.

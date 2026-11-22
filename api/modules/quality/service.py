@@ -270,3 +270,13 @@ async def record_answer(
         question = await repository.get_question(session, question_id)
         if question is not None:
             _send_to_review(question)
+
+
+# =========================================================================== account delete
+# Called by the auth module (DELETE /auth/me).
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the question reports the student made (no commit). No files."""
+    await repository.delete_user_reports(session, user_id)
+    return []

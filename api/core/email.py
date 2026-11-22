@@ -97,7 +97,7 @@ class SmtpEmailSender:
             if settings.SMTP_USER:
                 smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             smtp.send_message(mime)
-        logger.info("Email sent to %s (%s)", message.to, message.subject)
+        logger.info("Email sent (%s)", message.subject)
 
 
 def get_email_sender() -> EmailSender:

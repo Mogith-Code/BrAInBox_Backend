@@ -3,6 +3,7 @@
 Tables: mistakes, concept_mastery, unit_mastery, study_activity, user_topic_progress
 Read-only for topic insights: attempts, responses, questions, mcq_options, topics, units,
 misconceptions, model_answers, resources. Read-only for admin analytics: users, ai_usage_log.
+Read-only for achievements: papers (was a past paper submitted?).
 Only this module's `service.py` may import this file.
 """
 
@@ -26,6 +27,7 @@ from shared.db.models import (
     Misconception,
     Mistake,
     ModelAnswer,
+    Paper,
     Question,
     QuestionConcept,
     Resource,
@@ -41,6 +43,7 @@ from shared.enums import (
     AttemptStatus,
     ContentStatus,
     MistakeType,
+    PaperKind,
     QuestionType,
     TopicProgressStatus,
     UserRole,
@@ -1065,3 +1068,61 @@ async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
     """Delete the student's mistakes, mastery, snapshots, activity and topic progress. No commit."""
     for model in USER_TABLES:
         await session.execute(delete(model).where(model.user_id == user_id))
+
+
+# ---------------------------------------------------------------- achievements (profiles module)
+async def count_answered(session: AsyncSession, user_id: uuid.UUID, *, mcq_only: bool) -> int:
+    """Questions the student answered in any attempt except abandoned ones: an MCQ with an
+    option chosen, or a written answer with text. `mcq_only` counts the MCQs alone."""
+    stmt = (
+        select(func.count(Response.id))
+        .join(Attempt, Attempt.id == Response.attempt_id)
+        .where(Attempt.user_id == user_id, Attempt.status != AttemptStatus.ABANDONED)
+    )
+    if mcq_only:
+        stmt = stmt.join(Question, Question.id == Response.question_id).where(
+            Question.question_type == QuestionType.MCQ, Response.selected_option_id.is_not(None)
+        )
+    else:
+        stmt = stmt.where(
+            or_(
+                Response.selected_option_id.is_not(None),
+                func.length(func.trim(func.coalesce(Response.answer_text, ""))) > 0,
+            )
+        )
+    return (await session.scalar(stmt)) or 0
+
+
+async def mastered_topic_ids(session: AsyncSession, user_id: uuid.UUID) -> set[uuid.UUID]:
+    result = await session.scalars(
+        select(UserTopicProgress.topic_id).where(
+            UserTopicProgress.user_id == user_id,
+            UserTopicProgress.status == TopicProgressStatus.MASTERED,
+        )
+    )
+    return set(result)
+
+
+async def unit_mastery_history(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[uuid.UUID, int]]:
+    """Every (unit_id, mastery) snapshot of the student, oldest first."""
+    result = await session.execute(
+        select(UnitMastery.unit_id, UnitMastery.mastery)
+        .where(UnitMastery.user_id == user_id)
+        .order_by(UnitMastery.created_at, UnitMastery.id)
+    )
+    return [(unit_id, mastery) for unit_id, mastery in result.all()]
+
+
+async def count_finished_past_papers(session: AsyncSession, user_id: uuid.UUID) -> int:
+    stmt = (
+        select(func.count(Attempt.id))
+        .join(Paper, Paper.id == Attempt.paper_id)
+        .where(
+            Attempt.user_id == user_id,
+            Attempt.status.in_(FINISHED_ATTEMPT_STATUSES),
+            Paper.paper_type == PaperKind.PAST_PAPER.value,
+        )
+    )
+    return (await session.scalar(stmt)) or 0

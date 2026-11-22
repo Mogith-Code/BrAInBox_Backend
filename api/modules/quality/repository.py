@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Integer, func, select
+from sqlalchemy import Integer, delete, func, select
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,6 +185,11 @@ async def count_open_reporters(session: AsyncSession, question_id: uuid.UUID) ->
         )
     )
     return int(result.scalar_one())
+
+
+async def delete_user_reports(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete the question reports one student made (account delete). No commit."""
+    await session.execute(delete(QuestionReport).where(QuestionReport.user_id == user_id))
 
 
 async def upsert_stats(

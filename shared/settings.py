@@ -8,23 +8,36 @@ Each service extends `SharedSettings` with its own fields
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Every value the code checks. Anything else is refused at start-up: a typo such as
+# "production" would otherwise skip every production safety check.
+ENVIRONMENTS = {"dev", "test", "prod"}
+_ENVIRONMENT_ALIASES = {"development": "dev", "production": "prod"}
+LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+# The built-in DATABASE_URL (a local docker database). Production must set its own.
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://brainbox:brainbox@localhost:5432/brainbox"
+DEFAULT_SERVICE_TOKEN = "dev-service-token"
 
 
 class SharedSettings(BaseSettings):
     # Read from the environment first, then from `.env`. Unknown variables are ignored,
     # so both services can share one `.env` file.
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # hide_input_in_errors: a refused setting must not print the other values (secrets) to the log.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     # "dev", "test" or "prod"
     ENVIRONMENT: str = "dev"
     LOG_LEVEL: str = "INFO"
 
     # Async SQLAlchemy URL, e.g. postgresql+asyncpg://user:pass@host:5432/dbname
-    DATABASE_URL: str = "postgresql+asyncpg://brainbox:brainbox@localhost:5432/brainbox"
+    DATABASE_URL: str = DEFAULT_DATABASE_URL
 
     # Secret shared by api and ai_service. The api sends it in the X-Service-Token header.
-    AI_SERVICE_TOKEN: str = "dev-service-token"
+    AI_SERVICE_TOKEN: str = DEFAULT_SERVICE_TOKEN
 
     # Use the deterministic fake AI providers (no API keys needed).
     USE_FAKE_AI: bool = True
@@ -48,6 +61,36 @@ class SharedSettings(BaseSettings):
 
     # Public URL of the logo (used in docs, emails, notifications)
     LOGO_URL: str = "/static/brand/logo_horizontal_1200.png"
+
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def _check_environment(cls, value: object) -> str:
+        name = str(value).strip().lower()
+        name = _ENVIRONMENT_ALIASES.get(name, name)
+        if name not in ENVIRONMENTS:
+            raise ValueError(f"ENVIRONMENT must be one of dev, test, prod (got {value!r})")
+        return name
+
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def _check_log_level(cls, value: object) -> str:
+        level = str(value).strip().upper()
+        if level not in LOG_LEVELS:
+            raise ValueError(f"LOG_LEVEL must be one of {', '.join(sorted(LOG_LEVELS))}")
+        return level
+
+    def shared_production_problems(self) -> list[str]:
+        """Settings both services need in production (empty list = all good)."""
+        problems = []
+        if self.DATABASE_URL == DEFAULT_DATABASE_URL:
+            problems.append("DATABASE_URL must point at the production database")
+        if len(self.AI_SERVICE_TOKEN) < 32 or self.AI_SERVICE_TOKEN == DEFAULT_SERVICE_TOKEN:
+            problems.append("AI_SERVICE_TOKEN must be a random secret of 32+ characters")
+        if not self.FIREBASE_PROJECT_ID:
+            problems.append("FIREBASE_PROJECT_ID is empty (logins cannot be checked)")
+        if not self.STORAGE_BUCKET:
+            problems.append("STORAGE_BUCKET is empty (uploads have nowhere to go)")
+        return problems
 
 
 @lru_cache

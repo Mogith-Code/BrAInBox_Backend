@@ -38,6 +38,7 @@ from shared.db.models import (
     PlanItem,
     Post,
     Question,
+    QuestionReport,
     Recommendation,
     Reply,
     Response,
@@ -49,11 +50,15 @@ from shared.db.models import (
     Unit,
     Upload,
     User,
+    UserAchievement,
     UserSettings,
+    Visual,
+    VisualReport,
     Vote,
 )
 from shared.enums import (
     AttemptKind,
+    ContentStatus,
     DevicePlatform,
     JobType,
     MistakeType,
@@ -61,6 +66,7 @@ from shared.enums import (
     NotificationType,
     QuestionType,
     UserRole,
+    VisualKind,
 )
 from tests.conftest import STUDENT, make_api_client, student_claims
 
@@ -72,6 +78,7 @@ EXPORT_KEYS = {
     "profile",
     "settings",
     "privacy",
+    "achievements",
     "quiz_attempts",
     "exam_attempts",
     "evaluations",
@@ -80,7 +87,9 @@ EXPORT_KEYS = {
     "study_plan",
     "notes",
     "uploads",
+    "bookmarks",
     "community",
+    "notifications",
 }
 
 
@@ -114,6 +123,11 @@ async def _seed_student(session: AsyncSession, user_id: uuid.UUID, shared: dict)
                 minutes=10,
             ),
             GroupMember(group_id=shared["group"], user_id=user_id),
+            UserAchievement(
+                user_id=user_id, achievement_id="streak_7", unlocked_at=func.now(), detail=tag
+            ),
+            QuestionReport(question_id=shared["question"], user_id=user_id, reason="wrong_answer"),
+            VisualReport(visual_id=shared["visual"], user_id=user_id, reason="unclear"),
             EmailCode(
                 user_id=user_id,
                 email=f"{tag}@test.local",
@@ -155,7 +169,29 @@ async def _seed_student(session: AsyncSession, user_id: uuid.UUID, shared: dict)
         image_paths=[f"posts/{tag}/1.jpg"],
         moderation_status=ModerationStatus.APPROVED,
     )
-    session.add_all([evaluation, plan, recommendation, upload, note, job, post])
+    # Own AI visuals: one still waiting for review (private), one approved (shared content).
+    draft_visual = Visual(
+        topic_id=shared["topic"],
+        kind=VisualKind.ILLUSTRATION,
+        title=f"My visual {tag}",
+        prompt=f"draw osmosis {tag}",
+        image_path=f"visuals/{tag}/draft.png",
+        is_ai_generated=True,
+        status=ContentStatus.PENDING_REVIEW,
+        created_by=user_id,
+    )
+    approved_visual = Visual(
+        topic_id=shared["topic"],
+        kind=VisualKind.ILLUSTRATION,
+        title=f"Approved visual {tag}",
+        image_path=f"visuals/{tag}/approved.png",
+        is_ai_generated=True,
+        status=ContentStatus.APPROVED,
+        created_by=user_id,
+    )
+    session.add_all(
+        [evaluation, plan, recommendation, upload, note, job, post, draft_visual, approved_visual]
+    )
     await session.flush()
     session.add_all(
         [
@@ -167,7 +203,14 @@ async def _seed_student(session: AsyncSession, user_id: uuid.UUID, shared: dict)
         ]
     )
     await session.flush()
-    return {"paper": paper.id, "post": post.id, "job": job.id, "upload": upload.id}
+    return {
+        "paper": paper.id,
+        "post": post.id,
+        "job": job.id,
+        "upload": upload.id,
+        "draft_visual": draft_visual.id,
+        "approved_visual": approved_visual.id,
+    }
 
 
 @pytest.fixture
@@ -196,9 +239,22 @@ async def two_students(student_in_db, db_session: AsyncSession):
         unit_id=unit.id, topic_id=topic.id, question_type=QuestionType.MCQ, stem="Osmosis is?"
     )
     group = CommunityGroup(name=f"Privacy {other_id.hex[:6]}")
-    s.add_all([concept, question, group])
+    admin_visual = Visual(
+        topic_id=topic.id,
+        kind=VisualKind.DIAGRAM,
+        title="Osmosis diagram",
+        mermaid_code="graph TD; A-->B",
+        status=ContentStatus.APPROVED,
+    )
+    s.add_all([concept, question, group, admin_visual])
     await s.flush()
-    shared = {"topic": topic.id, "concept": concept.id, "question": question.id, "group": group.id}
+    shared = {
+        "topic": topic.id,
+        "concept": concept.id,
+        "question": question.id,
+        "group": group.id,
+        "visual": admin_visual.id,
+    }
 
     mine = await _seed_student(s, STUDENT.id, shared)
     theirs = await _seed_student(s, other_id, shared)
@@ -242,6 +298,7 @@ async def two_students(student_in_db, db_session: AsyncSession):
     await s.execute(delete(EmailCode).where(EmailCode.email.like(f"{other_id.hex[:8]}%")))
     await s.execute(delete(CommunityGroup).where(CommunityGroup.id == shared["group"]))
     await s.execute(delete(Note).where(Note.topic_id == shared["topic"]))  # RESTRICT on topic
+    await s.execute(delete(Visual).where(Visual.topic_id == shared["topic"]))  # RESTRICT too
     await s.execute(delete(Question).where(Question.id == shared["question"]))
     await s.execute(delete(Unit).where(Unit.id == unit_id))  # topic + concept cascade
     await s.commit()
@@ -302,6 +359,10 @@ async def test_delete_me_removes_every_row_and_file(
     assert await db_session.get(AIJob, mine["job"]) is None
     assert await db_session.get(Paper, mine["paper"]) is None
     assert await db_session.get(Upload, mine["upload"]) is None
+    assert await db_session.get(Visual, mine["draft_visual"]) is None  # private: gone
+    kept = await db_session.get(Visual, mine["approved_visual"])  # shared content: unlinked
+    assert kept is not None and kept.created_by is None
+    assert await db_session.get(Visual, two_students["visual"]) is not None
     reports_on_my_post = await db_session.scalar(
         select(func.count())
         .select_from(ContentReport)
@@ -316,6 +377,9 @@ async def test_delete_me_removes_every_row_and_file(
     assert f"uploads/{STUDENT.id}/" in paths
     assert any(p.endswith(f"/{STUDENT.id}/") and "learn" in p for p in paths)
     assert f"posts/{STUDENT.id.hex[:8]}/1.jpg" in paths
+    assert f"visuals/{STUDENT.id.hex[:8]}/draft.png" in paths
+    assert f"visuals/{STUDENT.id.hex[:8]}/approved.png" not in paths
+    assert not any(other.hex[:8] in p or str(other) in p for p in paths)
 
     # Student 2 keeps everything, except their vote + report on student 1's (deleted) post.
     other_after = await _rows_per_user_column(db_session, other)
@@ -377,6 +441,15 @@ async def test_export_has_the_shape_and_only_my_data(two_students):
     assert data["profile"]["school"] == "Royal College"
     assert data["settings"]["theme"] == "system"
     assert data["privacy"]["push_devices"] == 1
+    assert data["privacy"]["improve_ai"] is True
+    assert data["privacy"]["share_research"] is False
+    assert "improve_ai" not in data["settings"]
+    assert [(a["id"], a["detail"]) for a in data["achievements"]] == [
+        ("streak_7", STUDENT.id.hex[:8])
+    ]
+    assert [b["topic_id"] for b in data["bookmarks"]] == [str(two_students["topic"])]
+    assert data["bookmarks"][0]["topic_title"] == "Osmosis"
+    assert [(n["title"], n["body"]) for n in data["notifications"]] == [("Done", "Your plan")]
     assert [a["kind"] for a in data["quiz_attempts"]] == ["quiz"]
     assert [a["kind"] for a in data["exam_attempts"]] == ["exam"]
     assert len(data["quiz_attempts"][0]["answers"]) == 1

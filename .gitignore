@@ -46,3 +46,5 @@ ai_service/evals/data/*
 data/ocr_cache/
 data/chroma_db/
 *.sqlite3
+
+CLAUDE.md

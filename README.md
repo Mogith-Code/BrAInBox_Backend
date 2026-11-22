@@ -166,6 +166,7 @@ pytest                       # API + AI service tests; DB tests are skipped if n
 pytest -m db                 # only the database tests (need `alembic upgrade head` first)
 ruff check . && ruff format --check .
 mypy api ai_service shared
+python scripts/check_contract.py ../../Brainbox-Mobile/BrAInBox_Mobile   # every app api.* call has a route (exit 1 if not)
 ```
 
 - `tests/conftest.py` replaces Firebase with fake users (`client` = student, `admin_client` = admin, `anon_client` = no token)
@@ -196,6 +197,8 @@ README.md      owner, purpose, endpoints, tables, Jira epic, git branch
 
 - All public routes are under **`/api/v1`**. Admin routes are under **`/api/v1/admin`** and require role **`admin`**.
 - **Error format everywhere:** `{"error": {"code": "SOME_CODE", "message": "..."}}`. In the api, raise `AppError` (`api/core/errors.py`).
+  Framework errors use it too: unknown URL → 404 `NOT_FOUND`, wrong method → 405 `METHOD_NOT_ALLOWED`, other
+  `HTTPException` → `HTTP_<status>`, crash → 500 `INTERNAL_ERROR` (traceback only in the log). Codes: `docs/api-endpoints.md`.
 - Settings come only from environment variables. Every variable is documented in `.env.example`.
 - **Never commit** `.env`, service-account JSON or copyrighted RAG documents.
 - The app must start with no AI keys. The fakes in `ai_service/providers/fakes.py` take over.

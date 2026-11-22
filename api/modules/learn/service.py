@@ -65,6 +65,7 @@ from api.modules.learn.schemas import (
     VideoList,
     VideoOut,
 )
+from api.modules.profiles import service as profiles_service
 from api.modules.syllabus.service import parse_ref
 from shared.db.models import (
     AIJob,
@@ -607,6 +608,7 @@ async def record_progress(
     m = _topic_mastery(row, stats)
     if m.level == "mastered":
         row.status = TopicProgressStatus.MASTERED
+        await profiles_service.check_achievements(session, user.id)
     elif row.status == TopicProgressStatus.NOT_STARTED:
         row.status = TopicProgressStatus.IN_PROGRESS  # opened or read -> started
     await session.commit()
@@ -911,6 +913,20 @@ def upload_files_folder(user_id: uuid.UUID) -> str | None:
         logger.warning("UPLOAD_DIR is outside LOCAL_STORAGE_DIR: Learn files of %s kept", user_id)
         return None
     return f"{upload_root.relative_to(storage_root).as_posix()}/{user_id}/"
+
+
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The student's topic bookmarks for the data export (GET /auth/me/export)."""
+    return [
+        {
+            "topic_id": b.topic_id,
+            "topic_title": t.title,
+            "unit_id": u.id,
+            "unit_title": u.title,
+            "created_at": b.created_at,
+        }
+        for b, t, u in await repository.list_bookmarks(session, user_id)
+    ]
 
 
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:

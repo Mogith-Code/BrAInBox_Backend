@@ -75,7 +75,7 @@ another module's tables: each module in `USER_DATA_SERVICES` has
 | community | posts (with the replies under them), replies, votes, reports, group memberships + post images. Other students' post scores, reply counts and accepted answers are corrected |
 | notifications | notifications, push device tokens |
 | jobs | AI jobs the student started (their input can hold answers) |
-| profiles | profile, app settings |
+| profiles | profile, settings + privacy switches (`user_settings`), unlocked achievements (`user_achievements`) |
 | auth | email codes, reset tokens, the `users` row |
 
 Order: all rows above → delete the **Firebase login** (fails → rollback, `503 FIREBASE_ERROR`, nothing lost) →
@@ -84,8 +84,9 @@ Kept on purpose: `ai_usage_log` rows (cost reports, user link set to NULL), `aud
 student made that admins review (AI-generated questions, visuals); their `created_by` becomes NULL.
 
 **`GET /auth/me/export`** (`service.export_me`) returns one JSON object the app saves as a `.json` file:
-`{exported_at, account, profile, settings, privacy, quiz_attempts, exam_attempts, evaluations, mistakes,
-recommendations, study_plan: {plans, daily_items}, notes, uploads, community: {posts, replies}}`. Each module's
+`{exported_at, account, profile, settings, privacy, achievements, quiz_attempts, exam_attempts, evaluations,
+mistakes, recommendations, study_plan: {plans, daily_items}, notes, uploads, bookmarks, community: {posts, replies},
+notifications}` (`achievements` = only the unlocked ones). Each module's
 `export_user_data(session, user_id)` gives its part. Only the caller's rows; files are Storage paths (never bytes);
 no Firebase uid, codes, reset tokens or FCM tokens (`privacy.push_devices` is just a count).
 

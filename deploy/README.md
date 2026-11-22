@@ -55,13 +55,15 @@ To change a secret later: `gcloud secrets versions add NAME --data-file=-`, then
 Create the database, enable pgvector (`CREATE EXTENSION IF NOT EXISTS vector;`), then:
 
 ```bash
-export DATABASE_URL='postgresql+asyncpg://...'
-pip install -e ".[api]"
-./deploy/deploy.sh migrate
-python scripts/seed_syllabus.py          # the 10 units, topics and concepts
-python -m scripts.seed_dev               # community groups and app settings
-python scripts/make_admin.py you@example.com   # after that person has signed up once
+export DATABASE_URL='postgresql+asyncpg://...'   # plus the other production settings
+pip install -e ".[api,ai]"
+./deploy/deploy.sh migrate     # optional: the API container also migrates when it starts
+python scripts/seed_customer.py --admin-email you@example.com   # safe to run again
 ```
+
+`scripts/seed_customer.py` loads the syllabus, base data, Learn topics, past papers, question
+bank and knowledge base, then makes the admin (that person must have signed in once). See
+`docs/deployment.md` (hosting, Neon, backups, logs, rollback).
 
 ### Firebase
 

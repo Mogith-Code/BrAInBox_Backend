@@ -101,7 +101,8 @@ class DataExportOut(BaseModel):
     account: dict[str, Any]
     profile: dict[str, Any] | None  # null before profile setup
     settings: dict[str, Any]
-    privacy: dict[str, Any]
+    privacy: dict[str, Any]  # Data & privacy switches + terms accepted + push device count
+    achievements: list[dict[str, Any]]  # only the unlocked ones
     quiz_attempts: list[dict[str, Any]]  # quizzes, practice and the diagnostic
     exam_attempts: list[dict[str, Any]]
     evaluations: list[dict[str, Any]]
@@ -110,7 +111,9 @@ class DataExportOut(BaseModel):
     study_plan: dict[str, Any]  # {"plans": [... with items], "daily_items": [...]}
     notes: list[dict[str, Any]]
     uploads: list[dict[str, Any]]
+    bookmarks: list[dict[str, Any]]  # topic bookmarks (Learn tab)
     community: CommunityExportOut
+    notifications: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------- admin: Students (users_admin.py)

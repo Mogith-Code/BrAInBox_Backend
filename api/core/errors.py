@@ -102,6 +102,10 @@ def _shaped(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+# Public name for code outside the handlers (the rate-limit middleware).
+shaped_body = _shaped
+
+
 def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
     error: dict[str, Any] = {"code": code, "message": message}
     if details is not None:
@@ -123,7 +127,8 @@ async def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
 
 async def http_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, StarletteHTTPException)
-    code = _HTTP_CODES.get(exc.status_code, "HTTP_ERROR")
+    # Known statuses get a name (404 -> NOT_FOUND); any other one becomes e.g. "HTTP_418".
+    code = _HTTP_CODES.get(exc.status_code, f"HTTP_{exc.status_code}")
     return JSONResponse(
         status_code=exc.status_code,
         content=_shaped(request, error_body(code, str(exc.detail))),
@@ -146,6 +151,7 @@ async def validation_error_handler(request: Request, exc: Exception) -> JSONResp
 
 
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    # The traceback goes to the server log only; the client never sees it.
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,

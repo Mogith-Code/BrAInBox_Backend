@@ -5,7 +5,12 @@ Admin routes are under `/api/v1/admin` and need role `admin`.
 The only placeholder left is `GET /api/v1/knowledge-base/status` (that module has no real endpoint yet).
 The live list is always at `http://localhost:8000/docs`.
 
-Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
+Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`, including unknown URLs
+(404 `NOT_FOUND`), wrong methods (405 `METHOD_NOT_ALLOWED`) and crashes (500 `INTERNAL_ERROR`). See
+[Error codes](#error-codes-for-the-apps-errormessages).
+
+**Contract check:** `python scripts/check_contract.py <frontend repo>` checks that every `api.get/post/...` call in
+the Flutter apps has a route here (see [Contract check](#contract-check-frontend-calls--backend-routes)).
 
 | Method | Path | Description |
 |---|---|---|
@@ -20,8 +25,8 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | POST | `/api/v1/auth/register` | token | ✅ Create / update my users row `{full_name, phone?, consent}` → `UserOut` (201 new, 200 existing) |
 | GET | `/api/v1/auth/me` | token | ✅ My account + onboarding flags (`USER_NOT_FOUND` before register) |
 | PATCH | `/api/v1/auth/me` | token | ✅ Change `full_name` / `phone` |
-| GET | `/api/v1/auth/me/export` | token | ✅ Download a copy of all my data → `DataExportOut` JSON (the app saves it as `.json`): `{exported_at, account, profile, settings, privacy, quiz_attempts, exam_attempts, evaluations, mistakes, recommendations, study_plan, notes, uploads, community: {posts, replies}}`. Only the caller's data; files as Storage paths; no uid / codes / tokens. Works for suspended accounts (`USER_NOT_FOUND` before register) |
-| DELETE | `/api/v1/auth/me` | token | ✅ Delete account → 204: **all** my rows in every module (attempts + answers, evaluations, plan, recommendations, mistakes, notes, uploads, posts / replies / votes, notifications, AI jobs, profile), my Storage files (answer photos, uploads, post images), then the Firebase login. Firebase fails → `FIREBASE_ERROR` 503 and nothing is deleted |
+| GET | `/api/v1/auth/me/export` | token | ✅ Download a copy of all my data → `DataExportOut` JSON (the app saves it as `.json`): `{exported_at, account, profile, settings, privacy, achievements, quiz_attempts, exam_attempts, evaluations, mistakes, recommendations, study_plan, notes, uploads, bookmarks, community: {posts, replies}, notifications}`. Only the caller's data; files as Storage paths; no uid / codes / tokens. Works for suspended accounts (`USER_NOT_FOUND` before register) |
+| DELETE | `/api/v1/auth/me` | token | ✅ Delete account → 204: **all** my rows in every module (attempts + answers, evaluations, plan, recommendations, mistakes, notes, uploads, bookmarks, posts / replies / votes / memberships, notifications, AI jobs, profile, settings + privacy, achievements), my Storage files (answer photos, uploads, post images), then the Firebase login. Firebase fails → `FIREBASE_ERROR` 503 and nothing is deleted |
 | POST | `/api/v1/auth/email-code/send` | token | ✅ Email a verification code (`ALREADY_VERIFIED`, `RESEND_TOO_SOON` 429) |
 | POST | `/api/v1/auth/email-code/verify` | token | ✅ `{code}` → `UserOut` with `email_verified: true` |
 | POST | `/api/v1/auth/password-reset/send` | none | ✅ `{email}` → always `{sent: true, ...}` |
@@ -36,6 +41,29 @@ Errors always look like `{"error": {"code": "SOME_CODE", "message": "..."}}`.
 | GET | `/api/v1/profile` | ✅ My profile (`ProfileOut`, includes `weekly_hours`) |
 | PATCH | `/api/v1/profile` | ✅ Save any subset of the setup fields |
 | POST | `/api/v1/profile/complete` | ✅ Finish setup (`PROFILE_INCOMPLETE` + `missing`) |
+| GET | `/api/v1/profile/overview` | ✅ The Profile page: `{full_name, stream_label ("Biological Science"), exam_year, target_grade, days_to_exam, streak_days, questions_answered, topics_mastered, achievements: [{id, title, icon, description, unlocked, unlocked_at, seen, badge_label, xp}], achievements_total}`. Unlocked achievements first (newest first), then the locked ones. `days_to_exam` is counted in Sri Lanka time from the `AL_EXAM_DATES` setting; `null` if the exam year or its date is unknown |
+| POST | `/api/v1/achievements/{id}/seen` | ✅ → 204: the "Achievement unlocked" pop-up was shown (`seen: true`). `ACHIEVEMENT_NOT_FOUND` 404 if the id is unknown or I haven't unlocked it |
+
+Achievements (`icon` is the same as `id`, except `streak_7` → `streak`): `streak_7` (7-day streak),
+`first_mastery` (first topic mastered), `unit_fixer` (a unit from Weak to Strong), `mcq_100` (100 MCQs answered),
+`past_paper_pro` (first past paper submitted), `unit_master` (every topic in a unit mastered). They unlock by
+themselves when the event happens (quizzes, exams, diagnostic, evaluation, home plan, learn and recommendations call
+`profiles.service.check_achievements`).
+
+## settings (profiles module) — Mogith
+
+Settings > Notifications and Settings > Data & privacy. PATCH takes any subset of the fields (`null` →
+`VALIDATION_ERROR`) and returns the full object.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/settings` | ✅ `{study_reminders, reminder_time, community_replies}`. Defaults `true`, `"20:30"` (24 h `HH:mm`, Sri Lanka time), `true` |
+| PATCH | `/api/v1/settings` | ✅ Change any of them. `reminder_time` must be `00:00`–`23:59` (`VALIDATION_ERROR` 422) |
+| GET | `/api/v1/privacy` | ✅ `{personalised_recommendations, improve_ai, show_name_in_community, share_research}`. Defaults `true` (always, read-only), `true`, `true`, `false` |
+| PATCH | `/api/v1/privacy` | ✅ Change any of them; `personalised_recommendations` is ignored (can't be turned off). `show_name_in_community: false` → community posts and replies show "A/L student" instead of my name |
+
+`community_replies: false` stops the community reply notification. (No study-reminder sender exists yet; it must
+check `study_reminders` + `reminder_time`.)
 
 ## home — Samni
 
@@ -520,9 +548,25 @@ still a TODO (`ai_service/rag/ingestion/pipeline.py`).
 
 Every error is `{"error": {"code": "...", "message": "..."}}`; some add fields (e.g. `retry_after`).
 Failed AI jobs return `status: "failed"` with `error` (a sentence) and `error_code` from `GET /jobs/{job_id}`.
+`/api/v1/learn/...` errors also have top-level `detail` and `code` (the Learn tab's parser).
+
+**Generic codes** (`api/core/errors.py`, any route):
+
+| Code | HTTP | When |
+|---|---|---|
+| `NOT_FOUND` | 404 | unknown URL (also outside `/api/v1`), or a plain 404 without a more specific code |
+| `METHOD_NOT_ALLOWED` | 405 | the URL exists but not with this method (the `Allow` header lists the right ones) |
+| `UNAUTHORIZED` | 401 | missing / invalid token |
+| `FORBIDDEN` | 403 | not allowed (e.g. a student on an admin route) |
+| `VALIDATION_ERROR` | 422 | bad request body / query / path; `details: [{field, message}]` |
+| `HTTP_<status>` | that status | a framework `HTTPException` with a status that has no name above (e.g. `HTTP_418`). Known ones keep their name: 400 `BAD_REQUEST`, 409 `CONFLICT`, 413 `PAYLOAD_TOO_LARGE`, 429 `TOO_MANY_REQUESTS`, 501 `NOT_IMPLEMENTED`, 503 `SERVICE_UNAVAILABLE` |
+| `INTERNAL_ERROR` | 500 | an unexpected crash. The message is always "Something went wrong"; the traceback is only in the server log, never in the response |
+
+**Module codes:**
 
 | Code | HTTP | Module | Meaning |
 |---|---|---|---|
+| `ACHIEVEMENT_NOT_FOUND` | 404 | profiles | `POST /achievements/{id}/seen` for an unknown id or one I haven't unlocked |
 | `TOPIC_NOT_FOUND` | 404 | syllabus, content, visuals | unknown topic id |
 | `VISUAL_NOT_FOUND` | 404 | visuals | unknown visual, or another student's visual that is not approved |
 | `ALREADY_REPORTED` | 409 | visuals | my report of this visual is still pending |
@@ -559,6 +603,29 @@ Failed AI jobs return `status: "failed"` with `error` (a sentence) and `error_co
 | `POINT_NOT_IN_ANSWER` | 422 | admin model answers | a `point_id` belongs to another model answer |
 | `OPTION_NOT_FOUND` | 404 | admin MCQ mapping | unknown option id |
 | `CORRECT_OPTION_NO_MISCONCEPTION` | 422 | admin MCQ mapping | the correct option can't have a misconception |
+
+## Contract check (frontend calls ↔ backend routes)
+
+```bash
+python scripts/check_contract.py ../../Brainbox-Mobile/BrAInBox_Mobile        # path to the Flutter repo (required)
+python scripts/check_contract.py <frontend repo> --verbose                    # also list the calls that match
+```
+
+It loads `app.openapi()` (the `/api/v1` routes) and scans `apps/mobile/lib`, `apps/admin/lib` and
+`packages/brainbox_core/lib` (not `*.g.dart` / `*.freezed.dart`, not comments) for
+`api.get/post/put/patch/delete(...)` calls (`api.upload` / `uploadBytes` count as POST). It prints every call
+without a matching route (no such path, or the path exists with other methods) and **exits 1** if there is one,
+otherwise 0 (2 = wrong folder).
+
+- `static const _base = '/learn'` in the same file is filled in (`'$_base/topics'` → `/learn/topics`).
+- `$var` / `${...}` is a path parameter: it matches `{topic_id}` in a route, never a fixed word.
+- A private helper that passes its `String path` on to `api.get(path)` (e.g. `_cached`, `_list`) is followed, so
+  the helper's callers are checked. A `switch` / `?:` choosing between path literals checks every literal.
+- Paths built at runtime (e.g. `'/admin/analytics/$part'`) are in `ALLOWED_UNMATCHED` in the script, each with a
+  comment saying why the call is fine. The script notes entries that are no longer used.
+
+Tests: `tests/api/test_check_contract.py` (also runs it on the real frontend repo when it is cloned next to this
+one, or set `BRAINBOX_FRONTEND`).
 
 ## Internal AI service (`ai_service`, port 8001, not public)
 

@@ -52,6 +52,7 @@ from api.modules.evaluation.schemas import (
 from api.modules.jobs.service import readable_error
 from api.modules.knowledge_base import service as knowledge_service
 from api.modules.performance import service as performance_service
+from api.modules.profiles import service as profiles_service
 from api.modules.syllabus import service as syllabus_service
 from shared.db.models import AIJob, Evaluation, Question
 from shared.enums import EvaluationMethod, JobStatus, JobType, MistakeType, QuestionType
@@ -444,6 +445,9 @@ async def on_evaluated(session: AsyncSession, job: AIJob) -> None:
         problems=problems_from(points, result.get("structure") or {}),
     )
     await performance_service.record_study_activity(session, evaluation.user_id)
+    await profiles_service.check_achievements(
+        session, evaluation.user_id, only=profiles_service.ACTIVITY_ACHIEVEMENTS
+    )
 
 
 async def on_job_failed(session: AsyncSession, job: AIJob) -> None:

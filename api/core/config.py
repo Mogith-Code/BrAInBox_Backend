@@ -5,7 +5,13 @@ import re
 from datetime import date
 from functools import lru_cache
 
+from pydantic import model_validator
+
 from shared.settings import SharedSettings
+
+DEFAULT_AUTH_CODE_SECRET = "dev-only-change-me"
+# Switches that help on a laptop and are dangerous on a real server.
+DEV_ONLY_SWITCHES = ("DEV_LOGIN_ENABLED", "DEBUG_SHOW_ANSWERS", "DEV_EXPOSE_CODES")
 
 
 class ApiSettings(SharedSettings):
@@ -17,10 +23,21 @@ class ApiSettings(SharedSettings):
     # identity token for it, so the ai_service can be a private Cloud Run service.
     AI_SERVICE_AUDIENCE: str = ""
 
-    # Comma-separated list. "*" is allowed inside an entry, e.g. "http://localhost:*"
+    # Browser origins allowed to call the API (the admin portal; the mobile app needs none).
+    # Comma-separated. "*" is allowed inside an entry in dev only, e.g. "http://localhost:*".
+    # Production: exact https origins only, e.g. "https://admin.brainbox.lk".
     CORS_ORIGINS: str = "http://localhost:*,http://127.0.0.1:*"
     # Extra origins for the deployed admin portal, e.g. "https://admin.brainbox.lk" (comma-separated)
     ADMIN_ORIGINS: str = ""
+
+    # --- Request rate limits per minute (api/core/rate_limit.py). 0 = off.
+    # Auth: per client IP on the sign-up / email-code / password-reset routes.
+    RATE_LIMIT_AUTH_PER_MINUTE: int = 10
+    # AI: per logged-in user on the routes that start AI work (notes, papers, evaluations...).
+    RATE_LIMIT_AI_PER_MINUTE: int = 20
+    # How many proxies in front of the API append to X-Forwarded-For. Cloud Run = 1.
+    # The client IP is the entry that many places from the right. 0 = use the socket address.
+    RATE_LIMIT_PROXY_HOPS: int = 1
 
     # How AI jobs are run: "local" (FastAPI BackgroundTasks) or "cloudtasks" (Google Cloud Tasks)
     JOB_RUNNER: str = "local"
@@ -50,7 +67,7 @@ class ApiSettings(SharedSettings):
 
     # --- 6-digit email codes (verify email + password reset)
     # Secret mixed into the code / reset-token hashes. MUST be a long random value outside dev.
-    AUTH_CODE_SECRET: str = "dev-only-change-me"
+    AUTH_CODE_SECRET: str = DEFAULT_AUTH_CODE_SECRET
     # Dev only: return the code in the API response ("dev_code") so you can test without email.
     # Works ONLY when ENVIRONMENT=dev; ignored everywhere else.
     DEV_EXPOSE_CODES: bool = False
@@ -83,6 +100,46 @@ class ApiSettings(SharedSettings):
     PUBLIC_BASE_URL: str = ""
 
     API_VERSION: str = "0.1.0"
+
+    @model_validator(mode="after")
+    def _no_dev_switches_in_prod(self) -> "ApiSettings":
+        """Make the dev-only switches impossible to turn on in production."""
+        if self.ENVIRONMENT == "prod":
+            on = [name for name in DEV_ONLY_SWITCHES if getattr(self, name)]
+            if on:
+                raise ValueError(f"{', '.join(on)} must be false when ENVIRONMENT=prod")
+        return self
+
+    def production_problems(self) -> list[str]:
+        """Every setting that is unsafe or missing for production (empty list = all good)."""
+        problems = self.shared_production_problems()
+        if len(self.AUTH_CODE_SECRET) < 32 or self.AUTH_CODE_SECRET == DEFAULT_AUTH_CODE_SECRET:
+            problems.append("AUTH_CODE_SECRET must be a random secret of 32+ characters")
+        if self.EMAIL_BACKEND != "smtp":
+            problems.append("EMAIL_BACKEND must be smtp (console would not send the codes)")
+        elif not (self.SMTP_HOST and self.SMTP_USER and self.SMTP_PASSWORD):
+            problems.append(
+                "SMTP_HOST, SMTP_USER and SMTP_PASSWORD are needed with EMAIL_BACKEND=smtp"
+            )
+        on = [name for name in DEV_ONLY_SWITCHES if getattr(self, name)]
+        if on:
+            problems.append(f"{', '.join(on)} must be false")
+        origins = self._cors_list()
+        if not origins:
+            problems.append("CORS_ORIGINS / ADMIN_ORIGINS must list the admin portal origin(s)")
+        bad = [o for o in origins if "*" in o or not o.startswith("https://")]
+        if bad:
+            problems.append(
+                "CORS_ORIGINS / ADMIN_ORIGINS allow only exact https origins in production, "
+                f"not {', '.join(bad)}"
+            )
+        if self.JOB_RUNNER not in ("local", "cloudtasks"):
+            problems.append("JOB_RUNNER must be local or cloudtasks")
+        if self.JOB_RUNNER == "cloudtasks" and not self.JOBS_TARGET_URL:
+            problems.append("JOBS_TARGET_URL is needed with JOB_RUNNER=cloudtasks")
+        if any(host in self.AI_SERVICE_URL for host in ("localhost", "127.0.0.1")):
+            problems.append("AI_SERVICE_URL still points at this computer (localhost)")
+        return problems
 
     def cors_exact_origins(self) -> list[str]:
         """Origins without a wildcard, e.g. "https://admin.brainbox.lk"."""

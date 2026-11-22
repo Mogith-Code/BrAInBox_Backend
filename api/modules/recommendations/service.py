@@ -610,6 +610,9 @@ async def update_recommendation(
     rec.completed_at = clock.now() if status == "done" else None
     if status == "done":
         await performance_service.record_study_activity(session, user.id)
+        await profiles_service.check_achievements(
+            session, user.id, only=profiles_service.ACTIVITY_ACHIEVEMENTS
+        )
     await session.commit()
     return (await _outs(session, [rec]))[0]
 
@@ -853,6 +856,9 @@ async def update_plan_item(
                 rec.completed_at = item.done_at
         if req.is_done:
             await performance_service.record_study_activity(session, user.id)
+            await profiles_service.check_achievements(
+                session, user.id, only=profiles_service.ACTIVITY_ACHIEVEMENTS
+            )
     await session.commit()
     return _item_out(item, {})
 

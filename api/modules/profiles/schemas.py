@@ -4,9 +4,10 @@ Profile setup = 3 onboarding steps in the app:
   1. stream + subject   2. goal (exam year, target grade, confidence)   3. availability
 """
 
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 WEEK_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 Day = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -94,3 +95,79 @@ class ProfileOut(BaseModel):
     preferred_time: str | None = None
     weekly_hours: float | None = None  # hours_per_day x number of study days
     profile_completed: bool = False
+
+
+# ---------------------------------------------------------------- GET /profile/overview
+class AchievementOut(BaseModel):
+    id: str  # "streak_7"
+    title: str
+    icon: str  # streak | first_mastery | unit_fixer | mcq_100 | past_paper_pro | unit_master
+    description: str
+    unlocked: bool
+    unlocked_at: datetime | None = None
+    seen: bool  # false on an unlocked badge = the app shows the "Achievement unlocked" pop-up
+    badge_label: str | None = None
+    xp: int | None = None
+
+
+class ProfileOverviewOut(BaseModel):
+    """The Profile page (Figma F1) in one call."""
+
+    full_name: str
+    stream_label: str  # "Biological Science" ("" before profile setup)
+    exam_year: int | None = None
+    target_grade: str | None = None
+    days_to_exam: int | None = None  # null if the year or its A/L date is unknown
+    streak_days: int
+    questions_answered: int
+    topics_mastered: int
+    # Unlocked ones first (newest first), then the locked ones in display order.
+    achievements: list[AchievementOut]
+    achievements_total: int
+
+
+# ---------------------------------------------------------------- settings / privacy
+HHMM = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
+
+
+class _NoNulls(BaseModel):
+    """PATCH bodies: send any subset of the fields, but never null."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def no_nulls(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nulls = [k for k, v in data.items() if v is None and k in cls.model_fields]
+            if nulls:
+                raise ValueError(f"cannot be null: {', '.join(nulls)}")
+        return data
+
+
+class NotificationSettingsOut(BaseModel):
+    study_reminders: bool
+    reminder_time: str  # "HH:mm", 24 h, Sri Lanka time
+    community_replies: bool
+
+
+class NotificationSettingsUpdate(_NoNulls):
+    study_reminders: StrictBool | None = None
+    reminder_time: str | None = Field(
+        default=None, pattern=HHMM, description='24 h "HH:mm", e.g. "20:30"'
+    )
+    community_replies: StrictBool | None = None
+
+
+class PrivacySettingsOut(BaseModel):
+    personalised_recommendations: bool = True  # always on (needed for the core app)
+    improve_ai: bool
+    show_name_in_community: bool
+    share_research: bool
+
+
+class PrivacySettingsUpdate(_NoNulls):
+    personalised_recommendations: StrictBool | None = Field(
+        default=None, description="Ignored: personalised recommendations are always on"
+    )
+    improve_ai: StrictBool | None = None
+    show_name_in_community: StrictBool | None = None
+    share_research: StrictBool | None = None

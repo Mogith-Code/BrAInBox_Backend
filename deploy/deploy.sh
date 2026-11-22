@@ -89,16 +89,23 @@ deploy() {
 
   # 2. The public API. --no-cpu-throttling keeps the CPU on after a response is sent, which
   #    the in-process background jobs (notes, visuals, uploads) need; the instance still
-  #    scales to zero when idle.
+  #    scales to zero when idle. The container runs `alembic upgrade head` before it starts.
+  #    --set-env-vars replaces ALL variables, so JOBS_TARGET_URL (the API's own URL) must be
+  #    in it. The very first deploy has no URL yet: it starts with JOB_RUNNER=local and is
+  #    switched to cloudtasks right after.
+  API_URL="$(g run services describe "$API_SERVICE" --region "$REGION" --format 'value(status.url)' 2>/dev/null || true)"
+  if [ -n "$API_URL" ]; then JOBS_ENV="JOB_RUNNER=cloudtasks##JOBS_TARGET_URL=$API_URL"; else JOBS_ENV="JOB_RUNNER=local"; fi
   g run deploy "$API_SERVICE" --image "$IMAGE_BASE/api:$TAG" --region "$REGION" \
     --service-account "$RUN_SA" --allow-unauthenticated --no-cpu-throttling \
     --min-instances 0 --max-instances 2 --cpu 1 --memory 512Mi --timeout 600 --concurrency 40 \
     --set-secrets "$API_SECRETS" \
-    --set-env-vars "^##^ENVIRONMENT=prod##FIREBASE_PROJECT_ID=$PROJECT_ID##STORAGE_BUCKET=${STORAGE_BUCKET:-$PROJECT_ID.firebasestorage.app}##AI_SERVICE_URL=$AI_URL##AI_SERVICE_AUDIENCE=$AI_URL##JOB_RUNNER=cloudtasks##CLOUD_TASKS_LOCATION=$REGION##CLOUD_TASKS_QUEUE=$QUEUE##CLOUD_TASKS_SERVICE_ACCOUNT=$RUN_SA##EMAIL_BACKEND=smtp##SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}##SMTP_PORT=${SMTP_PORT:-587}##SMTP_USER=${SMTP_USER:-}##EMAIL_FROM=${EMAIL_FROM:-BrAInBox <no-reply@example.com>}##CORS_ORIGINS=${CORS_ORIGINS:-https://$PROJECT_ID.web.app}##ADMIN_ORIGINS=${ADMIN_ORIGINS:-}##AL_EXAM_DATES=${AL_EXAM_DATES:-{\}}"
-  API_URL="$(g run services describe "$API_SERVICE" --region "$REGION" --format 'value(status.url)')"
-  # The queue calls the API back on its own public URL.
-  g run services update "$API_SERVICE" --region "$REGION" \
-    --update-env-vars "JOBS_TARGET_URL=$API_URL" >/dev/null
+    --set-env-vars "^##^ENVIRONMENT=prod##$JOBS_ENV##FIREBASE_PROJECT_ID=$PROJECT_ID##STORAGE_BUCKET=${STORAGE_BUCKET:-$PROJECT_ID.firebasestorage.app}##AI_SERVICE_URL=$AI_URL##AI_SERVICE_AUDIENCE=$AI_URL##CLOUD_TASKS_LOCATION=$REGION##CLOUD_TASKS_QUEUE=$QUEUE##CLOUD_TASKS_SERVICE_ACCOUNT=$RUN_SA##EMAIL_BACKEND=smtp##SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}##SMTP_PORT=${SMTP_PORT:-587}##SMTP_USER=${SMTP_USER:-}##EMAIL_FROM=${EMAIL_FROM:-BrAInBox <no-reply@example.com>}##CORS_ORIGINS=${CORS_ORIGINS:-https://$PROJECT_ID.web.app}##ADMIN_ORIGINS=${ADMIN_ORIGINS:-}##AL_EXAM_DATES=${AL_EXAM_DATES:-{\}}"
+  if [ -z "$API_URL" ]; then
+    API_URL="$(g run services describe "$API_SERVICE" --region "$REGION" --format 'value(status.url)')"
+    # First deploy: now that the URL exists, the queue can call the API back on it.
+    g run services update "$API_SERVICE" --region "$REGION" \
+      --update-env-vars "JOB_RUNNER=cloudtasks,JOBS_TARGET_URL=$API_URL" >/dev/null
+  fi
 
   echo
   echo "API:        $API_URL/api/v1   (docs: $API_URL/docs)"
