@@ -5,12 +5,14 @@ Only this module's `service.py` may import this file.
 """
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import AnswerPoint, Keyword, ModelAnswer
+from shared.enums import ContentStatus
 
 
 async def count_model_answers(session: AsyncSession) -> int:
@@ -150,3 +152,18 @@ async def questions_with_approved_points(
         .distinct()
     )
     return set(result.scalars())
+
+
+async def approve_pending_ai_answers(
+    session: AsyncSession, question_id: uuid.UUID, admin_id: uuid.UUID, now: datetime
+) -> None:
+    """Approve the AI-written model answer of this question, if one is waiting."""
+    await session.execute(
+        update(ModelAnswer)
+        .where(
+            ModelAnswer.question_id == question_id,
+            ModelAnswer.source == "ai",
+            ModelAnswer.status == ContentStatus.PENDING_REVIEW,
+        )
+        .values(status=ContentStatus.APPROVED, approved_by=admin_id, approved_at=now)
+    )
