@@ -8,6 +8,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -36,9 +37,17 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Any fixed number: the id of the PostgreSQL advisory lock held while migrating.
+MIGRATION_LOCK_ID = 727_001
+
+
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
+        # Two containers starting at once (each runs `alembic upgrade head`) would otherwise
+        # migrate together. The second one waits here, then finds nothing left to do. The lock
+        # is released when this transaction ends.
+        connection.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": MIGRATION_LOCK_ID})
         context.run_migrations()
 
 

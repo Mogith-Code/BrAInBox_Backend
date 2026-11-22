@@ -25,6 +25,8 @@ dependencies = [
     "alembic>=1.13",
     "pgvector>=0.3",
     "httpx>=0.27",
+    # IANA time zones (Asia/Colombo) for zoneinfo. Windows and slim images have none built in.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

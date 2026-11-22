@@ -68,6 +68,7 @@ from api.modules.exams.schemas import (
 from api.modules.jobs import service as jobs_service
 from api.modules.knowledge_base import service as knowledge_service
 from api.modules.performance import service as performance_service
+from api.modules.profiles import service as profiles_service
 from api.modules.questions import service as questions_service
 from api.modules.syllabus import service as syllabus_service
 from shared.db.models import AIJob, Paper
@@ -443,6 +444,7 @@ async def submit_paper(
         session, user.id, attempt.id, source=MasterySource.EXAM
     )
     await performance_service.record_study_activity(session, user.id)
+    await profiles_service.check_achievements(session, user.id)
     await session.commit()
     result.attempt_id = attempt.id
 

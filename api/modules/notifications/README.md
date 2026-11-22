@@ -24,8 +24,12 @@ and the filter chip). `event` is the backend `NotificationType`. `data` says whe
 |---|---|---|
 | `job_done` | recommendation | `service.on_job_finished`, a listener in `api/core/jobs.py` (`register_job_listener`). Only the student background jobs in `JOB_MESSAGES` (summaries, notes, visuals, answer marking), on success and on failure |
 | `plan_ready` | reminder | `recommendations.service.regenerate_plan` (a new weekly plan) |
-| `community_reply` | community | `community.service.create_reply` (an approved reply to someone else's post) and `on_answer_suggested` (the AI answer) |
+| `community_reply` | community | `community.service.create_reply` (an approved reply to someone else's post) and `on_answer_suggested` (the AI answer). Skipped when the author turned **community replies** off (`PATCH /settings`) |
 | `system` | other | moderation warnings (`community.service._warn`) |
+
+**Study reminders** (`study_reminder`, type `reminder`) have no sender yet. Whoever adds one must read
+`profiles.service.get_notification_settings(session, user_id)` and send only when `study_reminders` is true, at
+`reminder_time` (24 h `"HH:mm"`, Sri Lanka time).
 
 Other modules call `notifications.service.notify(session, user_id, type, title, body, data)`. It only adds the
 row; the caller's commit saves it.

@@ -59,8 +59,10 @@ from api.modules.learn import service as learn_service
 from api.modules.notifications import service as notifications_service
 from api.modules.performance import service as performance_service
 from api.modules.profiles import service as profiles_service
+from api.modules.quality import service as quality_service
 from api.modules.quizzes import service as quizzes_service
 from api.modules.recommendations import service as recommendations_service
+from api.modules.visuals import service as visuals_service
 from shared.db.models import EmailCode, PasswordResetToken, User
 
 logger = logging.getLogger(__name__)
@@ -69,8 +71,9 @@ MODULE_NAME = "auth"
 
 # DELETE /auth/me asks each of these modules to delete the student's rows, in this order.
 # Each has `delete_user_data(session, user_id) -> list[storage paths]` and does not commit.
-# Tables not listed here (e.g. question / visual reports, bookmarks are in learn) go with
-# the users row through ON DELETE CASCADE.
+# Only the auth tables (email codes, reset tokens) go with the users row itself. Columns with
+# ON DELETE SET NULL are shared content the student only touched (e.g. an approved visual they
+# asked for, ai_usage_log for cost reports): they stay without the link to the student.
 USER_DATA_SERVICES = (
     evaluation_service,  # evaluations + answer photos
     exams_service,  # quiz / exam / diagnostic attempts, answers, personal papers
@@ -79,6 +82,8 @@ USER_DATA_SERVICES = (
     content_service,  # uploads + summaries, own notes, library
     learn_service,  # bookmarks + Learn upload files
     community_service,  # posts, replies, votes, reports, group memberships
+    quality_service,  # question reports
+    visuals_service,  # visual reports, own unapproved visuals + their images
     notifications_service,  # notifications, push device tokens
     jobs_service,  # AI jobs the student started
     profiles_service,  # profile + settings
@@ -285,6 +290,11 @@ async def export_me(session: AsyncSession, claims: dict[str, Any]) -> dict[str, 
     attempts = await exams_service.export_user_data(session, user.id)
     plans = await recommendations_service.export_user_data(session, user.id)
     content = await content_service.export_user_data(session, user.id)
+    privacy = {
+        **profile_data["privacy"],
+        "terms_accepted_at": user.consent_at,
+        "push_devices": await notifications_service.count_devices(session, user.id),
+    }
     return {
         "exported_at": clock.now().isoformat(),
         "account": {
@@ -299,10 +309,8 @@ async def export_me(session: AsyncSession, claims: dict[str, Any]) -> dict[str, 
         },
         "profile": profile_data["profile"],
         "settings": profile_data["settings"],
-        "privacy": {
-            "terms_accepted_at": user.consent_at,
-            "push_devices": await notifications_service.count_devices(session, user.id),
-        },
+        "privacy": privacy,
+        "achievements": profile_data["achievements"],
         "quiz_attempts": attempts["quiz_attempts"],
         "exam_attempts": attempts["exam_attempts"],
         "evaluations": await evaluation_service.export_user_data(session, user.id),
@@ -311,7 +319,9 @@ async def export_me(session: AsyncSession, claims: dict[str, Any]) -> dict[str, 
         "study_plan": plans["study_plan"],
         "notes": content["notes"],
         "uploads": content["uploads"],
+        "bookmarks": await learn_service.export_user_data(session, user.id),
         "community": await community_service.export_user_data(session, user.id),
+        "notifications": await notifications_service.export_user_data(session, user.id),
     }
 
 

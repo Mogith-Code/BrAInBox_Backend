@@ -7,7 +7,7 @@ Only this module's `service.py` may import this file.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import AIJob, Topic, Unit, User, Visual, VisualReport
@@ -185,3 +185,20 @@ async def reports_per_day(session: AsyncSession, since: datetime) -> dict[date, 
         select(day, func.count()).where(VisualReport.created_at >= since).group_by(day)
     )
     return {d: int(n) for d, n in result.all()}
+
+
+# ---------------------------------------------------------------- account delete
+
+
+async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's visual reports and their own visuals that are NOT approved (only
+    they can see those). Approved visuals are shared content: they stay, and created_by is
+    set to NULL with the users row. Returns the image paths of the deleted visuals. No commit.
+    """
+    await session.execute(delete(VisualReport).where(VisualReport.user_id == user_id))
+    result = await session.execute(
+        delete(Visual)
+        .where(Visual.created_by == user_id, Visual.status != ContentStatus.APPROVED)
+        .returning(Visual.image_path)
+    )
+    return [path for path in result.scalars() if path]

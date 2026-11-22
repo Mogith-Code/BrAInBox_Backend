@@ -227,6 +227,9 @@ async def save_answer(
         await repository.add_response(session, response)
         responses[question_id] = response
     await performance_service.record_study_activity(session, user_id)
+    await profiles_service.check_achievements(
+        session, user_id, only=profiles_service.ACTIVITY_ACHIEVEMENTS
+    )
     await session.commit()
     answered = sum(1 for r in responses.values() if r.selected_option_id is not None)
     return AnswerSavedOut(answered=answered, total=len(rows))
@@ -329,6 +332,7 @@ async def submit_diagnostic(
         session, user_id, marked.mastery_by_unit_id, source="diagnostic"
     )
     await performance_service.refresh_topic_progress(session, user_id)
+    await profiles_service.check_achievements(session, user_id)
     await session.commit()
     return _result(attempt, marked)
 
@@ -581,6 +585,9 @@ async def answer_quiz_question(
         session, row.id, correct=bool(response.is_correct), label=chosen.label
     )
     await performance_service.record_study_activity(session, user_id)
+    await profiles_service.check_achievements(
+        session, user_id, only=profiles_service.ACTIVITY_ACHIEVEMENTS
+    )
     if req.time_spent_seconds:
         await performance_service.add_study_time(session, user_id, req.time_spent_seconds)
 
@@ -764,6 +771,7 @@ async def submit_quiz(session: AsyncSession, user_id: uuid.UUID, quiz_id: uuid.U
         await performance_service.after_attempt_marked(
             session, user_id, attempt.id, source=MasterySource.QUIZ, record_concepts=False
         )
+        await profiles_service.check_achievements(session, user_id)
         await session.commit()
     return await _quiz_result(session, attempt)
 

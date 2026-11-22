@@ -754,6 +754,57 @@ async def get_streak(session: AsyncSession, user_id: uuid.UUID) -> int:
     return count_streak(days, today)
 
 
+# =========================================================================== profile page + achievements
+# Read by the profiles module (GET /profile/overview and the achievement rules).
+
+
+async def count_answers(
+    session: AsyncSession, user_id: uuid.UUID, *, mcq_only: bool = False
+) -> int:
+    """Questions answered in quizzes, the diagnostic and exams (abandoned attempts left out)."""
+    return await repository.count_answered(session, user_id, mcq_only=mcq_only)
+
+
+async def count_mastered_topics(session: AsyncSession, user_id: uuid.UUID) -> int:
+    return len(await repository.mastered_topic_ids(session, user_id))
+
+
+def weak_to_strong(history: list[tuple[uuid.UUID, int]]) -> list[uuid.UUID]:
+    """Pure: units whose newest mastery is Strong (grade A) after an earlier Weak one (S / F).
+    `history` is (unit_id, mastery) oldest first."""
+    was_weak: set[uuid.UUID] = set()
+    latest: dict[uuid.UUID, int] = {}
+    for unit_id, mastery in history:
+        if grading.is_weak_percent(mastery):
+            was_weak.add(unit_id)
+        latest[unit_id] = mastery
+    return [
+        u
+        for u, m in latest.items()
+        if u in was_weak and grading.grade_for(m).status == TopicStatus.STRONG
+    ]
+
+
+async def units_weak_to_strong(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Titles of the units the student took from Weak to Strong (Unit 1 first)."""
+    fixed = set(weak_to_strong(await repository.unit_mastery_history(session, user_id)))
+    return [u.title for u in await syllabus_service.list_units(session) if u.id in fixed]
+
+
+async def fully_mastered_units(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Titles of the units where every current topic is mastered (Unit 1 first)."""
+    mastered = await repository.mastered_topic_ids(session, user_id)
+    if not mastered:
+        return []
+    units = await syllabus_service.list_units(session)
+    topics = await syllabus_service.list_topics_by_unit(session, [u.id for u in units])
+    return [u.title for u in units if topics[u.id] and all(t.id in mastered for t in topics[u.id])]
+
+
+async def has_submitted_past_paper(session: AsyncSession, user_id: uuid.UUID) -> bool:
+    return await repository.count_finished_past_papers(session, user_id) > 0
+
+
 # =========================================================================== topic progress
 # What the Learn screens show (read by the syllabus module).
 

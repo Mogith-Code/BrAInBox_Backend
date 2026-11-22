@@ -78,6 +78,30 @@ class AISettings(SharedSettings):
 
     API_VERSION: str = "0.1.0"
 
+    def production_problems(self) -> list[str]:
+        """Settings that are unsafe or missing for production (empty list = all good)."""
+        problems = self.shared_production_problems()
+        if self.USE_FAKE_AI:
+            problems.append("USE_FAKE_AI must be false (students would get fake AI answers)")
+        if not self.GEMINI_API_KEY:
+            problems.append("GEMINI_API_KEY is empty (the fake AI would answer instead)")
+        if self.LLM_PROVIDER.strip().lower() == "mock":
+            problems.append("LLM_PROVIDER=mock would give students fake notes and summaries")
+        if self.IMAGE_PROVIDER not in ("cloudflare", "gemini"):
+            problems.append("IMAGE_PROVIDER must be cloudflare or gemini")
+        return problems
+
+    def production_warnings(self) -> list[str]:
+        """Optional features that are switched off by missing settings (the service still runs)."""
+        warnings = []
+        if self.IMAGE_PROVIDER == "cloudflare" and not (
+            self.CLOUDFLARE_ACCOUNT_ID and self.CLOUDFLARE_API_TOKEN
+        ):
+            warnings.append(
+                "CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN empty: visuals fall back to diagrams"
+            )
+        return warnings
+
     @property
     def use_fakes(self) -> bool:
         """Fake providers are used when asked for, or when no Gemini key is set."""

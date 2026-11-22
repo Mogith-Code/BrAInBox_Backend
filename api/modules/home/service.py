@@ -20,9 +20,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import clock
 from api.core.ai_client import AIClient
-from api.core.config import get_settings
 from api.core.errors import AppError
 from api.core.security import CurrentUser
 from api.modules.home.schemas import (
@@ -77,13 +75,9 @@ def initials(user: CurrentUser) -> str:
 
 
 def days_to_exam(exam_year: int | None) -> int | None:
-    """Days from today (Sri Lanka) to the A/L exam; null if the year or its date is unknown."""
-    if exam_year is None:
-        return None
-    exam_date = get_settings().AL_EXAM_DATES.get(exam_year)
-    if exam_date is None:
-        return None
-    return max(0, (exam_date - clock.today()).days)
+    """Days from today (Sri Lanka) to the A/L exam; null if the year or its date is unknown.
+    The same number as the Profile page (profiles service)."""
+    return profiles_service.days_to_exam(exam_year)
 
 
 def average(values: list[int]) -> float | None:
@@ -210,5 +204,8 @@ async def set_plan_item(
     )
     if done:
         await performance_service.record_study_activity(session, user.id)
+        await profiles_service.check_achievements(
+            session, user.id, only=profiles_service.ACTIVITY_ACHIEVEMENTS
+        )
     await session.commit()
     return item

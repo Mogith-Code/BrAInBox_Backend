@@ -191,6 +191,22 @@ async def count_devices(session: AsyncSession, user_id: uuid.UUID) -> int:
     return await repository.count_devices(session, user_id)
 
 
+async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The student's notifications for the data export (device / FCM tokens are never in it)."""
+    return [
+        {
+            "id": n.id,
+            "type": n.type,
+            "title": n.title,
+            "body": n.body,
+            "data": n.data,
+            "read_at": n.read_at,
+            "created_at": n.created_at,
+        }
+        for n in await repository.list_all_for_user(session, user_id)
+    ]
+
+
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
     """Delete the student's notifications and device tokens (no commit). No files."""
     await repository.delete_user_rows(session, user_id)

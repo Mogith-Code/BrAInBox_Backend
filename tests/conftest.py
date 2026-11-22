@@ -15,6 +15,9 @@ os.environ["USE_FAKE_AI"] = "true"
 os.environ["AI_SERVICE_TOKEN"] = "test-service-token"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["DEV_LOGIN_ENABLED"] = "false"
+# Many tests call the auth / AI routes quickly; tests/api/test_rate_limit.py turns limits on.
+os.environ["RATE_LIMIT_AUTH_PER_MINUTE"] = "0"
+os.environ["RATE_LIMIT_AI_PER_MINUTE"] = "0"
 if os.environ.get("TEST_DATABASE_URL"):
     os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
@@ -45,6 +48,40 @@ STUDENT = CurrentUser(
 ADMIN = CurrentUser(
     id=uuid.UUID(int=2), firebase_uid="test-admin", email="admin@test.local", role=UserRole.ADMIN
 )
+
+
+# --------------------------------------------------------------------------- time zones
+
+
+def install_pgserver_timezones() -> None:
+    """Give a local pgserver PostgreSQL the IANA time zones it is shipped without.
+
+    The pgserver wheel for Windows has no share/postgresql/timezone folder, so queries using
+    'Asia/Colombo' fail with 'time zone not recognized'. The `tzdata` package holds the same
+    compiled zone files PostgreSQL reads, so copy them in once. PostgreSQL loads zone files
+    when a query needs them, so a server that is already running picks them up. Does nothing
+    when pgserver is not installed or already has its zones (Linux CI, a real server).
+    """
+    import importlib.util
+    import shutil
+    from pathlib import Path
+
+    pg_spec = importlib.util.find_spec("pgserver")
+    tz_spec = importlib.util.find_spec("tzdata")
+    if not pg_spec or not pg_spec.origin or not tz_spec or not tz_spec.origin:
+        return
+    share = Path(pg_spec.origin).parent / "pginstall" / "share" / "postgresql"
+    target = share / "timezone"
+    source = Path(tz_spec.origin).parent / "zoneinfo"
+    if not share.is_dir() or (target / "Asia" / "Colombo").is_file() or not source.is_dir():
+        return
+    try:
+        shutil.copytree(source, target, dirs_exist_ok=True)
+    except OSError:
+        pass  # read-only install: the 5 time zone tests fail, everything else still runs
+
+
+install_pgserver_timezones()
 
 
 # --------------------------------------------------------------------------- database check

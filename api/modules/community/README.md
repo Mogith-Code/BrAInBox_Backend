@@ -64,6 +64,11 @@ posts live under their group (`/groups/{id}/posts`).
 - **Delete is soft** (`deleted_at`): the row stays so replies and votes keep working, but nobody sees it.
 - Authors are shown by display name only (`"Student"` when they have none); `author` is `null` for an AI suggested
   answer or a deleted account.
+- **Settings > Data & privacy:** an author with `show_name_in_community: false` (`PATCH /privacy`) is shown as
+  `"A/L student"` on their posts and replies, to every viewer including themselves
+  (`profiles.service.users_hiding_name`).
+- **Settings > Notifications:** the `community_reply` notification is only sent when the post's author has
+  `community_replies: true` (`profiles.service.wants_community_replies`).
 
 ### Replies and the accepted answer
 

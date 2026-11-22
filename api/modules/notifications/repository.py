@@ -65,6 +65,16 @@ async def count_devices(session: AsyncSession, user_id: uuid.UUID) -> int:
     return result.scalar_one()
 
 
+async def list_all_for_user(session: AsyncSession, user_id: uuid.UUID) -> list[Notification]:
+    """Every notification of the student, oldest first (data export)."""
+    result = await session.scalars(
+        select(Notification)
+        .where(Notification.user_id == user_id)
+        .order_by(Notification.created_at, Notification.id)
+    )
+    return list(result)
+
+
 async def delete_user_rows(session: AsyncSession, user_id: uuid.UUID) -> None:
     """Delete the student's notifications and push device tokens. No commit."""
     await session.execute(delete(Notification).where(Notification.user_id == user_id))

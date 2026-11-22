@@ -41,6 +41,8 @@ def _get(kind: str, build_real: Any, build_fake: Any) -> Any:
             try:
                 _cache[kind] = build_real()
             except Exception:
+                if get_settings().ENVIRONMENT == "prod":
+                    raise  # never answer real students with the fake
                 # Missing SDK or credentials: fall back to the fake so the service still starts.
                 logger.exception("Could not create real %s provider; using the fake", kind)
                 _cache[kind] = build_fake()

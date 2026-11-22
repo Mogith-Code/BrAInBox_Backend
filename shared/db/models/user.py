@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -113,8 +114,58 @@ class UserSettings(TimestampMixin, Base):
     notifications_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true"
     )
+    # GET/PATCH /settings "reminder_time" (Sri Lanka time); NULL = the default 20:30.
     daily_reminder_time: Mapped[time | None] = mapped_column(Time)  # local time, e.g. 19:30
     email_updates: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    # --- Settings > Notifications (GET/PATCH /settings)
+    study_reminders: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    community_replies: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    # --- Data & privacy (GET/PATCH /privacy). Personalised recommendations are always on.
+    improve_ai: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # False: community posts / replies show "A/L student" instead of the name.
+    show_name_in_community: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    share_research: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class Achievement(TimestampMixin, Base):
+    """A badge students can earn ("7-day streak"). Rows are seeded by migration 0011; the rule
+    that awards each one lives in the profiles service. Owner: Mogith (profiles)."""
+
+    __tablename__ = "achievements"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # "streak_7"
+    title: Mapped[str] = mapped_column(String(80))
+    description: Mapped[str] = mapped_column(String(300))
+    # streak | first_mastery | unit_fixer | mcq_100 | past_paper_pro | unit_master
+    icon: Mapped[str] = mapped_column(String(30))
+    badge_label: Mapped[str | None] = mapped_column(String(30))  # "Strong"
+    xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    order_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class UserAchievement(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """An achievement one student unlocked. Owner: Mogith (profiles)."""
+
+    __tablename__ = "user_achievements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "achievement_id", name="uq_user_achievements_user_achievement"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    achievement_id: Mapped[str] = mapped_column(
+        ForeignKey("achievements.id", ondelete="CASCADE"), index=True
+    )
+    unlocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # pop-up shown
+    # Personal text, e.g. "You took Genetics from Weak to Strong." (else the general one)
+    detail: Mapped[str | None] = mapped_column(String(300))
 
 
 class DeviceToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):

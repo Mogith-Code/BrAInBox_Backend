@@ -24,6 +24,7 @@ from ai_service.errors import UserInputError
 from ai_service.providers import provider_names
 from ai_service.routes import jobs, sync
 from shared.branding import APP_NAME, FAVICON_32_PATH, LOGO_URL, TAGLINE
+from shared.logging_setup import configure_logging
 
 SERVICE_TOKEN_HEADER = "X-Service-Token"
 OPEN_PATHS = ("/docs", "/redoc", "/openapi.json", "/static/")
@@ -38,7 +39,7 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    logging.basicConfig(level=settings.LOG_LEVEL)
+    configure_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
 
     app = FastAPI(
         title=f"{APP_NAME} AI Service (internal)",
@@ -135,4 +136,18 @@ def _add_branded_docs(app: FastAPI) -> None:
         )
 
 
+def check_production_settings(settings: Any) -> None:
+    """Refuse to start in production with fake AI, default secrets or missing settings."""
+    problems = settings.production_problems()
+    if problems:
+        raise RuntimeError("Unsafe production settings: " + "; ".join(problems))
+    for warning in settings.production_warnings():
+        logger.warning("Production setting: %s", warning)
+
+
 app = create_app()
+
+# Checked once when the server starts (uvicorn ai_service.main:app), not for every test app.
+# After create_app, so the warnings use the configured (JSON) logging.
+if get_settings().ENVIRONMENT == "prod":
+    check_production_settings(get_settings())

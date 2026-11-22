@@ -835,3 +835,45 @@ async def test_three_reports_hide_a_reply_and_uncount_it(client, forum, db_sessi
 
     detail = (await client.get(f"/api/v1/posts/{post.id}")).json()
     assert detail["replies"] == [] and detail["reply_count"] == 0
+
+
+# --------------------------------------------------------------------------- privacy / settings
+
+
+@pytest.mark.db
+async def test_show_name_in_community_off_hides_the_name(client, forum, db_session, moderator):
+    """With "show my name" off, my posts and replies say "A/L student" to everyone (me too);
+    other authors keep their names."""
+    turned_off = await client.patch("/api/v1/privacy", json={"show_name_in_community": False})
+    assert turned_off.json()["show_name_in_community"] is False
+    mine = await _post(db_session, forum.group, STUDENT.id, "My question")
+    theirs = await _post(db_session, forum.group, OTHER.id, "Their question")
+    created = (
+        await client.post(f"/api/v1/posts/{theirs.id}/replies", json={"body": "My answer"})
+    ).json()
+    async with _client_as(OTHER) as other:
+        feed = (await other.get(f"/api/v1/groups/{forum.group.id}/posts")).json()["items"]
+        my_detail = (await other.get(f"/api/v1/posts/{mine.id}")).json()
+        their_detail = (await other.get(f"/api/v1/posts/{theirs.id}")).json()
+    own_view = (await client.get(f"/api/v1/posts/{mine.id}")).json()
+
+    names = {p["title"]: p["author"]["name"] for p in feed}
+    assert names == {"My question": "A/L student", "Their question": "Kasun"}
+    assert my_detail["author"]["name"] == "A/L student"
+    assert my_detail["author"]["id"] == str(STUDENT.id)
+    assert their_detail["author"]["name"] == "Kasun"
+    assert [r["author"]["name"] for r in their_detail["replies"]] == ["A/L student"]
+    assert created["author"]["name"] == "A/L student"
+    assert (own_view["author"]["name"], own_view["is_mine"]) == ("A/L student", True)
+
+
+@pytest.mark.db
+async def test_community_replies_off_means_no_reply_notification(client, forum, db_session):
+    await client.patch("/api/v1/settings", json={"community_replies": False})
+    mine = await _post(db_session, forum.group, STUDENT.id, "Quiet question")
+    async with _client_as(OTHER) as other:
+        reply = await other.post(f"/api/v1/posts/{mine.id}/replies", json={"body": "An answer"})
+    assert reply.status_code == 201, reply.text
+
+    items = (await client.get("/api/v1/notifications")).json()["items"]
+    assert [n for n in items if n["data"].get("post_id") == str(mine.id)] == []

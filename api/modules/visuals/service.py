@@ -431,3 +431,13 @@ async def waiting_for_review_counts(session: AsyncSession, older_than: Any) -> t
 
 async def reports_per_day(session: AsyncSession, since: Any) -> dict[Any, int]:
     return await repository.reports_per_day(session, since)
+
+
+# =========================================================================== account delete
+# Called by the auth module (DELETE /auth/me).
+
+
+async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Delete the student's visual reports and own unapproved visuals (no commit). Returns the
+    deleted visuals' image paths, to delete from Storage after the commit."""
+    return await repository.delete_user_rows(session, user_id)
