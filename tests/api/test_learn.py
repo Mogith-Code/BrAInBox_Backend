@@ -218,7 +218,7 @@ async def test_every_route_needs_login(anon_client):
 async def test_docs_list_every_learn_route(anon_client):
     paths = (await anon_client.get("/openapi.json")).json()["paths"]
     learn = {p for p in paths if p.startswith(L)}
-    assert len(learn) == 18
+    assert len(learn) == 20
     assert f"{L}/uploads/{{upload_id}}/save-to-short-notes" in learn
 
 

@@ -26,7 +26,7 @@ from api.core.ai_client import AIClient
 from api.core.config import get_settings
 from api.core.errors import AppError, NotFoundError
 from api.core.security import CurrentUser
-from api.modules.learn import mastery, repository
+from api.modules.learn import mastery, official_notes, repository
 from api.modules.learn.mastery import NO_PRACTICE, TopicMastery
 from api.modules.learn.schemas import (
     AskIn,
@@ -44,6 +44,8 @@ from api.modules.learn.schemas import (
     LearnJobStatus,
     MasteryOut,
     NoteOut,
+    OfficialBookOut,
+    OfficialNotesOut,
     PracticeSummaryOut,
     ProgressEvent,
     ProgressOut,
@@ -342,6 +344,62 @@ async def get_notes(
             f"No {note_type.value} notes for this topic yet", code="NOTES_NOT_FOUND"
         )
     return note_out(note)
+
+
+async def get_official_notes(session: AsyncSession, topic_ref: str) -> OfficialNotesOut:
+    """The real book pages for this topic's unit, and the page to open first.
+
+    The whole unit stays readable, so a topic that is hard to locate never hides any content.
+    """
+    topic, unit, _ = await _topic(session, topic_ref)
+    books: list[OfficialBookOut] = []
+    for document in await repository.official_books(session, unit.id):
+        path = await run_in_threadpool(official_notes.book_file, document.file_path)
+        if path is None:  # the file can't be read on this server
+            logger.warning("Official book file is missing: %s", document.id)
+            continue
+        pages = await run_in_threadpool(official_notes.page_count, path)
+        title = official_notes.book_title(document.title)
+        books.append(OfficialBookOut(document_id=document.id, title=title, page_count=pages))
+    if not books:
+        return OfficialNotesOut(
+            topic_id=topic.id,
+            available=False,
+            books=[],
+            open_document_id=None,
+            open_page=None,
+            exact_match=False,
+        )
+
+    # Passages come back grouped by book id, so put them in the books' reading order.
+    order = {book.document_id: i for i, book in enumerate(books)}
+    rows = await repository.book_passages(session, list(order))
+    passages = [
+        official_notes.Passage(document_id, page, text)
+        for document_id, page, text in sorted(rows, key=lambda row: order[row[0]])
+    ]
+    start = official_notes.find_start_page(topic.title, passages)
+    return OfficialNotesOut(
+        topic_id=topic.id,
+        available=True,
+        books=books,
+        open_document_id=start.document_id if start else books[0].document_id,
+        open_page=start.page if start else 1,
+        exact_match=start.exact if start else False,
+    )
+
+
+async def official_note_page(session: AsyncSession, document_id: uuid.UUID, page: int) -> bytes:
+    """One page of an approved book as a JPEG. 404 for anything else."""
+    document = await repository.official_book(session, document_id)
+    path = None
+    if document is not None:
+        path = await run_in_threadpool(official_notes.book_file, document.file_path)
+    if path is None:
+        raise NotFoundError("This book is not available", code="OFFICIAL_NOTES_NOT_FOUND")
+    if page > await run_in_threadpool(official_notes.page_count, path):
+        raise NotFoundError("This page does not exist", code="OFFICIAL_PAGE_NOT_FOUND")
+    return await run_in_threadpool(official_notes.render_page, path, page)
 
 
 def params_hash(req: GenerateNotesRequest, syllabus_version: str | None) -> str:

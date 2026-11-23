@@ -36,6 +36,8 @@ api = [
     "python-multipart>=0.0.9",
     # Photos of handwritten answers are re-encoded before they are stored.
     "pillow>=10.0",
+    # Shows the pages of the scanned government books in the Notes tab.
+    "pypdfium2>=4.30",
     # Access tokens for Cloud Tasks (JOB_RUNNER=cloudtasks).
     "google-auth>=2.30",
     "requests>=2.31",
