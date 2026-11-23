@@ -7,6 +7,7 @@ several modules.
 """
 
 from datetime import date, datetime, time, timedelta
+from time import monotonic
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,15 +16,18 @@ from api.core import clock
 from api.core.security import CurrentUser
 from api.modules.admin import repository
 from api.modules.admin.schemas import (
+    ConsoleStatsOut,
     DashboardActivity,
     DashboardKpi,
     DashboardMissedTopic,
     DashboardOut,
     DashboardReport,
 )
+from api.modules.auth import service as auth_service
 from api.modules.community import service as community_service
 from api.modules.community.schemas import ModerationItemOut
 from api.modules.content import service as content_service
+from api.modules.evaluation import service as evaluation_service
 from api.modules.performance import service as performance_service
 from api.modules.profiles import service as profiles_service
 from api.modules.quality import service as quality_service
@@ -50,6 +54,30 @@ async def record_audit(
         ),
     )
     await session.commit()
+
+
+# =========================================================================== sign-in page totals
+CONSOLE_STATS_SECONDS = 60  # this route needs no login, so repeat visits don't reach the database
+_console_stats: tuple[float, ConsoleStatsOut] | None = None
+
+
+async def console_stats(session: AsyncSession) -> ConsoleStatsOut:
+    """Totals for the admin sign-in page, refreshed at most once a minute."""
+    global _console_stats
+    now = monotonic()
+    if _console_stats is not None and now - _console_stats[0] < CONSOLE_STATS_SECONDS:
+        return _console_stats[1]
+    older_than = clock.now()
+    questions_waiting, _ = await quality_service.pending_counts(session, older_than)
+    content_waiting, _ = await content_service.pending_review_counts(session, older_than)
+    accuracy = (await evaluation_service.admin_accuracy(session)).within_one_mark
+    stats = ConsoleStatsOut(
+        ai_items_to_review=questions_waiting + content_waiting,
+        students=await auth_service.count_active_students(session),
+        eval_accuracy_percent=round(accuracy * 100) if accuracy is not None else None,
+    )
+    _console_stats = (now, stats)
+    return stats
 
 
 # =========================================================================== dashboard

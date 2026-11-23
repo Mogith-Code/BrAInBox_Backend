@@ -102,6 +102,11 @@ async def get_status() -> ModuleStatus:
     return ModuleStatus(module=MODULE_NAME, status="todo")
 
 
+async def count_active_students(session: AsyncSession) -> int:
+    """Student accounts that are not suspended."""
+    return await repository.count_active_students(session)
+
+
 # =========================================================================== small helpers
 
 

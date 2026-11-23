@@ -20,6 +20,7 @@ from api.core.config import get_settings
 from api.core.database import SessionDep
 from api.core.errors import register_error_handlers
 from api.core.rate_limit import RateLimiter, rate_limit_middleware
+from api.modules.admin.public_stats import router as public_stats_router
 from api.modules.admin.router import router as admin_router
 from api.modules.auth.router import router as auth_router
 from api.modules.community.router import router as community_router
@@ -69,6 +70,7 @@ MODULE_ROUTERS = [
     settings_router,
     jobs_router,
     admin_router,
+    public_stats_router,
 ]
 
 logger = logging.getLogger(__name__)

@@ -23,6 +23,16 @@ async def count_users(session: AsyncSession) -> int:
     return result.scalar_one()
 
 
+async def count_active_students(session: AsyncSession) -> int:
+    """Student accounts that are not suspended (admins are not counted)."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(User)
+        .where(User.role == UserRole.STUDENT, User.is_active.is_(True))
+    )
+    return result.scalar_one()
+
+
 # ---------------------------------------------------------------- users
 async def get_user_by_uid(session: AsyncSession, firebase_uid: str) -> User | None:
     result = await session.execute(select(User).where(User.firebase_uid == firebase_uid))
