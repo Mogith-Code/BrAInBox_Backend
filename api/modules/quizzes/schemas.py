@@ -75,6 +75,8 @@ class DiagnosticResult(BaseModel):
     strongest: UnitRef
     needs_work: UnitRef
     units: list[UnitResult]
+    # Units with no approved questions yet: not measured by this test.
+    units_not_checked: list[UnitRef] = []
     summary: str
     summary_ai_generated: bool
     disclaimer: str

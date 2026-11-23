@@ -5,6 +5,8 @@
     GET    /learn/units/{id}                        Unit + ordered topics with my status
     GET    /learn/topics/{id}                       Topic detail, breadcrumb, mastery, flags
     GET    /learn/topics/{id}/notes?type=           My note, else the official one
+    GET    /learn/topics/{id}/official-notes        Government book pages for this topic
+    GET    /learn/official-notes/{doc}/pages/{n}    One book page as a JPEG
     POST   /learn/topics/{id}/notes/generate        AI notes job -> 202 {job_id}
     GET    /learn/jobs/{id}                         Job status (owner only)
     GET    /learn/topics/{id}/diagrams              Ordered images
@@ -34,6 +36,7 @@ from fastapi import (
     BackgroundTasks,
     File,
     Form,
+    Path,
     Query,
     Request,
     Response,
@@ -47,6 +50,8 @@ from api.core.pagination import PageParamsDep
 from api.core.security import CurrentUserDep
 from api.modules.learn import service
 from api.modules.learn.schemas import (
+    AskIn,
+    AskOut,
     BookmarkList,
     BookmarkState,
     DiagramList,
@@ -54,6 +59,7 @@ from api.modules.learn.schemas import (
     JobAccepted,
     JobOut,
     NoteOut,
+    OfficialNotesOut,
     PracticeSummaryOut,
     ProgressEvent,
     ProgressOut,
@@ -71,6 +77,12 @@ from api.modules.learn.schemas import (
 from shared.enums import NoteKind, SummaryLength
 
 router = APIRouter(prefix="/learn", tags=["Learn"])
+
+
+@router.post("/ask", response_model=AskOut, summary="Ask BrAInBox (answers from approved books)")
+async def ask(req: AskIn, user: CurrentUserDep, session: SessionDep, ai: AIClientDep) -> AskOut:
+    """Errors: 401 · 404 `TOPIC_NOT_FOUND` · 422 · 503 `AI_SERVICE_UNAVAILABLE`."""
+    return await service.ask_tutor(session, req, ai)
 
 
 # --------------------------------------------------------------------------- syllabus tree
@@ -120,6 +132,41 @@ async def get_notes(
 
     Errors: 401 · 404 `TOPIC_NOT_FOUND` / `NOTES_NOT_FOUND` · 422 unknown type."""
     return await service.get_notes(session, user, topic_id, type)
+
+
+@router.get(
+    "/topics/{topic_id}/official-notes",
+    response_model=OfficialNotesOut,
+    summary="Government notes for a topic",
+)
+async def get_official_notes(
+    topic_id: str, user: CurrentUserDep, session: SessionDep
+) -> OfficialNotesOut:
+    """The approved resource book of this topic's unit and the page to open first.
+    `available=false` when no book is imported. Errors: 401 · 404 `TOPIC_NOT_FOUND`."""
+    return await service.get_official_notes(session, topic_id)
+
+
+@router.get(
+    "/official-notes/{document_id}/pages/{page}",
+    response_class=Response,
+    responses={200: {"content": {"image/jpeg": {}}}},
+    summary="One page of a government book",
+)
+async def get_official_note_page(
+    document_id: uuid.UUID,
+    page: Annotated[int, Path(ge=1)],
+    user: CurrentUserDep,
+    session: SessionDep,
+) -> Response:
+    """The printed page as a JPEG (login required, so send the Authorization header).
+    Errors: 401 · 404 `OFFICIAL_NOTES_NOT_FOUND` / `OFFICIAL_PAGE_NOT_FOUND` · 422."""
+    image = await service.official_note_page(session, document_id, page)
+    return Response(
+        content=image,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=86400"},  # only on this student's device
+    )
 
 
 @router.post(

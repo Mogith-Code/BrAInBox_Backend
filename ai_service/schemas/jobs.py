@@ -1,5 +1,6 @@
 """HTTP schemas for POST /jobs/run and the /sync/* routes."""
 
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -40,6 +41,12 @@ class TagPostRequest(BaseModel):
     title: str
     body: str
     topics: list[TopicChoice] = Field(default_factory=list, max_length=300)
+
+
+class AskTutorRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    topic_title: str = ""
+    unit_id: uuid.UUID | None = None
 
 
 class ModerateRequest(BaseModel):

@@ -6,9 +6,11 @@ from ai_service.pipelines.community import auto_tag, moderation
 from ai_service.pipelines.diagnostic import summary as diagnostic_summary
 from ai_service.pipelines.evaluation.keyword_match import keyword_hits
 from ai_service.pipelines.home import next_action
+from ai_service.pipelines.notes import tutor
 from ai_service.pipelines.questions.explain_answers import explain_answers
 from ai_service.pipelines.recommendations import rank_resources
 from ai_service.schemas.jobs import (
+    AskTutorRequest,
     DiagnosticSummaryRequest,
     ExplainMCQRequest,
     KeywordScoreRequest,
@@ -27,6 +29,15 @@ async def explain_mcq(request: ExplainMCQRequest) -> SyncResponse:
     """result = {"explanations": {question_id: "1-2 sentence feedback"}} (may be empty)."""
     explanations = await explain_answers([item.model_dump() for item in request.items])
     return SyncResponse(name="explain-mcq", status="ok", result={"explanations": explanations})
+
+
+@router.post("/ask-tutor", response_model=SyncResponse, summary="Answer from the approved books")
+async def ask_tutor(request: AskTutorRequest) -> SyncResponse:
+    """result = {"answer", "grounded", "sources": [{"title", "page"}]}"""
+    result = await tutor.ask(
+        request.question, topic_title=request.topic_title, unit_id=request.unit_id
+    )
+    return SyncResponse(name="ask-tutor", status="ok", result=result)
 
 
 @router.post("/tag-post", response_model=SyncResponse, summary="Suggest the topic of a post")

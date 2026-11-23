@@ -27,12 +27,21 @@ from shared.enums import ContentStatus, QuestionType
 
 DEFAULT_FILE = _bootstrap.REPO_ROOT / "data" / "questions" / "question_bank.json"
 LETTERS = "ABCDE"
+# The team database uses these older topic titles for three names in question_bank.json.
+TOPIC_ALIASES = {
+    "cell structure": "cell structure and organelles",
+    "diversity of microorganisms": "structure of microorganisms",
+    "ecosystem structure and energy flow": "ecosystems and energy flow",
+}
 
 
 def match_topic(name: str, topics: dict[str, Topic]) -> Topic | None:
     key = name.strip().lower()
     if key in topics:
         return topics[key]
+    alias = TOPIC_ALIASES.get(key)
+    if alias in topics:
+        return topics[alias]
     matches = [t for title, t in topics.items() if key in title or title in key]
     return matches[0] if len(matches) == 1 else None
 

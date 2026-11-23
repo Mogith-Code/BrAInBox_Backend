@@ -17,17 +17,23 @@ payload = {
 """
 
 import logging
+import uuid
 from typing import Any
 
 from ai_service.errors import AIOutputError, UserInputError
 from ai_service.prompts import prompt_id, render_prompt
 from ai_service.providers import get_llm_client
+from ai_service.rag.context_builder import BuiltContext, build_context
+from ai_service.rag.retrieval.retriever import retrieve
+from shared.enums import SourceType
 from shared.learn_blocks import BlocksError, bullet_count, parse_blocks, read_minutes
 
 logger = logging.getLogger(__name__)
 
 FULL_PROMPT = ("notes/learn_notes", 1)
 SHORT_PROMPT = ("notes/learn_short_notes", 1)
+GROUNDED_VERSION = 2  # the same prompts + passages from the approved books
+SOURCE_TYPES = [SourceType.SYLLABUS, SourceType.TEACHER_GUIDE, SourceType.APPROVED_NOTE]
 TARGET_WORDS = {"quick": 300, "standard": 900, "detailed": 1800}
 MIN_BULLETS, MAX_BULLETS = 8, 15
 TEMPERATURE = 0.4
@@ -49,6 +55,19 @@ def _check_short(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [b for b in blocks if b["type"] != "bullet_list" or b["items"]]
 
 
+async def _book_context(payload: dict[str, Any], topic_title: str) -> BuiltContext | None:
+    """Passages from the approved books for this topic. None = no books: notes still work."""
+    raw_unit = payload.get("unit_id")
+    try:
+        unit_id = uuid.UUID(str(raw_unit)) if raw_unit else None
+        chunks = await retrieve(topic_title, unit_id=unit_id, source_types=SOURCE_TYPES, k=8)
+    except Exception:
+        logger.warning("Could not read the approved books for %r", topic_title, exc_info=True)
+        return None
+    context = build_context(chunks) if chunks else None
+    return context if context and context.citations else None
+
+
 async def generate(payload: dict[str, Any], *, short: bool) -> dict[str, Any]:
     topic_title = (payload.get("topic_title") or "").strip()
     if not topic_title:
@@ -60,6 +79,9 @@ async def generate(payload: dict[str, Any], *, short: bool) -> dict[str, Any]:
     include_tips = bool(payload.get("include_past_paper_tips", True))
 
     name, version = SHORT_PROMPT if short else FULL_PROMPT
+    context = await _book_context(payload, topic_title)
+    if context is not None:
+        version = GROUNDED_VERSION
     prompt = render_prompt(
         name,
         version,
@@ -72,6 +94,7 @@ async def generate(payload: dict[str, Any], *, short: bool) -> dict[str, Any]:
         target_words=TARGET_WORDS.get(depth, 900),
         include_examples=include_examples,
         include_past_paper_tips=include_tips,
+        source_text=context.text if context else "",
     )
     task = "notes_short" if short else "notes_full"
     meta = {
@@ -112,4 +135,5 @@ async def generate(payload: dict[str, Any], *, short: bool) -> dict[str, Any]:
         "depth": depth,
         "model": getattr(client, "name", None),
         "prompt_version": prompt_id(name, version),
+        "citations": [c.model_dump(mode="json") for c in context.citations] if context else [],
     }

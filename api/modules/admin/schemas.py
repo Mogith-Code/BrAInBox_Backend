@@ -44,6 +44,14 @@ class DashboardMissedTopic(BaseModel):
     top_misconception: str
 
 
+class ConsoleStatsOut(BaseModel):
+    """The three totals on the admin sign-in page. Totals only, never anyone's details."""
+
+    ai_items_to_review: int
+    students: int
+    eval_accuracy_percent: int | None  # null until a teacher has marked an evaluation
+
+
 class DashboardOut(BaseModel):
     title: str = "Dashboard"
     message: str | None = None

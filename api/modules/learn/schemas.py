@@ -18,6 +18,23 @@ LearnJobStatus = Literal["queued", "running", "done", "failed"]
 NoteSourceOut = Literal["ai", "manual", "upload"]
 
 
+# ---------------------------------------------------------------- Ask BrAInBox
+class AskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=1000)
+    topic_id: str | None = None  # UUID or code, e.g. "bio-6.1"
+
+
+class AskSourceOut(BaseModel):
+    title: str
+    page: int | None = None
+
+
+class AskOut(BaseModel):
+    answer: str
+    grounded: bool  # false = the approved books don't contain the answer
+    sources: list[AskSourceOut]
+
+
 # ---------------------------------------------------------------- shared bits
 class SubjectRef(BaseModel):
     id: uuid.UUID
@@ -137,6 +154,23 @@ class NoteOut(BaseModel):
     source: NoteSourceOut
     is_own: bool  # True = the student's own note, False = the official note
     created_at: datetime
+
+
+class OfficialBookOut(BaseModel):
+    document_id: uuid.UUID
+    title: str
+    page_count: int
+
+
+class OfficialNotesOut(BaseModel):
+    """The government resource book pages for a topic's unit."""
+
+    topic_id: uuid.UUID
+    available: bool
+    books: list[OfficialBookOut]
+    open_document_id: uuid.UUID | None  # the book and page to open first
+    open_page: int | None
+    exact_match: bool  # False = the topic's page wasn't found, so open at the unit's start
 
 
 class GenerateNotesRequest(BaseModel):

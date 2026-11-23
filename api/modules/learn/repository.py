@@ -17,10 +17,12 @@ from api.modules.learn.mastery import RECENT_ANSWERS, PracticeStats
 from shared.db.models import (
     AIJob,
     Attempt,
+    DocumentChunk,
     Note,
     Question,
     Resource,
     Response,
+    SourceDocument,
     Subject,
     Summary,
     Topic,
@@ -30,7 +32,7 @@ from shared.db.models import (
     UserTopicProgress,
     Visual,
 )
-from shared.enums import ContentStatus, JobType
+from shared.enums import ContentStatus, DocumentStatus, JobType, SourceType
 
 Ref = uuid.UUID | str
 
@@ -274,6 +276,49 @@ async def find_cached_note(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+# =========================================================================== official books
+
+
+async def official_books(session: AsyncSession, unit_id: uuid.UUID) -> list[SourceDocument]:
+    """The unit's imported approved books, in reading order (Part 1 before Part 2)."""
+    result = await session.execute(
+        select(SourceDocument)
+        .where(
+            SourceDocument.unit_id == unit_id,
+            SourceDocument.source_type == SourceType.APPROVED_NOTE,
+            SourceDocument.status == DocumentStatus.READY,
+        )
+        .order_by(SourceDocument.title)
+    )
+    return list(result.scalars())
+
+
+async def official_book(session: AsyncSession, document_id: uuid.UUID) -> SourceDocument | None:
+    """One approved book that is ready to read."""
+    result = await session.execute(
+        select(SourceDocument).where(
+            SourceDocument.id == document_id,
+            SourceDocument.source_type == SourceType.APPROVED_NOTE,
+            SourceDocument.status == DocumentStatus.READY,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def book_passages(
+    session: AsyncSession, document_ids: list[uuid.UUID]
+) -> list[tuple[uuid.UUID, int, str]]:
+    """(document id, page, text) of the books' passages, ordered inside each book."""
+    if not document_ids:
+        return []
+    result = await session.execute(
+        select(DocumentChunk.document_id, DocumentChunk.page, DocumentChunk.text)
+        .where(DocumentChunk.document_id.in_(document_ids), DocumentChunk.page.is_not(None))
+        .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
+    )
+    return [(row[0], row[1], row[2]) for row in result.all()]
 
 
 # =========================================================================== diagrams + videos

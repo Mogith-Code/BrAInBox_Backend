@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.core import clock
 from api.core.errors import ConflictError, NotFoundError
 from api.core.security import CurrentUser
+from api.modules.knowledge_base import service as knowledge_service
 from api.modules.quality import repository
 from api.modules.quality.schemas import (
     CheckName,
@@ -188,6 +189,8 @@ async def record_decision(
 
     404 QUESTION_NOT_FOUND · 422 QUESTION_INCOMPLETE."""
     question = await questions_service.admin_set_review_status(session, question_id, approve)
+    if approve:
+        await knowledge_service.approve_ai_marking_scheme(session, question.id, admin_id)
     await repository.add_review(
         session,
         QuestionReview(

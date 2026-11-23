@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db.models import Achievement, StudentProfile, UserAchievement, UserSettings
+from shared.db.models import Achievement, StudentProfile, User, UserAchievement, UserSettings
 
 
 async def count_student_profiles(session: AsyncSession) -> int:
@@ -22,6 +22,12 @@ async def count_student_profiles(session: AsyncSession) -> int:
 
 async def get_by_user_id(session: AsyncSession, user_id: uuid.UUID) -> StudentProfile | None:
     result = await session.execute(select(StudentProfile).where(StudentProfile.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def get_phone(session: AsyncSession, user_id: uuid.UUID) -> str | None:
+    """The student's phone number (kept on the users row)."""
+    result = await session.execute(select(User.phone).where(User.id == user_id))
     return result.scalar_one_or_none()
 
 

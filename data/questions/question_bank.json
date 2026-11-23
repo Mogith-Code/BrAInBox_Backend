@@ -65,7 +65,7 @@
   },
   {
     "id": "BIO-PHO-001",
-    "topic": "Photosynthesis",
+    "topic": "Photosynthesis: light-dependent reactions",
     "unit": "Bioenergetics",
     "question": "In which organelle does photosynthesis occur?",
     "options": [
@@ -81,7 +81,7 @@
   },
   {
     "id": "BIO-PHO-002",
-    "topic": "Photosynthesis",
+    "topic": "Photosynthesis: Calvin cycle, C4 and CAM plants",
     "unit": "Bioenergetics",
     "question": "The light-independent reactions of photosynthesis take place in the:",
     "options": [
@@ -113,7 +113,7 @@
   },
   {
     "id": "BIO-DIV-001",
-    "topic": "Classification of organisms",
+    "topic": "Classification and binomial nomenclature",
     "unit": "Evolution & Diversity of Organisms",
     "question": "Which is the correct order of taxonomic ranks, from the largest group to the smallest?",
     "options": [
@@ -129,7 +129,7 @@
   },
   {
     "id": "BIO-ANIM-001",
-    "topic": "Circulation and gas exchange",
+    "topic": "Circulatory systems in animals",
     "unit": "Animal Form & Function",
     "question": "In humans, which blood vessel carries oxygenated blood from the lungs to the heart?",
     "options": [
@@ -193,7 +193,7 @@
   },
   {
     "id": "BIO-ENV-001",
-    "topic": "Ecosystems and energy flow",
+    "topic": "Ecosystem structure and energy flow",
     "unit": "Environmental Biology",
     "question": "About what percentage of the energy at one trophic level is passed on to the next trophic level?",
     "options": [
@@ -209,7 +209,7 @@
   },
   {
     "id": "BIO-MIC-001",
-    "topic": "Structure of microorganisms",
+    "topic": "Diversity of microorganisms",
     "unit": "Microbiology",
     "question": "Which of these structures is found in bacterial cells?",
     "options": [
@@ -225,7 +225,7 @@
   },
   {
     "id": "BIO-APP-001",
-    "topic": "Food production and agriculture",
+    "topic": "Microbes in industry and food",
     "unit": "Applied Biology",
     "question": "Which microorganism is commonly used to make bread rise?",
     "options": [

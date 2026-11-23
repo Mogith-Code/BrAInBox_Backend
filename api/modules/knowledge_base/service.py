@@ -142,6 +142,13 @@ async def save_ai_marking_scheme(
     return answer.id
 
 
+async def approve_ai_marking_scheme(
+    session: AsyncSession, question_id: uuid.UUID, admin_id: uuid.UUID
+) -> None:
+    """An admin approved the question, so its AI model answer is approved too. No commit."""
+    await repository.approve_pending_ai_answers(session, question_id, admin_id, clock.now())
+
+
 # =========================================================================== admin: model answers
 # Used by admin/knowledge_admin.py: a model answer -> marking points -> keywords per point.
 

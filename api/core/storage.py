@@ -75,6 +75,14 @@ def upload_bytes(path: str, data: bytes, content_type: str) -> str:
     return path
 
 
+def download_to_file(path: str, target: Path) -> None:
+    """Copy one bucket file to `target`. Blocking: call it with run_in_threadpool."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    _get_bucket().blob(path).download_to_filename(str(temporary))
+    temporary.replace(target)  # a stopped download never leaves half a file
+
+
 def _write_local(root: str, path: str, data: bytes) -> None:
     """Dev only: keep the file in the local storage folder."""
     folder = Path(root).resolve()

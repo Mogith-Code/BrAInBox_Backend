@@ -21,9 +21,10 @@ from datetime import time
 from decimal import Decimal
 from typing import Any
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import clock
+from api.core import clock, storage
 from api.core.config import get_settings
 from api.core.errors import AppError, NotFoundError
 from api.core.security import CurrentUser
@@ -34,6 +35,8 @@ from api.modules.profiles.schemas import (
     ModuleStatus,
     NotificationSettingsOut,
     NotificationSettingsUpdate,
+    PersonalDetailsOut,
+    PersonalDetailsUpdate,
     PrivacySettingsOut,
     PrivacySettingsUpdate,
     ProfileOptionsOut,
@@ -47,6 +50,9 @@ from api.modules.profiles.schemas import (
 from shared.db.models import Achievement, StudentProfile, UserAchievement, UserSettings
 
 MODULE_NAME = "profiles"
+# Inside "visuals/" because the dev file route only serves that folder.
+AVATAR_FOLDER = "visuals/avatars"
+MAX_AVATAR_BYTES = 3 * 1024 * 1024
 
 # What the app offers. Only Biology is available for now ("coming soon" for the others).
 STREAMS = [StreamOption(id="bio_science", name="Biological Science", available=True)]
@@ -275,10 +281,103 @@ async def export_user_data(session: AsyncSession, user_id: uuid.UUID) -> dict[st
 
 
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
-    """Delete the student's profile, settings and achievements (no commit). No files: avatar_url is a link
-    (e.g. the Google photo), not a file we store."""
+    """Delete the student's profile, settings and achievements (no commit).
+    Returns the student's profile photo folder, so the auth module deletes it too."""
     await repository.delete_user_rows(session, user_id)
-    return []
+    return [f"{AVATAR_FOLDER}/{user_id}/"]
+
+
+# =========================================================================== personal details
+# Edit profile: bio and photo. Name and phone are saved by PATCH /auth/me.
+
+
+def _image_extension(data: bytes) -> str | None:
+    """Look at the file's first bytes, because a file name or content type can be faked."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+async def _details_out(
+    session: AsyncSession, user: CurrentUser, base_url: str
+) -> PersonalDetailsOut:
+    profile = await repository.get_by_user_id(session, user.id)
+    saved = profile.avatar_url if profile else None
+    # An older value can be a full link (a Google photo); ours are Storage paths.
+    avatar = saved if saved and saved.startswith("http") else None
+    if saved and avatar is None:
+        avatar = await storage.public_image_url(saved, base_url)
+    return PersonalDetailsOut(
+        full_name=(user.full_name or "").strip(),
+        email=user.email,
+        phone=await repository.get_phone(session, user.id),
+        bio=profile.bio if profile else None,
+        avatar_url=avatar,
+    )
+
+
+async def get_details(
+    session: AsyncSession, user: CurrentUser, base_url: str
+) -> PersonalDetailsOut:
+    return await _details_out(session, user, base_url)
+
+
+async def _get_or_create_profile(session: AsyncSession, user_id: uuid.UUID) -> StudentProfile:
+    profile = await repository.get_by_user_id(session, user_id)
+    if profile is None:
+        profile = StudentProfile(user_id=user_id)
+        session.add(profile)
+    return profile
+
+
+async def update_details(
+    session: AsyncSession, user: CurrentUser, req: PersonalDetailsUpdate, base_url: str
+) -> PersonalDetailsOut:
+    profile = await _get_or_create_profile(session, user.id)
+    if "bio" in req.model_fields_set:
+        profile.bio = (req.bio or "").strip() or None
+    await session.commit()
+    return await _details_out(session, user, base_url)
+
+
+async def save_avatar(
+    session: AsyncSession, user: CurrentUser, data: bytes, base_url: str
+) -> PersonalDetailsOut:
+    """Store a new photo (JPEG, PNG or WebP, up to 3 MB), then remove the old one."""
+    if len(data) > MAX_AVATAR_BYTES:
+        raise AppError("The photo must be 3 MB or smaller", code="AVATAR_TOO_LARGE")
+    extension = _image_extension(data)
+    if extension is None:
+        raise AppError("Choose a JPEG, PNG or WebP photo", code="AVATAR_INVALID")
+
+    path = f"{AVATAR_FOLDER}/{user.id}/{uuid.uuid4().hex}.{extension}"
+    content_type = "image/jpeg" if extension == "jpg" else f"image/{extension}"
+    await run_in_threadpool(storage.upload_bytes, path, data, content_type)
+
+    profile = await _get_or_create_profile(session, user.id)
+    old = profile.avatar_url
+    profile.avatar_url = path
+    await session.commit()
+    if old and old.startswith(f"{AVATAR_FOLDER}/{user.id}/"):
+        await run_in_threadpool(storage.delete_files, [old])
+    return await _details_out(session, user, base_url)
+
+
+async def remove_avatar(
+    session: AsyncSession, user: CurrentUser, base_url: str
+) -> PersonalDetailsOut:
+    profile = await repository.get_by_user_id(session, user.id)
+    old = profile.avatar_url if profile else None
+    if profile is not None:
+        profile.avatar_url = None
+        await session.commit()
+    if old and old.startswith(f"{AVATAR_FOLDER}/{user.id}/"):
+        await run_in_threadpool(storage.delete_files, [old])
+    return await _details_out(session, user, base_url)
 
 
 # =========================================================================== GET /profile/overview
