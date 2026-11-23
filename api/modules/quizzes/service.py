@@ -86,22 +86,24 @@ def allocate_questions(
 ) -> dict[uuid.UUID, int]:
     """How many questions to take from each unit.
 
-    1 per unit first; then each extra question goes to the unit furthest below its fair
-    share (total x weight / sum of weights) that still has unused questions.
-    Raises AppError NOT_ENOUGH_QUESTIONS when the bank can't give `total` this way.
+    1 per unit that has questions; then each extra question goes to the unit furthest below
+    its fair share (total x weight / sum of weights) that still has unused questions.
+    A unit with no approved questions is left out, so one empty unit can't block every student.
+    Raises AppError NOT_ENOUGH_QUESTIONS when the whole bank has fewer than `total` questions.
     """
-    missing = [u for u in units if available.get(u.id, 0) == 0]
-    if not units or missing or sum(available.get(u.id, 0) for u in units) < total:
+    usable = [u for u in units if available.get(u.id, 0) > 0]
+    if sum(available.get(u.id, 0) for u in usable) < total:
+        missing = [u for u in units if u not in usable]
         names = ", ".join(f"Unit {u.number}" for u in missing)
         detail = f" No approved questions yet for: {names}." if names else ""
         raise ConflictError(
-            f"The question bank needs at least {total} approved MCQs covering all units." + detail,
+            f"The question bank needs at least {total} approved MCQs." + detail,
             code="NOT_ENOUGH_QUESTIONS",
         )
-    weight_sum = sum(u.exam_weight for u in units) or 1.0
-    allocation = {u.id: 1 for u in units}
-    for _ in range(total - len(units)):
-        candidates = [u for u in units if allocation[u.id] < available[u.id]]
+    weight_sum = sum(u.exam_weight for u in usable) or 1.0
+    allocation = {u.id: 1 for u in usable}
+    for _ in range(total - len(usable)):
+        candidates = [u for u in usable if allocation[u.id] < available[u.id]]
         best = max(
             candidates,
             key=lambda u: (total * u.exam_weight / weight_sum - allocation[u.id], -u.number),
@@ -185,6 +187,7 @@ async def start_diagnostic(session: AsyncSession, user_id: uuid.UUID) -> Diagnos
     chosen = [
         q.id
         for unit in ordered_units  # questions are shown unit by unit
+        if unit.id in allocation  # a unit with no approved questions is left out
         for q in random.sample(by_unit[unit.id], allocation[unit.id])
     ]
     attempt = await repository.create_diagnostic(session, user_id, chosen, DIAGNOSTIC_MINUTES)
@@ -246,6 +249,7 @@ class _Marked:
     total: int
     strongest: UnitRef
     needs_work: UnitRef
+    units_not_checked: list[UnitRef]
 
 
 def _mark(
@@ -280,6 +284,12 @@ def _mark(
         total=len(rows),
         strongest=UnitRef(unit_code=best.code, unit_title=best.title),
         needs_work=UnitRef(unit_code=worst.code, unit_title=worst.title),
+        # Units the test could not measure, so the app never presents them as measured.
+        units_not_checked=[
+            UnitRef(unit_code=u.code, unit_title=u.title)
+            for u in sorted(units.values(), key=lambda u: u.number)
+            if u.id not in asked
+        ],
     )
 
 
@@ -347,6 +357,7 @@ def _result(attempt: Attempt, marked: _Marked) -> DiagnosticResult:
         strongest=marked.strongest,
         needs_work=marked.needs_work,
         units=marked.units,
+        units_not_checked=marked.units_not_checked,
         summary=feedback.get("summary") or template_summary(marked.strongest, marked.needs_work),
         summary_ai_generated=bool(feedback.get("summary_ai_generated", False)),
         disclaimer=DISCLAIMER,

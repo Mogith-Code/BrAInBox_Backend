@@ -53,7 +53,7 @@ diagnostic = APIRouter(prefix="/diagnostic", tags=["Diagnostic"])
     "/start", response_model=DiagnosticStartOut, summary="Start (or resume) the diagnostic"
 )
 async def start(user: CurrentUserDep, session: SessionDep) -> DiagnosticStartOut:
-    """15 approved MCQs covering all 10 units. Correct answers are never included.
+    """15 approved MCQs from every unit that has questions. Correct answers are never included.
     Calling it again returns the same unfinished test (with `selected_option_id` filled)."""
     return await service.start_diagnostic(session, user.id)
 

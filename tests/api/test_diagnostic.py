@@ -43,19 +43,25 @@ def test_allocation_respects_what_is_available():
     assert allocation[us[3].id] == 6 and sum(allocation.values()) == 15
 
 
+def test_allocation_leaves_out_a_unit_with_no_questions():
+    us = units(10)
+    available = {u.id: 3 for u in us[:-1]}  # Unit 10 has none
+    allocation = allocate_questions(us, available, 15)
+    assert sum(allocation.values()) == 15
+    assert us[-1].id not in allocation
+    assert all(allocation[u.id] >= 1 for u in us[:-1])
+
+
 @pytest.mark.parametrize(
     "available",
     [
         {},  # empty bank
-        "one_unit_missing",
         "too_few",
     ],
 )
 def test_not_enough_questions(available):
     us = units(10)
-    if available == "one_unit_missing":
-        available = {u.id: 3 for u in us[:-1]}
-    elif available == "too_few":
+    if available == "too_few":
         available = {u.id: 1 for u in us}  # 10 < 15
     with pytest.raises(AppError) as err:
         allocate_questions(us, available, 15)
